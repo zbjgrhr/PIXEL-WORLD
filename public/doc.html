@@ -1,0 +1,2017 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Seed - 项目需求文档</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <style>
+        :root {
+            --primary-color: #0366d6;
+            --secondary-color: #586069;
+            --accent-color: #28a745;
+            --warning-color: #ffd33d;
+            --danger-color: #d73a49;
+            --bg-primary: #ffffff;
+            --bg-secondary: #f6f8fa;
+            --bg-tertiary: #f1f3f4;
+            --border-color: #e1e4e8;
+            --text-primary: #24292e;
+            --text-secondary: #586069;
+            --text-muted: #6a737d;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+            --shadow-md: 0 4px 6px rgba(0,0,0,0.07), 0 1px 3px rgba(0,0,0,0.06);
+            --shadow-lg: 0 10px 15px rgba(0,0,0,0.1), 0 4px 6px rgba(0,0,0,0.05);
+            --radius-sm: 6px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+            line-height: 1.6;
+            color: var(--text-primary);
+            background-color: var(--bg-secondary);
+            font-size: 16px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0;
+            background: var(--bg-primary);
+            box-shadow: var(--shadow-lg);
+            border-radius: var(--radius-lg);
+            margin-top: 24px;
+            margin-bottom: 24px;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+        
+        .content {
+            padding: 32px 40px;
+        }
+        
+        .header {
+            text-align: center;
+            padding: 64px 40px;
+            background: linear-gradient(135deg, var(--primary-color) 0%, #4c63d2 100%);
+            color: white;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grain" width="100" height="100" patternUnits="userSpaceOnUse"><circle cx="50" cy="50" r="1" fill="%23ffffff" opacity="0.1"/></pattern></defs><rect width="100" height="100" fill="url(%23grain)"/></svg>') repeat;
+            opacity: 0.1;
+        }
+        
+        .header h1 {
+            font-size: 3.5rem;
+            font-weight: 700;
+            margin-bottom: 16px;
+            letter-spacing: -0.02em;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .header p {
+            font-size: 1.25rem;
+            opacity: 0.95;
+            font-weight: 400;
+            position: relative;
+            z-index: 1;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .nav {
+            position: sticky;
+            top: 0;
+            background: var(--bg-primary);
+            padding: 16px 40px;
+            border-bottom: 1px solid var(--border-color);
+            backdrop-filter: blur(8px);
+            z-index: 100;
+            box-shadow: var(--shadow-sm);
+        }
+        
+        .nav ul {
+            list-style: none;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 8px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        
+        .nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 10px 16px;
+            border-radius: var(--radius-sm);
+            transition: all 0.2s ease;
+            font-weight: 500;
+            font-size: 14px;
+            border: 1px solid transparent;
+            white-space: nowrap;
+        }
+        
+        .nav a:hover {
+            background: var(--bg-tertiary);
+            color: var(--primary-color);
+            border-color: var(--border-color);
+            transform: translateY(-1px);
+        }
+        
+        .nav a:active {
+            transform: translateY(0);
+        }
+        
+        h1, h2, h3, h4, h5, h6 {
+            color: var(--text-primary);
+            font-weight: 600;
+            line-height: 1.25;
+            margin-top: 32px;
+            margin-bottom: 16px;
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 12px;
+            margin-top: 0;
+            position: relative;
+        }
+        
+        h1::before {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            width: 60px;
+            height: 2px;
+            background: var(--primary-color);
+        }
+        
+        h2 {
+            font-size: 1.875rem;
+            color: var(--text-primary);
+            border-left: 4px solid var(--primary-color);
+            padding-left: 16px;
+            margin-top: 48px;
+        }
+        
+        h3 {
+            font-size: 1.5rem;
+            color: var(--text-primary);
+            margin-top: 32px;
+        }
+        
+        h4 {
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            margin-top: 24px;
+        }
+        
+        h5 {
+            font-size: 1.125rem;
+            color: var(--text-secondary);
+        }
+        
+        h6 {
+            font-size: 1rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        
+        p {
+            margin-bottom: 16px;
+            color: var(--text-primary);
+            line-height: 1.7;
+        }
+        
+        ul, ol {
+            margin-left: 24px;
+            margin-bottom: 16px;
+            padding-left: 8px;
+        }
+        
+        li {
+            margin-bottom: 8px;
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+        
+        li::marker {
+            color: var(--primary-color);
+        }
+        
+        strong {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        em {
+            font-style: italic;
+            color: var(--text-secondary);
+        }
+        
+        blockquote {
+            background: var(--bg-tertiary);
+            border-left: 4px solid var(--primary-color);
+            margin: 24px 0;
+            padding: 20px 24px;
+            border-radius: var(--radius-sm);
+            font-style: italic;
+            color: var(--text-secondary);
+        }
+        
+        blockquote p {
+            margin-bottom: 0;
+        }
+        
+        .mermaid {
+            text-align: center;
+            margin: 32px 0;
+            padding: 24px;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            overflow-x: auto;
+        }
+        
+        code {
+            background: var(--bg-tertiary);
+            color: var(--danger-color);
+            padding: 3px 6px;
+            border-radius: var(--radius-sm);
+            font-family: 'SFMono-Regular', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', monospace;
+            font-size: 0.875em;
+            border: 1px solid var(--border-color);
+        }
+        
+        pre {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 24px;
+            border-radius: var(--radius-md);
+            overflow-x: auto;
+            margin: 24px 0;
+            border: 1px solid var(--border-color);
+            position: relative;
+            line-height: 1.5;
+        }
+        
+        pre code {
+            background: none;
+            padding: 0;
+            color: inherit;
+            border: none;
+            font-size: 0.875rem;
+        }
+        
+        pre::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--primary-color), var(--accent-color));
+            border-radius: var(--radius-md) var(--radius-md) 0 0;
+        }
+        
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-left: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border: 1px solid;
+        }
+        
+        .status-completed {
+            background: #f0f9ff;
+            color: var(--accent-color);
+            border-color: #bbf7d0;
+        }
+        
+        .status-pending {
+            background: #fffbeb;
+            color: #d97706;
+            border-color: #fed7aa;
+        }
+        
+        .status-warning {
+            background: #fef2f2;
+            color: var(--danger-color);
+            border-color: #fecaca;
+        }
+        
+        .status-badge::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        
+        .status-completed::before {
+            background: var(--accent-color);
+        }
+        
+        .status-pending::before {
+            background: #d97706;
+        }
+        
+        .status-warning::before {
+            background: var(--danger-color);
+        }
+        
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 24px;
+            margin: 32px 0;
+        }
+        
+        .feature-card {
+            background: var(--bg-secondary);
+            padding: 24px;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            border-left: 4px solid var(--primary-color);
+            transition: all 0.2s ease;
+            position: relative;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+            border-left-color: var(--accent-color);
+        }
+        
+        .feature-card h4 {
+            margin-top: 0;
+            margin-bottom: 12px;
+            color: var(--primary-color);
+            font-size: 1.125rem;
+        }
+        
+        .feature-card ul {
+            margin-left: 16px;
+        }
+        
+        .feature-card li {
+            font-size: 0.9rem;
+            margin-bottom: 6px;
+        }
+        
+        .back-to-app {
+            position: fixed;
+            bottom: 32px;
+            right: 32px;
+            background: var(--primary-color);
+            color: white;
+            padding: 16px 24px;
+            border-radius: 50px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.875rem;
+            box-shadow: var(--shadow-lg);
+            transition: all 0.2s ease;
+            z-index: 1000;
+            border: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .back-to-app:hover {
+            background: #0256cc;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(3, 102, 214, 0.4);
+        }
+        
+        .back-to-app::before {
+             content: '←';
+             font-size: 1rem;
+         }
+         
+         /* 表格样式 */
+         table {
+             width: 100%;
+             border-collapse: collapse;
+             margin: 24px 0;
+             background: var(--bg-primary);
+             border-radius: var(--radius-md);
+             overflow: hidden;
+             box-shadow: var(--shadow-sm);
+         }
+         
+         th, td {
+             padding: 12px 16px;
+             text-align: left;
+             border-bottom: 1px solid var(--border-color);
+         }
+         
+         th {
+             background: var(--bg-secondary);
+             font-weight: 600;
+             color: var(--text-primary);
+             font-size: 0.875rem;
+             text-transform: uppercase;
+             letter-spacing: 0.05em;
+         }
+         
+         tr:hover {
+             background: var(--bg-secondary);
+         }
+         
+         /* 链接样式 */
+         a {
+             color: var(--primary-color);
+             text-decoration: none;
+             transition: color 0.2s ease;
+         }
+         
+         a:hover {
+             color: #0256cc;
+             text-decoration: underline;
+         }
+         
+         /* 分隔线样式 */
+         hr {
+             border: none;
+             height: 1px;
+             background: var(--border-color);
+             margin: 32px 0;
+         }
+         
+         /* 标签样式 */
+         .tag {
+             display: inline-block;
+             padding: 2px 8px;
+             background: var(--bg-tertiary);
+             color: var(--text-secondary);
+             border-radius: var(--radius-sm);
+             font-size: 0.75rem;
+             font-weight: 500;
+             margin: 2px;
+         }
+         
+         /* 警告框样式 */
+         .alert {
+             padding: 16px 20px;
+             border-radius: var(--radius-md);
+             margin: 24px 0;
+             border-left: 4px solid;
+         }
+         
+         .alert-info {
+             background: #f0f9ff;
+             border-color: var(--primary-color);
+             color: #1e40af;
+         }
+         
+         .alert-warning {
+             background: #fffbeb;
+             border-color: #d97706;
+             color: #92400e;
+         }
+         
+         .alert-success {
+             background: #f0fdf4;
+             border-color: var(--accent-color);
+             color: #166534;
+         }
+         
+         .alert-danger {
+             background: #fef2f2;
+             border-color: var(--danger-color);
+             color: #991b1b;
+         }
+         
+         /* 代码块复制按钮 */
+         .code-block {
+             position: relative;
+         }
+         
+         .copy-button {
+             position: absolute;
+             top: 12px;
+             right: 12px;
+             background: var(--bg-secondary);
+             border: 1px solid var(--border-color);
+             color: var(--text-secondary);
+             padding: 6px 12px;
+             border-radius: var(--radius-sm);
+             font-size: 0.75rem;
+             cursor: pointer;
+             transition: all 0.2s ease;
+             opacity: 0;
+         }
+         
+         .code-block:hover .copy-button {
+             opacity: 1;
+         }
+         
+         .copy-button:hover {
+             background: var(--primary-color);
+             color: white;
+         }
+        
+        @media (max-width: 768px) {
+            .container {
+                margin: 16px;
+                border-radius: var(--radius-md);
+            }
+            
+            .content {
+                padding: 24px 20px;
+            }
+            
+            .header {
+                padding: 48px 20px;
+            }
+            
+            .header h1 {
+                font-size: 2.5rem;
+            }
+            
+            .header p {
+                font-size: 1.125rem;
+            }
+            
+            .nav {
+                padding: 12px 20px;
+            }
+            
+            .nav ul {
+                flex-direction: column;
+                align-items: center;
+                gap: 4px;
+            }
+            
+            .nav a {
+                padding: 8px 16px;
+                width: 100%;
+                text-align: center;
+            }
+            
+            h1 {
+                font-size: 2rem;
+            }
+            
+            h2 {
+                font-size: 1.5rem;
+                margin-top: 32px;
+            }
+            
+            h3 {
+                font-size: 1.25rem;
+            }
+            
+            .feature-grid {
+                grid-template-columns: 1fr;
+                gap: 16px;
+            }
+            
+            .feature-card {
+                padding: 20px;
+            }
+            
+            .back-to-app {
+                bottom: 20px;
+                right: 20px;
+                padding: 12px 20px;
+                font-size: 0.8rem;
+            }
+            
+            pre {
+                padding: 16px;
+                font-size: 0.8rem;
+            }
+            
+            .mermaid {
+                padding: 16px;
+                font-size: 0.9rem;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .header p {
+                font-size: 1rem;
+            }
+            
+            .content {
+                padding: 20px 16px;
+            }
+            
+            .nav {
+                 padding: 8px 16px;
+             }
+             
+             table {
+                 font-size: 0.875rem;
+             }
+             
+             th, td {
+                 padding: 8px 12px;
+             }
+         }
+         
+         /* 深色模式支持 */
+         @media (prefers-color-scheme: dark) {
+             :root {
+                 --bg-primary: #0d1117;
+                 --bg-secondary: #161b22;
+                 --bg-tertiary: #21262d;
+                 --text-primary: #f0f6fc;
+                 --text-secondary: #8b949e;
+                 --text-muted: #6e7681;
+                 --border-color: #30363d;
+             }
+             
+             .header {
+                 background: linear-gradient(135deg, #1f6feb 0%, #0969da 100%);
+             }
+             
+             pre {
+                 background: #0d1117;
+                 border-color: #30363d;
+             }
+         }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎮 PIXEL SEED</h1>
+            <p>基于 AI 生成的 2D 像素风网页游戏 - 项目需求文档</p>
+        </div>
+        
+        <nav class="nav">
+            <ul>
+                <li><a href="#overview">📋 项目概述</a></li>
+                <li><a href="#features">⚡ 功能需求</a></li>
+                <li><a href="#ui">🎨 用户界面</a></li>
+                <li><a href="#architecture">🏗️ 技术架构</a></li>
+                <li><a href="#current-arch">🔧 当前架构</a></li>
+                <li><a href="#ai-content">🎯 AI生成内容规范</a></li>
+                <li><a href="#ai-flow">🤖 AI生成流程</a></li>
+                <li><a href="#status">📊 实现状态</a></li>
+                <li><a href="#roadmap">🚀 扩展计划</a></li>
+            </ul>
+        </nav>
+        
+        <div class="content">
+        <section id="overview">
+            <h1>项目概述</h1>
+            <p><strong>"用一粒 AI 种子，生长无限像素世界"</strong></p>
+            <p>Pixel Seed 是一款实验性 2D 像素风网页游戏，核心创新在于：游戏内容完全由用户输入的"种子"（主题/提示词）驱动。用户无需美术基础，仅需选择预设主题（如史诗魔幻、赛博朋克）或输入自定义提示词，系统即调用大模型生成专属的像素风角色形象和关卡背景，动态构建游戏世界。这验证了 AI 作为"创造源头"的潜力——将提示词转化为可玩的像素宇宙。</p>
+            
+            <h3>1. 项目背景</h3>
+            <p>传统像素游戏开发受限于美术资源制作周期长、风格固化。随着AI图像生成技术的发展，尤其是大模型在风格化图像生成上的突破，我们有机会构建一个"AI即内容引擎"的游戏平台。</p>
+            <p><strong>Pixel Seed</strong> 旨在通过大语言模型 + 图像生成模型，实现"输入一个种子（Seed），生成一个世界"的愿景——用户只需选择或输入一个主题，即可获得风格一致的像素游戏角色与场景，快速进入可玩的游戏体验。</p>
+            
+            <h3>2. 项目目标</h3>
+            <ul>
+                <li>实现"AI生成+即时游戏化"的闭环流程。</li>
+                <li>验证使用大模型生成高质量、风格统一的像素美术资源的可行性。</li>
+                <li>构建可扩展的架构，支持未来加入更多游戏玩法、主题风格和交互机制。</li>
+            </ul>
+            
+            <h3>3. 核心理念</h3>
+            <blockquote style="background: #f8f9fa; padding: 20px; border-left: 4px solid #667eea; margin: 20px 0; font-style: italic;">
+                <strong>"A Seed, A World."</strong><br>
+                每一次生成，都是一次独特的创造。AI 是世界的"种子"，玩家是世界的"探索者"。
+            </blockquote>
+        </section>
+        
+        <section id="features">
+            <h1>功能需求</h1>
+            
+            <h2>1. 主题选择系统 <span class="status-badge status-completed">已实现</span></h2>
+            
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h4>1.1 预设主题</h4>
+                    <ul>
+                        <li><strong>史诗魔幻 (Epic Fantasy)</strong>：包含魔法、龙、城堡、森林等元素</li>
+                        <li><strong>赛博朋克 (Cyberpunk)</strong>：包含霓虹灯、机械、未来城市等元素</li>
+                        <li><strong>西部世界 (Western World)</strong>：包含牛仔、酒馆、沙漠景观、边疆小镇等元素</li>
+                        <li><strong>海底世界 (Underwater World)</strong>：包含珊瑚礁、深海生物、古代海底文明等元素</li>
+                    </ul>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>1.2 自定义主题</h4>
+                    <ul>
+                        <li>用户可手动输入提示词</li>
+                        <li>支持中英文输入</li>
+                        <li>提供提示词建议和示例</li>
+                        <li>200字符限制</li>
+                    </ul>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>1.3 主题持久化存储</h4>
+                    <ul>
+                        <li>使用localStorage自动保存生成的主题</li>
+                        <li>支持主题删除和管理功能</li>
+                        <li>页面刷新后保持主题状态</li>
+                        <li>主题数据包含角色和背景图像URL</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <h2>2. AI内容生成系统 <span class="status-badge status-completed">已实现</span></h2>
+            
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h4>2.1 角色生成</h4>
+                    <ul>
+                        <li>基于选定主题生成像素风角色形象</li>
+                        <li>支持主角、NPC、敌人等不同类型角色</li>
+                        <li>单个图像重新生成功能</li>
+                        <li>骨架屏加载状态显示</li>
+                    </ul>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>2.2 关卡背景生成</h4>
+                    <ul>
+                        <li>生成符合主题的关卡背景</li>
+                        <li>包含前景、中景、背景层次</li>
+                        <li>支持不同关卡类型（地面、地下、空中等）</li>
+                        <li>四象限布局展示（角色、背景、地面、障碍物）</li>
+                    </ul>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>2.3 图像重新生成</h4>
+                    <ul>
+                        <li>支持单独重新生成任意图像类型</li>
+                        <li>实时加载状态管理</li>
+                        <li>骨架屏动画效果</li>
+                        <li>错误处理和重试机制</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <h2>3. 游戏玩法系统 <span class="status-badge status-completed">已实现</span></h2>
+            
+            <h3>3.1 游戏渲染方案</h3>
+            <ul>
+                <li><strong>混合方案</strong>：背景使用CSS，角色使用绝对定位（已采用）</li>
+            </ul>
+            
+            <h3>3.2 基础交互功能 (已实现)</h3>
+            <ul>
+                <li><strong>角色显示</strong>：使用绝对定位在游戏区域显示角色</li>
+                <li><strong>背景展示</strong>：CSS背景图片作为游戏场景</li>
+                <li><strong>基础动画</strong>：
+                    <ul>
+                        <li>角色方向翻转（左右移动时scaleX变化）</li>
+                        <li>平滑的位置过渡动画</li>
+                        <li>暂停状态的淡入淡出效果</li>
+                    </ul>
+                </li>
+                <li><strong>角色移动</strong>：
+                    <ul>
+                        <li>多键位支持：WASD + 方向键</li>
+                        <li>跳跃动作：W键、上方向键、空格键</li>
+                        <li>下蹲移动：S键、下方向键</li>
+                        <li>实时位置更新和边界限制</li>
+                    </ul>
+                </li>
+            </ul>
+            
+            <h3>3.3 技术实现细节 (已实现)</h3>
+            <ul>
+                <li><strong>静态场景</strong>：当前为展示版本，无碰撞检测和敌人系统</li>
+                <li><strong>键盘监听</strong>：使用Set数据结构管理多键同时按下</li>
+                <li><strong>游戏循环</strong>：setInterval实现16ms间隔的游戏循环</li>
+                <li><strong>状态管理</strong>：Zustand管理游戏状态、角色位置、动作状态</li>
+                <li><strong>重力系统</strong>：简单的重力效果，角色自动下落到地面</li>
+                <li><strong>暂停机制</strong>：ESC键暂停/恢复游戏</li>
+            </ul>
+        </section>
+        
+        <section id="ui">
+            <h1>用户界面 (已实现)</h1>
+            
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h4>4.1 主菜单 (已实现)</h4>
+                    <ul>
+                        <li>项目标题和描述展示</li>
+                        <li>主题选择功能</li>
+                        <li>开始游戏按钮</li>
+                        <li>响应式布局设计</li>
+                    </ul>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>4.2 主题选择界面 <span class="status-badge status-completed">已实现</span></h4>
+                    <ul>
+                        <li><strong>预设主题卡片</strong>：Epic Fantasy 和 Cyberpunk 主题</li>
+                        <li><strong>自定义输入框</strong>：支持200字符限制的自定义主题输入</li>
+                        <li><strong>主题预览</strong>：显示主题描述和示例元素</li>
+                        <li><strong>确认和重试按钮</strong>：主题确认和重置功能</li>
+                        <li><strong>Radio组件</strong>：使用Ant Design Radio实现主题选择</li>
+                        <li><strong>主题持久化</strong>：自动保存和恢复主题状态</li>
+                        <li><strong>主题删除</strong>：支持删除已生成的主题</li>
+                        <li><strong>主题创建流程</strong>：完整的自定义主题创建和验证逻辑</li>
+                        <li><strong>状态管理</strong>：集成regeneratingImages状态管理四种图像类型的生成状态</li>
+                    </ul>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>4.3 主题预览界面 <span class="status-badge status-completed">已实现</span></h4>
+                    <ul>
+                        <li><strong>四象限布局</strong>：角色、背景、地面、障碍物分区显示</li>
+                        <li><strong>图像重新生成</strong>：每个图像类型独立的重新生成按钮，带有重新生成按钮</li>
+                        <li><strong>骨架屏加载</strong>：使用Ant Design Skeleton组件显示加载状态</li>
+                        <li><strong>删除按钮</strong>：支持删除整个主题，仅对custom-前缀主题显示</li>
+                        <li><strong>响应式设计</strong>：适配不同屏幕尺寸</li>
+                        <li><strong>状态管理</strong>：统一的regeneratingImages状态管理</li>
+                        <li><strong>权限控制</strong>：删除按钮仅对自定义主题可见，预设主题不可删除</li>
+                        <li><strong>交互反馈</strong>：完整的错误处理和成功提示机制</li>
+                    </ul>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>4.4 游戏界面 (已实现)</h4>
+                    <ul>
+                        <li><strong>游戏画布</strong>：使用CSS背景 + 绝对定位的混合渲染方案</li>
+                        <li><strong>控制提示</strong>：底部显示WASD/方向键操作说明</li>
+                        <li><strong>实时信息面板</strong>：显示角色位置、当前动作和游戏状态</li>
+                        <li><strong>暂停功能</strong>：ESC键暂停游戏，显示暂停遮罩</li>
+                        <li><strong>返回主菜单</strong>：游戏内返回功能</li>
+                        <li><strong>移动端适配</strong>：响应式设计，支持不同屏幕尺寸</li>
+                    </ul>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>4.5 加载界面 (已实现)</h4>
+                    <ul>
+                        <li><strong>进度条显示</strong>：使用Ant Design Progress组件</li>
+                        <li><strong>加载状态提示</strong>：动态显示生成进度信息</li>
+                        <li><strong>骨架屏动画</strong>：图像重新生成时的视觉反馈</li>
+                        <li><strong>状态同步</strong>：实时更新加载状态和进度</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <h3>4.6 游戏画布技术规格 (已实现)</h3>
+            <ul>
+                <li><strong>Canvas尺寸</strong>：全屏响应式设计，适配不同设备</li>
+                <li><strong>角色位置</strong>：初始位置(100, 400)，x轴移动范围0-800</li>
+                <li><strong>背景处理</strong>：CSS background-size: cover 自适应</li>
+                <li><strong>动画帧率</strong>：16ms间隔实现60fps游戏循环</li>
+                <li><strong>重力系统</strong>：简单的重力效果，地面高度350px</li>
+            </ul>
+        </section>
+        
+        <section id="architecture">
+            <h1>技术架构</h1>
+            
+            <h2>前端技术栈</h2>
+            <ul>
+                <li><strong>框架</strong>：Next.js 15.5.2 (已实现)</li>
+                <li><strong>样式</strong>：Tailwind CSS 4.0 (已实现)</li>
+                <li><strong>游戏渲染</strong>：混合方案 - 背景使用CSS，角色使用Canvas (已实现)</li>
+                <li><strong>状态管理</strong>：Zustand 5.0.8 (已实现)</li>
+                <li><strong>UI组件</strong>：Ant Design 5.27.1 (已实现)</li>
+                <li><strong>HTTP客户端</strong>：Fetch API (已实现)</li>
+                <li><strong>动画库</strong>：Framer Motion 12.23.12 (已实现)</li>
+                <li><strong>图标库</strong>：Ant Design Icons 6.0.0 + Lucide React 0.542.0 (已实现)</li>
+                <li><strong>组件架构</strong>：模块化组件设计，统一导出管理 (已实现)
+                    <ul>
+                        <li>集中化UI组件导出：<code>components/ui/index.ts</code></li>
+                        <li>支持类型导出和组件重导出</li>
+                        <li>统一的组件引用路径管理</li>
+                    </ul>
+                </li>
+                <li><strong>配置管理</strong>：集中化配置文件管理 (已实现)</li>
+                <li><strong>持久化存储</strong>：localStorage 主题数据持久化 (已实现)</li>
+            </ul>
+            
+            <h2>后端技术栈</h2>
+            <ul>
+                <li><strong>API路由</strong>：Next.js API Routes</li>
+                <li><strong>数据库</strong>：PostgreSQL + Prisma ORM</li>
+                <li><strong>文件存储</strong>：AWS S3 或 Cloudinary</li>
+                <li><strong>缓存</strong>：Redis（可选）</li>
+                <li><strong>队列处理</strong>：Bull Queue（处理AI生成任务）</li>
+            </ul>
+            
+            <h2>AI集成 <span class="status-badge status-completed">已实现</span></h2>
+            <ul>
+                <li><strong>图像生成模型</strong>：Qwen-Image (通过DashScope API)</li>
+                <li><strong>API端点</strong>：https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation</li>
+                <li><strong>认证方式</strong>：Bearer Token (API Key)</li>
+                <li><strong>调用方式</strong>：HTTP同步接口，发送POST请求后立即返回结果</li>
+                <li><strong>图像规格</strong>：角色 1328x1328px，背景 1664x928px，地面和障碍物支持多种尺寸</li>
+                <li><strong>并发控制</strong>：Promise.all 并行处理多种图像类型生成</li>
+                <li><strong>延迟处理</strong>：智能延迟机制防止API限流，支持批量生成优化</li>
+                <li><strong>图像后处理</strong>：自动抠图处理地面和障碍物图像，去除背景</li>
+                <li><strong>性能监控</strong>：内存使用监控和垃圾回收机制</li>
+                <li><strong>多关卡支持</strong>：支持生成多个关卡的图像资源</li>
+                <li><strong>实现状态</strong>：完整的API路由实现，支持主题选择、提示词构建、并行生成</li>
+                <li><strong>错误处理</strong>：完善的异常捕获和用户友好的错误提示</li>
+                <li><strong>参数配置</strong>：支持不同尺寸、负面提示词、水印控制等高级参数</li>
+            </ul>
+            
+            <h2>组件架构设计 <span class="status-badge status-completed">已实现</span></h2>
+            
+            <h3>组件目录结构</h3>
+            <pre><code class="language-bash">components/
+├── GameCanvas.tsx         # 游戏画布组件
+├── SideMenu.tsx          # 侧边菜单组件
+├── ThemePreview.tsx      # 主题预览组件
+├── ThemesList.tsx        # 主题列表组件
+└── ui/                   # UI组件目录
+    ├── ActionButtons.tsx      # 操作按钮组件
+    ├── CircularText/          # 圆形文字组件
+    │   ├── index.css
+    │   └── index.tsx
+    ├── CurvedLoop/            # 曲线循环组件
+    │   ├── index.css
+    │   └── index.tsx
+    ├── ModelSelector.tsx      # 模型选择器组件
+    ├── ProjectHeader.tsx      # 项目头部组件
+    ├── ScrambleText/          # 文字扰动组件
+    │   ├── index.css
+    │   └── index.tsx
+    ├── ThemeCustomizer.tsx    # 主题定制器组件
+    └── index.ts               # 统一导出文件</code></pre>
+            
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h4>核心组件功能</h4>
+                    <ul>
+                        <li><strong>page.tsx</strong>：主页面组件，管理全局状态和主题生成流程</li>
+                        <li><strong>SideMenu.tsx</strong>：侧边菜单组件，整合所有子组件，处理主题创建，包含完整的主题创建验证逻辑</li>
+                        <li><strong>ThemePreview.tsx</strong>：主题预览组件，四象限布局和图像重新生成，包含删除权限控制</li>
+                        <li><strong>GameCanvas.tsx</strong>：游戏画布组件，处理游戏渲染和交互</li>
+                        <li><strong>ProjectHeader.tsx</strong>：项目头部，展示项目名称和描述</li>
+                        <li><strong>ModelSelector.tsx</strong>：AI模型选择和API Key配置</li>
+                        <li><strong>ThemeCustomizer.tsx</strong>：自定义主题名称和提示词输入</li>
+                    </ul>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>UI交互组件</h4>
+                    <ul>
+                        <li><strong>ActionButtons.tsx</strong>：创建主题和开始游戏按钮</li>
+                        <li><strong>ThemesList.tsx</strong>：预设主题列表展示和选择</li>
+                        <li><strong>ThemePreview.tsx</strong>：主题预览区域，显示角色和背景</li>
+                        <li><strong>ProgressIndicator.tsx</strong>：生成进度显示</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <h3>配置管理系统</h3>
+            <ul>
+                <li><strong>lib/store.ts</strong>：Zustand状态管理
+                    <ul>
+                        <li>游戏状态管理（gameState: menu/loading/playing）</li>
+                        <li>主题选择状态（selectedTheme: fantasy/cyberpunk/custom, customPrompt）</li>
+                        <li>角色和关卡数据管理（characterType: player/enemy/npc, levelType: ground/underground/sky）</li>
+                        <li>游戏数据对象（gameData: characterUrl, levels数组）</li>
+                        <li>关卡管理（currentLevelIndex, totalLevels, levelCount）</li>
+                        <li>已处理图像缓存（processedImages）</li>
+                        <li>游戏进度和加载状态（isLoading, loadingProgress, loadingMessage）</li>
+                        <li>玩家位置和游戏元素（playerPosition, groundTiles, obstacles）</li>
+                        <li>碰撞检测控制（isCollisionEnabled）</li>
+                        <li>持久化存储和游戏重置功能</li>
+                    </ul>
+                </li>
+                <li><strong>types/index.ts</strong>：TypeScript类型定义
+                    <ul>
+                        <li>ThemePreviewProps接口定义</li>
+                        <li>regeneratingImages类型约束</li>
+                        <li>onRegenerateImage异步函数类型</li>
+                        <li>主题数据结构和状态管理类型</li>
+                    </ul>
+                </li>
+                <li><strong>components/ui/index.ts</strong>：统一导出机制，简化组件导入</li>
+                <li><strong>localStorage持久化</strong>：主题数据自动保存和恢复机制
+                    <ul>
+                        <li>自定义主题标识（custom-前缀）</li>
+                        <li>主题数据完整性验证</li>
+                        <li>跨会话状态恢复</li>
+                    </ul>
+                </li>
+            </ul>
+        </section>
+        
+        <section id="current-arch">
+            <h1>当前项目架构图</h1>
+            
+            <h2>系统架构图</h2>
+            <div class="mermaid">
+graph TB
+    subgraph "前端层 (已实现)"
+        A["Next.js 15.5.2 应用"]
+        B["Ant Design UI 组件"]
+        C["Framer Motion 动画"]
+        D["Tailwind CSS 样式"]
+    end
+    
+    subgraph "组件架构层 (已实现)"
+        E1["Menu.tsx 主菜单"]
+        E2["GameInterface.tsx 游戏界面"]
+        E3["UI组件模块 (ui/)"]
+        E4["config.ts 配置管理"]
+        E5["types.ts 类型定义"]
+        E6["index.ts 统一导出"]
+    end
+    
+    subgraph "状态管理层 (已实现)"
+        F["Zustand Store"]
+        G["游戏状态管理"]
+        H["角色位置追踪"]
+        I["主题选择状态"]
+    end
+    
+    subgraph "游戏渲染层 (已实现)"
+        J["CSS 背景渲染"]
+        K["绝对定位角色"]
+        L["键盘事件监听"]
+        M["游戏循环 (16ms)"]
+    end
+    
+    subgraph "AI生成层 (待实现)"
+        N["DashScope API"]
+        O["Qwen-Image 模型"]
+        P["图像处理"]
+    end
+    
+    A --> B
+    A --> C
+    A --> D
+    A --> E1
+    E1 --> E3
+    E3 --> E6
+    E4 --> E1
+    E5 --> E3
+    A --> F
+    F --> G
+    F --> H
+    F --> I
+    G --> J
+    G --> K
+    L --> M
+    M --> H
+    A -.-> N
+    N -.-> O
+    O -.-> P
+            </div>
+            
+            <h2>用户交互流程图</h2>
+            <div class="mermaid">
+flowchart TD
+    Start(["用户访问应用"]) --> Menu["主菜单界面"]
+    Menu --> ThemeSelect{"选择主题类型"}
+    
+    ThemeSelect -->|"预设主题"| PresetTheme["Epic Fantasy / Cyberpunk"]
+    ThemeSelect -->|"自定义主题"| CustomTheme["输入自定义提示词"]
+    
+    PresetTheme --> Confirm["确认主题选择"]
+    CustomTheme --> Confirm
+    
+    Confirm --> Generate["点击开始游戏"]
+    Generate --> Loading["显示生成进度"]
+    Loading --> GameInterface["进入游戏界面"]
+    
+    GameInterface --> GamePlay{"游戏交互"}
+    GamePlay -->|"WASD/方向键"| Movement["角色移动"]
+    GamePlay -->|"空格键"| Jump["角色跳跃"]
+    GamePlay -->|"ESC键"| Pause["暂停游戏"]
+    
+    Movement --> GamePlay
+    Jump --> GamePlay
+    Pause --> Resume{"继续游戏?"}
+    Resume -->|"是"| GamePlay
+    Resume -->|"否"| BackToMenu["返回主菜单"]
+    BackToMenu --> Menu
+    
+    GameInterface --> Restart["重新生成"]
+    Restart --> Generate
+            </div>
+        </section>
+        
+        <section id="ai-content">
+            <h1>AI生成内容规范</h1>
+            
+            <h2>1. 图像规格</h2>
+            <ul>
+                <li><strong>分辨率</strong>：角色 1328x1328px（可后期裁剪为32x32px），背景 1664x928px</li>
+                <li><strong>格式</strong>：PNG（支持透明度）</li>
+                <li><strong>色彩</strong>：由AI模型自动生成，支持像素艺术风格调色板</li>
+                <li><strong>风格</strong>：《死亡细胞》风格像素艺术（通过prompt_extend参数优化）</li>
+                <li><strong>水印</strong>：关闭水印（watermark: false）</li>
+                <li><strong>角色背景</strong>：纯白色背景 #FFFFFF，便于后续抠图处理</li>
+                <li><strong>视角约束</strong>：严格侧身视角，保持游戏原设造型比例</li>
+            </ul>
+            
+            <h2>2. 反向提示词优化</h2>
+            <p>为确保生成内容精准符合《死亡细胞》风格，系统采用了详细的反向提示词约束：</p>
+            
+            <h3>2.1 角色反向约束</h3>
+            <ul>
+                <li><strong>环境排除</strong>："background elements, environment objects, scenery, landscape, buildings, trees, rocks, platforms, ground, floor, ceiling, walls, decorative elements, props, furniture, vehicles, weapons on ground, items, collectibles, UI elements, text, logos, watermarks"</li>
+                <li><strong>风格排除</strong>："3D render, realistic style, photorealistic, smooth gradients, anti-aliasing, blurred edges, soft shading, modern graphics, high-poly models, vector art, cartoon style, anime style, chibi style"</li>
+                <li><strong>视角排除</strong>："front view, back view, three-quarter view, isometric view, top-down view, multiple angles, rotating character, character sheet, multiple poses"</li>
+                <li><strong>质量控制</strong>："low quality, blurry, pixelated artifacts, compression artifacts, noise, distorted proportions, incomplete character, cut-off limbs"</li>
+            </ul>
+            
+            <h3>2.2 背景反向约束</h3>
+            <ul>
+                <li><strong>角色排除</strong>："characters, people, humans, creatures, monsters, animals, NPCs, players, sprites, figures, silhouettes, shadows of characters"</li>
+                <li><strong>UI排除</strong>："user interface, HUD elements, health bars, menus, buttons, text overlays, score displays, minimap, inventory icons, dialogue boxes"</li>
+                <li><strong>效果排除</strong>："particle effects on characters, character animations, motion blur on sprites, character-specific lighting effects"</li>
+                <li><strong>构图约束</strong>："vertical composition, portrait orientation, centered single object, close-up view, macro photography"</li>
+            </ul>
+            
+            <h2>3. 提示词构建逻辑流程</h2>
+            
+            <h3>3.1 整体架构流程图</h3>
+            <div class="mermaid">
+flowchart TD
+    A["🎮 用户输入"] --> B{"🔍 主题类型判断"}
+    B -->|"预设主题"| C["📋 选择预设主题"]
+    B -->|"自定义主题"| D["✏️ 输入自定义提示词"]
+    
+    C --> E["⚙️ 获取主题配置"]
+    D --> F["✅ 验证自定义输入"]
+    
+    E --> G["🎯 确定内容类型"]
+    F --> G
+    
+    G --> H{"🤔 角色 or 背景?"}
+    
+    H -->|"👤 角色"| I["🏗️ 构建角色提示词"]
+    H -->|"🌍 背景"| J["🏗️ 构建背景提示词"]
+    
+    I --> K["📝 添加基础模板"]
+    J --> L["📝 添加基础模板"]
+    
+    K --> M["🎨 应用主题特定描述"]
+    L --> N["🎨 应用主题特定描述"]
+    
+    M --> O["🎭 添加风格约束"]
+    N --> P["🎭 添加风格约束"]
+    
+    O --> Q["🚫 应用角色反向约束"]
+    P --> R["🚫 应用背景反向约束"]
+    
+    Q --> S["✨ 最终角色提示词"]
+    R --> T["✨ 最终背景提示词"]
+    
+    S --> U["🚀 调用DashScope API"]
+    T --> U
+    
+    U --> V["🎉 返回生成结果"]
+    
+    style A fill:#e1f5fe
+    style V fill:#e8f5e8
+    style H fill:#fff3e0
+    style B fill:#fff3e0
+            </div>
+            
+            <h3>3.2 详细实现步骤</h3>
+            
+            <h4>步骤1: 用户输入处理</h4>
+            <div class="alert alert-info">
+                <strong>实现位置：</strong> <code>components/ThemesList.tsx</code> 和 <code>components/ui/ThemeCustomizer.tsx</code>
+            </div>
+            <pre><code class="language-typescript">// 用户选择预设主题
+const handleThemeSelect = (themeId: string) => {
+  const selectedTheme = themes.find(t => t.id === themeId);
+  if (selectedTheme) {
+    setCurrentTheme(selectedTheme);
+    // 触发提示词构建流程
+    buildPrompt(selectedTheme, contentType);
+  }
+};
+
+// 用户输入自定义提示词
+const handleCustomPrompt = (customText: string) => {
+  if (customText.trim().length > 0) {
+    const customTheme = {
+      id: 'custom',
+      name: '自定义',
+      prompt: customText
+    };
+    buildPrompt(customTheme, contentType);
+  }
+};</code></pre>
+            
+            <h4>步骤2: 主题配置获取</h4>
+            <div class="alert alert-info">
+                <strong>实现位置：</strong> <code>configs/index.ts</code>
+            </div>
+            <pre><code class="language-typescript">// 预设主题配置结构
+export const themes = {
+  epic_fantasy: {
+    id: 'epic_fantasy',
+    name: '史诗魔幻',
+    character: {
+      basePrompt: '2D side-scrolling pixel art character',
+      themeElements: 'medieval fantasy warrior, ornate armor, magical weapons',
+      styleConstraints: '16-bit retro style, detailed pixel art',
+      negativePrompt: 'no background, no environment, no landscape'
+    },
+    background: {
+      basePrompt: '2D side-scrolling pixel art background',
+      themeElements: 'medieval castle, mystical forest, ancient ruins',
+      styleConstraints: 'horizontal scrolling composition, atmospheric',
+      negativePrompt: 'no characters, no people, no creatures'
+    }
+  }
+  // ... 其他主题配置
+};</code></pre>
+            
+            <h4>步骤3: 提示词模板构建</h4>
+            <div class="alert alert-success">
+                <strong>核心算法：</strong> 基于模板系统的动态提示词生成
+            </div>
+            <pre><code class="language-typescript">// 提示词构建核心函数
+function buildPrompt(theme: Theme, contentType: 'character' | 'background'): string {
+  const config = theme[contentType];
+  
+  // 1. 基础模板
+  let prompt = config.basePrompt;
+  
+  // 2. 添加主题特定元素
+  prompt += `, ${config.themeElements}`;
+  
+  // 3. 应用风格约束
+  prompt += `, ${config.styleConstraints}`;
+  
+  // 4. 添加通用死亡细胞风格
+  prompt += ', Dead Cells inspired, metroidvania style';
+  
+  // 5. 质量增强词
+  prompt += ', high quality, detailed pixel art, vibrant colors';
+  
+  return prompt;
+}
+
+// 反向约束构建
+function buildNegativePrompt(contentType: 'character' | 'background'): string {
+  const baseNegative = 'blurry, low quality, distorted, watermark';
+  
+  if (contentType === 'character') {
+    return `${baseNegative}, background elements, landscape, environment, scenery`;
+  } else {
+    return `${baseNegative}, characters, people, creatures, animals, faces`;
+  }
+}</code></pre>
+            
+            <h4>步骤4: API参数配置</h4>
+            <div class="alert alert-warning">
+                <strong>注意：</strong> 不同内容类型使用不同的图像尺寸配置
+            </div>
+            <pre><code class="language-typescript">// API调用参数构建
+function buildAPIParams(prompt: string, negativePrompt: string, contentType: string) {
+  const baseParams = {
+    model: 'qwen-image',
+    prompt: prompt,
+    negative_prompt: negativePrompt,
+    prompt_extend: true,
+    watermark: false,
+    safety_tolerance: 2
+  };
+  
+  // 根据内容类型设置尺寸
+  if (contentType === 'character') {
+    return {
+      ...baseParams,
+      width: 1328,
+      height: 1328
+    };
+  } else {
+    return {
+      ...baseParams,
+      width: 1664,
+      height: 928
+    };
+  }
+}</code></pre>
+            
+            <h4>步骤5: DashScope API调用</h4>
+            <div class="alert alert-info">
+                <strong>实现位置：</strong> <code>app/api/generate/route.ts</code>
+            </div>
+            <pre><code class="language-typescript">// API路由实现
+export async function POST(request: Request) {
+  try {
+    const { theme, contentType, customPrompt } = await request.json();
+    
+    // 1. 构建提示词
+    const prompt = customPrompt || buildPrompt(theme, contentType);
+    const negativePrompt = buildNegativePrompt(contentType);
+    
+    // 2. 配置API参数
+    const params = buildAPIParams(prompt, negativePrompt, contentType);
+    
+    // 3. 调用DashScope API
+    const response = await fetch('https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.DASHSCOPE_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        input: params,
+        parameters: {
+          style: '<pixel>',
+          size: `${params.width}*${params.height}`
+        }
+      })
+    });
+    
+    // 4. 处理响应
+    const result = await response.json();
+    return Response.json(result);
+    
+  } catch (error) {
+    return Response.json({ error: '生成失败' }, { status: 500 });
+  }
+}</code></pre>
+            
+            <h2>4. 生成参数配置</h2>
+            <pre><code class="language-typescript">const generateConfig = {
+  model: "qwen-image",
+  width: 1328,  // 角色专用
+  height: 1328, // 角色专用
+  background_width: 1664,  // 背景专用
+  background_height: 928,  // 背景专用
+  prompt_extend: true,
+  watermark: false,
+  safety_tolerance: 2,
+  negative_prompt: "根据内容类型动态应用反向约束"
+};</code></pre>
+            
+            <h2>5. 提示词模板构建详细示例</h2>
+            
+            <h3>5.1 构建流程可视化</h3>
+            <div class="mermaid" style="height: 800px; width: 100%; overflow: visible;">
+flowchart TD
+    %% 用户输入层
+    START(["🎮 用户开始生成"])
+    INPUT{"📝 选择输入方式"}
+    PRESET["📋 选择预设主题<br/>史诗魔幻/赛博朋克/蒸汽朋克"]
+    CUSTOM["✏️ 输入自定义提示词<br/>用户自由描述"]
+    
+    %% 内容类型判断
+    TYPE{"🎯 选择生成类型"}
+    CHAR_TYPE["👤 角色生成<br/>1328x1328 正方形"]
+    BG_TYPE["🌍 背景生成<br/>1664x928 宽屏"]
+    
+    %% 角色构建流程
+    subgraph CHAR_FLOW ["👤 角色提示词构建流程"]
+        CHAR_BASE["🏗️ 基础模板<br/>2D side-scrolling pixel art character"]
+        CHAR_THEME["🎨 主题元素<br/>+ medieval fantasy warrior<br/>+ ornate armor, magical weapons"]
+        CHAR_STYLE["🎭 风格约束<br/>+ 16-bit retro style<br/>+ detailed pixel art, side view"]
+        CHAR_QUALITY["✨ 质量增强<br/>+ high quality, vibrant colors<br/>+ Dead Cells inspired"]
+        CHAR_NEGATIVE["🚫 反向约束<br/>- no background, no environment<br/>- no landscape, no scenery"]
+        CHAR_FINAL["🎯 最终角色提示词<br/>完整组合结果"]
+        
+        CHAR_BASE --> CHAR_THEME
+        CHAR_THEME --> CHAR_STYLE
+        CHAR_STYLE --> CHAR_QUALITY
+        CHAR_QUALITY --> CHAR_NEGATIVE
+        CHAR_NEGATIVE --> CHAR_FINAL
+    end
+    
+    %% 背景构建流程
+    subgraph BG_FLOW ["🌍 背景提示词构建流程"]
+        BG_BASE["🏗️ 基础模板<br/>2D side-scrolling pixel art background"]
+        BG_THEME["🎨 主题元素<br/>+ medieval castle, mystical forest<br/>+ ancient ruins, magical atmosphere"]
+        BG_STYLE["🎭 风格约束<br/>+ horizontal scrolling composition<br/>+ atmospheric perspective"]
+        BG_QUALITY["✨ 质量增强<br/>+ detailed environment<br/>+ moody lighting, high contrast"]
+        BG_NEGATIVE["🚫 反向约束<br/>- no characters, no people<br/>- no creatures, no animals"]
+        BG_FINAL["🎯 最终背景提示词<br/>完整组合结果"]
+        
+        BG_BASE --> BG_THEME
+        BG_THEME --> BG_STYLE
+        BG_STYLE --> BG_QUALITY
+        BG_QUALITY --> BG_NEGATIVE
+        BG_NEGATIVE --> BG_FINAL
+    end
+    
+    %% API调用层
+    subgraph API_FLOW ["🚀 API调用处理"]
+        API_PARAMS["⚙️ 参数配置<br/>model: qwen-image<br/>prompt_extend: true<br/>watermark: false"]
+        API_CALL["📡 DashScope API<br/>POST /api/v1/services/aigc/<br/>text2image/image-synthesis"]
+        API_RESPONSE["📦 响应处理<br/>图像URL提取<br/>错误处理"]
+        
+        API_PARAMS --> API_CALL
+        API_CALL --> API_RESPONSE
+    end
+    
+    %% 最终结果
+    RESULT(["🎉 生成完成<br/>返回图像结果"])
+    
+    %% 主流程连接
+    START --> INPUT
+    INPUT -->|预设主题| PRESET
+    INPUT -->|自定义输入| CUSTOM
+    PRESET --> TYPE
+    CUSTOM --> TYPE
+    
+    TYPE -->|角色| CHAR_TYPE
+    TYPE -->|背景| BG_TYPE
+    
+    CHAR_TYPE --> CHAR_FLOW
+    BG_TYPE --> BG_FLOW
+    
+    CHAR_FINAL --> API_FLOW
+    BG_FINAL --> API_FLOW
+    
+    API_RESPONSE --> RESULT
+    
+    %% 样式定义
+    classDef startEnd fill:#e1f5fe,stroke:#01579b,stroke-width:3px,color:#000
+    classDef decision fill:#fff3e0,stroke:#e65100,stroke-width:2px,color:#000
+    classDef process fill:#f3e5f5,stroke:#4a148c,stroke-width:2px,color:#000
+    classDef final fill:#e8f5e8,stroke:#1b5e20,stroke-width:3px,color:#000
+    classDef api fill:#fce4ec,stroke:#880e4f,stroke-width:2px,color:#000
+    
+    class START,RESULT startEnd
+    class INPUT,TYPE decision
+    class PRESET,CUSTOM,CHAR_TYPE,BG_TYPE process
+    class CHAR_FINAL,BG_FINAL final
+    class API_PARAMS,API_CALL,API_RESPONSE api
+            </div>
+            
+            <h3>5.2 实际构建示例</h3>
+            
+            <h4>史诗魔幻主题 - 角色生成</h4>
+            <div class="code-block">
+                <pre><code class="language-typescript">// 输入参数
+const theme = 'epic_fantasy';
+const contentType = 'character';
+
+// 构建过程
+function buildEpicFantasyCharacter() {
+  // 第1层：基础模板
+  let prompt = '2D side-scrolling pixel art character';
+  
+  // 第2层：主题特定元素
+  prompt += ', medieval fantasy warrior';
+  prompt += ', ornate plate armor with intricate engravings';
+  prompt += ', magical glowing sword';
+  prompt += ', flowing cape with heraldic symbols';
+  
+  // 第3层：风格约束
+  prompt += ', 16-bit retro style';
+  prompt += ', detailed pixel art';
+  prompt += ', side view profile';
+  prompt += ', Dead Cells inspired';
+  
+  // 第4层：质量增强
+  prompt += ', high quality';
+  prompt += ', vibrant colors';
+  prompt += ', sharp details';
+  
+  // 反向约束
+  const negativePrompt = 'blurry, low quality, distorted, watermark, ' +
+                        'background elements, landscape, environment, scenery, ' +
+                        'multiple characters, front view, back view';
+  
+  return { prompt, negativePrompt };
+}
+
+// 最终结果
+const result = buildEpicFantasyCharacter();
+console.log('正向提示词:', result.prompt);
+console.log('反向提示词:', result.negativePrompt);</code></pre>
+            </div>
+            
+            <h4>赛博朋克主题 - 背景生成</h4>
+            <div class="code-block">
+                <pre><code class="language-typescript">// 输入参数
+const theme = 'cyberpunk';
+const contentType = 'background';
+
+// 构建过程
+function buildCyberpunkBackground() {
+  // 第1层：基础模板
+  let prompt = '2D side-scrolling pixel art background';
+  
+  // 第2层：主题特定元素
+  prompt += ', futuristic cyberpunk cityscape';
+  prompt += ', neon-lit skyscrapers';
+  prompt += ', holographic advertisements';
+  prompt += ', flying vehicles in the distance';
+  prompt += ', rain-soaked streets with reflections';
+  
+  // 第3层：风格约束
+  prompt += ', horizontal scrolling composition';
+  prompt += ', atmospheric perspective';
+  prompt += ', neon color palette';
+  prompt += ', 16-bit pixel art style';
+  
+  // 第4层：质量增强
+  prompt += ', detailed environment';
+  prompt += ', moody lighting';
+  prompt += ', high contrast';
+  
+  // 反向约束
+  const negativePrompt = 'blurry, low quality, distorted, watermark, ' +
+                        'characters, people, creatures, animals, faces, ' +
+                        'vertical composition, portrait orientation';
+  
+  return { prompt, negativePrompt };
+}
+
+// API调用参数
+const apiParams = {
+  model: 'qwen-image',
+  prompt: result.prompt,
+  negative_prompt: result.negativePrompt,
+  width: 1664,  // 背景专用宽屏比例
+  height: 928,
+  prompt_extend: true,
+  watermark: false,
+  safety_tolerance: 2
+};</code></pre>
+            </div>
+            
+            <h3>5.3 质量优化策略</h3>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h4>🎯 精确性优化</h4>
+                    <ul>
+                        <li>使用具体的描述词而非抽象概念</li>
+                        <li>明确指定视角和构图要求</li>
+                        <li>添加风格参考（Dead Cells, 16-bit等）</li>
+                        <li>控制元素数量避免过于复杂</li>
+                    </ul>
+                </div>
+                <div class="feature-card">
+                    <h4>🚫 排除性优化</h4>
+                    <ul>
+                        <li>角色生成排除环境元素</li>
+                        <li>背景生成排除人物角色</li>
+                        <li>统一排除低质量、模糊等问题</li>
+                        <li>避免不符合像素风格的元素</li>
+                    </ul>
+                </div>
+                <div class="feature-card">
+                    <h4>⚙️ 参数化优化</h4>
+                    <ul>
+                        <li>角色使用正方形比例(1328x1328)</li>
+                        <li>背景使用宽屏比例(1664x928)</li>
+                        <li>启用提示词扩展增强细节</li>
+                        <li>关闭水印保持画面纯净</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <h2>6. 《死亡细胞》风格提示词模板</h2>
+            
+            <h3>4.1 史诗魔幻主题</h3>
+            <ul>
+                <li><strong>角色</strong>："2D side-scrolling pixel art character, 16-bit retro style, dark fantasy aesthetic, medieval armor with weathered textures, magical elements with glowing effects, high contrast colors, hand-drawn texture, dynamic lighting, clear pixel outline, full body sprite, roguelike warrior design, side view profile pose, pure white background #FFFFFF, isolated character only, no environment elements, perfect for sprite extraction"</li>
+                <li><strong>背景</strong>："2D side-scrolling pixel art background, horizontal scrolling composition, dark fantasy medieval world, ancient castles with gothic architecture, mysterious forests with atmospheric lighting, high saturation dark tones, hand-drawn texture, dynamic shadows, no characters"</li>
+            </ul>
+            
+            <h3>4.2 赛博朋克主题</h3>
+            <ul>
+                <li><strong>角色</strong>："2D side-scrolling pixel art character, 16-bit retro style, dark cyberpunk aesthetic, neon-accented futuristic clothing, high-tech weaponry, high contrast neon colors, hand-drawn texture, dynamic lighting effects, clear pixel outline, full body sprite, roguelike cyber-warrior design, side view profile pose, pure white background #FFFFFF, isolated character only, no environment elements, perfect for sprite extraction"</li>
+                <li><strong>背景</strong>："2D side-scrolling pixel art background, horizontal scrolling composition, dark cyberpunk cityscape, towering skyscrapers with neon signs, industrial platforms and walkways, high saturation dark tones with neon highlights, hand-drawn texture, atmospheric lighting, no characters"</li>
+            </ul>
+            
+            <h3>4.3 西部世界主题</h3>
+            <ul>
+                <li><strong>角色</strong>："2D side-scrolling pixel art character, 16-bit retro style, dark western aesthetic, weathered cowboy attire, vintage firearms, high contrast earth tones, hand-drawn texture, dramatic lighting, clear pixel outline, full body sprite, roguelike gunslinger design, side view profile pose, pure white background #FFFFFF, isolated character only, no environment elements, perfect for sprite extraction"</li>
+                <li><strong>背景</strong>："2D side-scrolling pixel art background, horizontal scrolling composition, dark western frontier, desert landscapes with rocky formations, abandoned towns and saloons, high saturation warm tones, hand-drawn texture, sunset lighting effects, no characters"</li>
+            </ul>
+            
+            <h3>4.4 海底世界主题</h3>
+            <ul>
+                <li><strong>角色</strong>："2D side-scrolling pixel art character, 16-bit retro style, dark aquatic aesthetic, diving gear or aquatic adaptations, underwater weaponry, high contrast blue-green tones, hand-drawn texture, underwater lighting effects, clear pixel outline, full body sprite, roguelike deep-sea explorer design, side view profile pose, pure white background #FFFFFF, isolated character only, no environment elements, perfect for sprite extraction"</li>
+                <li><strong>背景</strong>："2D side-scrolling pixel art background, horizontal scrolling composition, dark underwater environment, coral reefs and ancient ruins, mysterious deep-sea caverns, high saturation blue-green tones, hand-drawn texture, volumetric underwater lighting, no characters"</li>
+            </ul>
+            
+            <h2>5. 角色类型约束优化</h2>
+            <p>为确保角色生成严格遵循《死亡细胞》游戏原设的侧身造型比例和特征，系统对各角色类型进行了精细化约束：</p>
+            
+            <h3>5.1 玩家角色 (Player)</h3>
+            <ul>
+                <li><strong>造型特征</strong>："主角战士形象，标准人体比例，清晰的侧身轮廓，动态战斗姿态，装备细节丰富，符合roguelike主角设定"</li>
+                <li><strong>比例约束</strong>："严格侧视角度，头身比例1:6-7，武器与身体比例协调，保持游戏sprite标准"</li>
+            </ul>
+            
+            <h3>5.2 敌人角色 (Enemy)</h3>
+            <ul>
+                <li><strong>造型特征</strong>："多样化怪物设计，独特的侧身剪影，威胁性外观，符合各主题世界观的敌对生物"</li>
+                <li><strong>比例约束</strong>："侧视角轮廓清晰，大小比例适中，攻击姿态明确，便于游戏中识别和战斗"</li>
+            </ul>
+            
+            <h3>5.3 NPC角色 (NPC)</h3>
+            <ul>
+                <li><strong>造型特征</strong>："非战斗角色设计，友善或中立的外观，职业特征明显，符合世界观设定"</li>
+                <li><strong>比例约束</strong>："标准侧身视角，静态或交互姿态，服装道具细节丰富，体现角色职能"</li>
+            </ul>
+        </section>
+        
+        <section id="ai-flow">
+            <h1>AI生成流程设计 <span class="status-badge status-completed">已实现</span></h1>
+            
+            <h2>生成流程时序图</h2>
+            <div class="mermaid">
+sequenceDiagram
+    participant User
+    participant Frontend
+    participant Backend
+    participant QwenImage
+    User->>Frontend: 点击"生成"
+    Frontend->>Backend: POST /api/generate (含提示词)
+    Backend->>Backend: 拆分请求
+    Backend->>QwenImage: 调用角色生成API
+    QwenImage-->>Backend: 返回角色图
+    Backend->>QwenImage: 调用背景生成API
+    QwenImage-->>Backend: 返回背景图
+    Backend-->>Frontend: 统一响应 {character, background}
+    Frontend->>User: 显示预览 + "开始游戏"按钮
+            </div>
+            
+            <h2>实现细节</h2>
+            
+            <h3>API路由实现</h3>
+            <p>在 <code>app/api/generate/route.ts</code> 中实现了完整的生成API：</p>
+            <ul>
+                <li><strong>请求处理</strong>：接收主题、提示词、角色类型、关卡类型等参数</li>
+                <li><strong>提示词构建</strong>：根据不同主题和类型构建专业的提示词模板</li>
+                <li><strong>并行生成</strong>：同时生成角色和背景图片，提高效率</li>
+                <li><strong>错误处理</strong>：完善的异常捕获和错误信息返回</li>
+                <li><strong>CORS支持</strong>：支持跨域请求处理</li>
+                <li><strong>参数验证</strong>：严格的输入参数验证和类型检查</li>
+                <li><strong>API密钥管理</strong>：安全的环境变量配置和密钥验证</li>
+                <li><strong>响应格式</strong>：统一的JSON响应格式，包含生成的图片URL和元数据</li>
+            </ul>
+            
+            <h4>API接口规范</h4>
+            <pre><code class="language-typescript">// POST /api/generate
+// 请求体
+{
+  "theme": "Epic Fantasy Adventure",
+  "prompt": "A magical realm with dragons and castles",
+  "types": ["character", "background", "ground", "obstacle"],
+  "levelCount": 3
+}
+
+// 响应体
+{
+  "success": true,
+  "data": {
+    "characterUrl": "https://...",
+    "levels": [
+      {
+        "id": "level_1",
+        "backgroundUrl": "https://...",
+        "groundUrl": "https://...",
+        "obstacleUrl": "https://...",
+        "obstacles": [
+          {
+            "id": "obs_1",
+            "x": 200,
+            "y": 300,
+            "width": 64,
+            "height": 64,
+            "type": "rock"
+          }
+        ]
+      }
+    ]
+  },
+  "generationId": "gen_123456789",
+  "timestamp": "2024-01-01T00:00:00.000Z"
+}
+
+// POST /api/process-image (图像后处理)
+// 请求体
+{
+  "imageUrl": "https://...",
+  "type": "ground" | "obstacle"
+}
+
+// 响应体
+{
+  "success": true,
+  "processedUrl": "https://...",
+  "originalUrl": "https://..."
+}</code></pre>
+            
+            <h3>前端集成</h3>
+            <p>在 <code>Menu.tsx</code> 组件中实现了完整的生成流程：</p>
+            <ul>
+                <li><strong>状态管理</strong>：使用Zustand管理生成状态和进度</li>
+                <li><strong>进度显示</strong>：实时显示生成进度和状态信息</li>
+                <li><strong>主题管理</strong>：动态添加生成的主题到主题列表</li>
+                <li><strong>错误处理</strong>：用户友好的错误提示和状态恢复</li>
+                <li><strong>加载状态</strong>：防止重复提交和状态混乱</li>
+            </ul>
+            
+            <h3>DashScope集成</h3>
+            <p>与阿里云DashScope API的完整集成：</p>
+            <ul>
+                <li><strong>模型选择</strong>：使用Qwen-Image模型进行图像生成</li>
+                <li><strong>参数配置</strong>：支持不同尺寸、负面提示词等参数</li>
+                <li><strong>响应解析</strong>：正确解析API返回的图片URL</li>
+                <li><strong>并发控制</strong>：合理控制API调用频率</li>
+            </ul>
+            
+            <h2>详细实现流程</h2>
+            
+            <h3>1. 前端交互流程</h3>
+            <ol>
+                <li><strong>用户选择主题</strong>：用户在主题选择界面选择预设主题或输入自定义提示词</li>
+                <li><strong>点击生成按钮</strong>：触发生成请求，显示加载状态</li>
+                <li><strong>实时进度显示</strong>：通过WebSocket或轮询显示生成进度</li>
+                <li><strong>预览展示</strong>：生成完成后展示角色和背景预览</li>
+                <li><strong>确认开始</strong>：用户确认满意后点击"开始游戏"按钮</li>
+            </ol>
+            
+            <h3>2. 后端处理流程</h3>
+            <ol>
+                <li><strong>请求接收</strong>：接收前端POST请求，验证参数</li>
+                <li><strong>提示词构建</strong>：根据主题和用户输入构建具体的提示词</li>
+                <li><strong>并行生成</strong>：同时调用DashScope Qwen-Image API生成角色和背景</li>
+                <li><strong>图像处理</strong>：对生成的图像进行格式转换和优化</li>
+                <li><strong>资源存储</strong>：将生成的图像上传到云存储</li>
+                <li><strong>响应返回</strong>：返回包含角色和背景URL的统一响应</li>
+            </ol>
+        </section>
+        
+        <section id="status">
+            <h1>当前实现状态</h1>
+            
+            <h2>已完成功能 ✅</h2>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h4>基础架构</h4>
+                    <ul>
+                        <li>Next.js + TypeScript + Tailwind CSS</li>
+                        <li>Ant Design 完整集成</li>
+                        <li>Zustand 全局状态管理</li>
+                        <li>模块化组件架构：完整的组件拆分和重构</li>
+                        <li>配置文件管理：集中化主题配置管理</li>
+                    </ul>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>用户界面</h4>
+                    <ul>
+                        <li>主题选择系统：预设主题 + 自定义主题输入</li>
+                        <li>响应式设计：移动端适配</li>
+                        <li>游戏界面：完整的UI布局</li>
+                        <li>扩展主题支持：4个预设主题（史诗魔幻、赛博朋克、西部世界、海底世界）</li>
+                        <li>类型系统：完整的TypeScript类型定义</li>
+                    </ul>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>游戏系统</h4>
+                    <ul>
+                        <li>游戏渲染引擎：CSS + 绝对定位混合方案</li>
+                        <li>角色控制系统：多键位支持 + 重力系统</li>
+                        <li>动画系统：Framer Motion 平滑过渡</li>
+                        <li>游戏循环：60fps 实时更新</li>
+                        <li>暂停功能：ESC键暂停/恢复</li>
+                        <li>统一导出机制：组件统一导出和管理</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <h2>待实现功能 🚧</h2>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h4>AI生成优化</h4>
+                    <ul>
+                        <li>生成质量优化：提示词模板精细化调整</li>
+                        <li>缓存机制：相同提示词结果缓存</li>
+                        <li>批量生成：支持一次生成多个变体</li>
+                        <li>生成历史：用户生成记录管理</li>
+                    </ul>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>后端开发</h4>
+                    <ul>
+                        <li>Next.js API Routes</li>
+                        <li>数据持久化：游戏数据存储</li>
+                        <li>文件存储：云存储集成</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <h2>技术债务 ⚠️</h2>
+            <ul>
+                <li><strong>模拟数据</strong>：当前使用占位符图片，需接入真实AI生成</li>
+                <li><strong>性能优化</strong>：游戏循环可优化为requestAnimationFrame</li>
+                <li><strong>测试覆盖</strong>：缺少单元测试和集成测试</li>
+            </ul>
+        </section>
+        
+        <section id="roadmap">
+            <h1>后续扩展计划</h1>
+            
+            <h2>短期扩展 (1-2周)</h2>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h4>AI生成集成</h4>
+                    <p>完成DashScope API接入，实现真实的AI图像生成功能</p>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>真实图片渲染</h4>
+                    <p>替换占位符为AI生成内容，完善图像处理流程</p>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>错误处理优化</h4>
+                    <p>完善生成失败的用户体验，添加重试机制</p>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>性能优化</h4>
+                    <p>游戏循环和渲染优化，提升整体性能</p>
+                </div>
+            </div>
+            
+            <h2>中期扩展 (1-2月)</h2>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h4>更多预设主题</h4>
+                    <p>科幻、恐怖、卡通等风格主题</p>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>基础碰撞检测</h4>
+                    <p>角色与环境交互系统</p>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>简单的收集元素</h4>
+                    <p>道具和奖励系统</p>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>音效生成集成</h4>
+                    <p>AI生成背景音乐和音效</p>
+                </div>
+            </div>
+            
+            <h2>长期扩展 (3-6月)</h2>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h4>完整游戏引擎集成</h4>
+                    <p>考虑Phaser.js或自研引擎</p>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>多关卡系统</h4>
+                    <p>程序化关卡生成</p>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>敌人和障碍物</h4>
+                    <p>AI生成的游戏机制</p>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>分数和成就系统</h4>
+                    <p>用户进度追踪</p>
+                </div>
+                
+                <div class="feature-card">
+                    <h4>多人游戏</h4>
+                    <p>实时对战功能</p>
+                </div>
+            </div>
+        </section>
+        </div>
+    </div>
+    
+    <a href="/" class="back-to-app">🎮 返回应用</a>
+    
+    <script>
+        // 初始化 Mermaid
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'default',
+            themeVariables: {
+                primaryColor: '#0366d6',
+                primaryTextColor: '#24292e',
+                primaryBorderColor: '#e1e4e8',
+                lineColor: '#586069',
+                secondaryColor: '#f6f8fa',
+                tertiaryColor: '#ffffff'
+            }
+        });
+        
+        // 初始化 Mermaid
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'default',
+            themeVariables: {
+                primaryColor: '#0366d6',
+                primaryTextColor: '#24292e',
+                primaryBorderColor: '#e1e4e8',
+                lineColor: '#586069',
+                secondaryColor: '#f6f8fa',
+                tertiaryColor: '#ffffff'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            }
+        });
+        
+        // 初始化 Prism.js 代码高亮
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof Prism !== 'undefined') {
+                Prism.highlightAll();
+            }
+        });
+        
+        // 平滑滚动导航
+        document.querySelectorAll('.nav a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    target.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }
+            });
+        });
+        
+        // 添加滚动时导航栏阴影效果
+        window.addEventListener('scroll', function() {
+            const nav = document.querySelector('.nav');
+            if (window.scrollY > 100) {
+                nav.style.boxShadow = 'var(--shadow-md)';
+            } else {
+                nav.style.boxShadow = 'var(--shadow-sm)';
+            }
+        });
+        
+        // 路由处理
+        function handleRouting() {
+            const path = window.location.pathname;
+            if (path === '/doc' || path === '/doc.html') {
+                // 当前就在文档页面
+                return;
+            }
+        }
+        
+        // 页面加载时处理路由
+        window.addEventListener('load', handleRouting);
+        
+        // 监听浏览器前进后退
+        window.addEventListener('popstate', handleRouting);
+    </script>
+</body>
+</html>

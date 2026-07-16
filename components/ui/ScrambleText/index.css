@@ -1,0 +1,13 @@
+.text-block {
+  /* margin: 12px; */
+  font-family: monospace;
+  font-size: 32px;
+  font-weight: bold;
+  color: #000;
+  cursor: pointer;
+}
+
+.char {
+  will-change: transform;
+  display: inline-block;
+}
