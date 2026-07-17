@@ -115,7 +115,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
         </Select>
         {selectedProvider === 'openrouter' && (
           <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginTop: '4px' }}>
-            聚合 API · 一个 Key 可选多模型（含 Grok）
+            生图默认 Seedream 4.5，失败时回退 FLUX.2 Pro；文字优化优先使用免费路由
           </Text>
         )}
         {selectedProvider === 'openai' && (
@@ -137,7 +137,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
         />
         {keyLooksWrong ? (
           <Text type="danger" style={{ fontSize: '12px', display: 'block', marginTop: '4px' }}>
-            Key 格式异常，请清空后从 platform.openai.com 重新复制
+            Key 格式异常，请清空后从当前 Provider 的控制台重新复制
           </Text>
         ) : (
           <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginTop: '4px' }}>

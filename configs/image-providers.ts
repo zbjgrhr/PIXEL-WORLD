@@ -17,6 +17,9 @@ export interface ProviderConfig {
   models: ModelConfig[]
 }
 
+export const OPENROUTER_PRIMARY_IMAGE_MODEL = 'bytedance-seed/seedream-4.5'
+export const OPENROUTER_FALLBACK_IMAGE_MODEL = 'black-forest-labs/flux.2-pro'
+
 export const IMAGE_PROVIDERS: ProviderConfig[] = [
   {
     id: 'dashscope',
@@ -71,28 +74,16 @@ export const IMAGE_PROVIDERS: ProviderConfig[] = [
     keyHintZh: 'OpenRouter Key · 一个 Key 可选多模型 · openrouter.ai',
     models: [
       {
-        id: 'openai/gpt-image-2',
-        label: 'OpenAI GPT Image 2',
+        id: OPENROUTER_PRIMARY_IMAGE_MODEL,
+        label: 'Seedream 4.5（默认）',
         supportsNegativePrompt: false,
-        endpointKind: 'images',
+        endpointKind: 'openrouter-images',
       },
       {
-        id: 'openai/gpt-image-1.5',
-        label: 'OpenAI GPT Image 1.5',
+        id: OPENROUTER_FALLBACK_IMAGE_MODEL,
+        label: 'FLUX.2 Pro（备用）',
         supportsNegativePrompt: false,
-        endpointKind: 'images',
-      },
-      {
-        id: 'black-forest-labs/flux-schnell',
-        label: 'Flux Schnell',
-        supportsNegativePrompt: false,
-        endpointKind: 'images',
-      },
-      {
-        id: 'x-ai/grok-2-image',
-        label: 'xAI Grok 2 Image',
-        supportsNegativePrompt: false,
-        endpointKind: 'images',
+        endpointKind: 'openrouter-images',
       },
     ],
   },
@@ -107,7 +98,7 @@ export function getModelConfig(providerId: ProviderId, modelId: string): ModelCo
 }
 
 export function getDefaultProvider(): ProviderId {
-  return 'openai'
+  return 'openrouter'
 }
 
 export function getDefaultModel(providerId: ProviderId): string {
@@ -122,7 +113,11 @@ const DEPRECATED_MODEL_ALIASES: Record<string, string> = {
   'dall-e-3': 'gpt-image-2',
   'dall-e-2': 'gpt-image-2',
   'gpt-image-1': 'gpt-image-2',
-  'openai/gpt-image-1': 'openai/gpt-image-2',
+  'openai/gpt-image-1': OPENROUTER_PRIMARY_IMAGE_MODEL,
+  'openai/gpt-image-1.5': OPENROUTER_PRIMARY_IMAGE_MODEL,
+  'openai/gpt-image-2': OPENROUTER_PRIMARY_IMAGE_MODEL,
+  'black-forest-labs/flux-schnell': OPENROUTER_FALLBACK_IMAGE_MODEL,
+  'x-ai/grok-2-image': OPENROUTER_PRIMARY_IMAGE_MODEL,
 }
 
 /** Maps retired or unknown model ids to a supported default. */

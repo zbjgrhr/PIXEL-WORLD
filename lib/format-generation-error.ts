@@ -2,6 +2,16 @@
 export function formatGenerationError(raw: string): string {
   const lower = raw.toLowerCase()
 
+  if (
+    lower.includes('openrouter') &&
+    (lower.includes('402') ||
+      lower.includes('insufficient credits') ||
+      lower.includes('insufficient balance') ||
+      lower.includes('payment required'))
+  ) {
+    return 'OpenRouter 余额不足。Seedream 4.5 和 FLUX.2 Pro 都是按量付费模型，请先在 openrouter.ai 充值；切换备用模型不能绕过账户余额限制。'
+  }
+
   if (lower.includes('billing_hard_limit') || lower.includes('billing hard limit')) {
     return 'OpenAI 账户已达消费硬上限。请到 platform.openai.com → Billing 绑定支付方式并提高 Hard limit，然后重试。'
   }
@@ -18,7 +28,10 @@ export function formatGenerationError(raw: string): string {
   }
 
   if (lower.includes("does not exist") && lower.includes('model')) {
-    return '所选模型已停用或不可用。请刷新页面后选择 GPT Image 2 / 1.5 / 1 Mini，并重新部署最新版本。'
+    if (lower.includes('openrouter')) {
+      return '所选 OpenRouter 图片模型已停用或暂不可用。请刷新页面并选择 Seedream 4.5 或 FLUX.2 Pro。'
+    }
+    return '所选模型已停用或不可用。请刷新页面后重新选择当前可用模型。'
   }
 
   if (lower.includes('rate limit') || lower.includes('429')) {

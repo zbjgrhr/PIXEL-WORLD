@@ -12,6 +12,11 @@
 - 统一视觉合同：所有素材共享像素规格、色板、视角和光照，但不会共享不属于自己的内容。
 - 独立预览与重生成：每类素材都可单独检查、抠图和重新生成。
 - 兼容 DashScope、OpenAI 和 OpenRouter 图像模型。
+- OpenRouter 已使用专用的 Unified Image API（`/api/v1/images`），新用户默认使用 Seedream 4.5；遇到模型拥塞、限流或上游故障时自动回退到 FLUX.2 Pro。
+
+> Seedream 4.5 与 FLUX.2 Pro 都是按量付费模型。OpenRouter 的免费文字模型不能稳定替代图片生成模型；账户没有图片生成余额时，自动回退也不会绕过计费限制。
+
+使用 OpenRouter 时，提示词优化与 AI 背景故事会优先调用 `openrouter/free` 免费文字路由；免费路由不可用或返回内容不合格时，系统会使用本地结构化结果继续运行。图片素材仍需使用 OpenRouter 余额。
 
 ## 运行
 

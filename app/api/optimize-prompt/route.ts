@@ -31,7 +31,7 @@ function optimizerEndpoint(provider: ProviderId): { url: string; model: string; 
     return { url: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini', envKey: 'OPENAI_API_KEY' }
   }
   if (provider === 'openrouter') {
-    return { url: 'https://openrouter.ai/api/v1/chat/completions', model: 'openai/gpt-4o-mini', envKey: 'OPENROUTER_API_KEY' }
+    return { url: 'https://openrouter.ai/api/v1/chat/completions', model: 'openrouter/free', envKey: 'OPENROUTER_API_KEY' }
   }
   return {
     url: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',

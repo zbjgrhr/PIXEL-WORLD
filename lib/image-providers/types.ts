@@ -2,7 +2,7 @@ export type ProviderId = 'dashscope' | 'openai' | 'openrouter'
 
 export type AssetType = import('@/types').AssetType
 
-export type EndpointKind = 'dashscope' | 'images'
+export type EndpointKind = 'dashscope' | 'images' | 'openrouter-images'
 
 export interface GenerateImageParams {
   prompt: string
