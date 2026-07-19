@@ -37,6 +37,31 @@ function buildPrompt(prompt: string, negativePrompt?: string): string {
   return `${prompt}\n\nStrict exclusions: ${negativePrompt}`
 }
 
+function buildImageRequestBody(
+  params: GenerateImageParams,
+  model: string,
+): Record<string, unknown> {
+  const commonBody = {
+    model,
+    prompt: buildPrompt(params.prompt, params.negativePrompt),
+    n: 1,
+    provider: {
+      sort: 'price',
+      allow_fallbacks: true,
+    },
+  }
+
+  if (model === OPENROUTER_PRIMARY_IMAGE_MODEL) {
+    return {
+      ...commonBody,
+      resolution: '2K',
+      aspect_ratio: getAspectRatio(params.assetType),
+    }
+  }
+
+  return commonBody
+}
+
 function parseImageResponse(result: OpenRouterImageResponse, model: string): string {
   const first = result.data?.[0]
   if (first?.url) return first.url
@@ -58,17 +83,7 @@ async function callOpenRouterImageAPI(
       Authorization: `Bearer ${params.apiKey}`,
       ...getOpenRouterHeaders(),
     },
-    body: JSON.stringify({
-      model,
-      prompt: buildPrompt(params.prompt, params.negativePrompt),
-      n: 1,
-      resolution: '1K',
-      aspect_ratio: getAspectRatio(params.assetType),
-      provider: {
-        sort: 'price',
-        allow_fallbacks: true,
-      },
-    }),
+    body: JSON.stringify(buildImageRequestBody(params, model)),
   })
 
   if (!response.ok) {
