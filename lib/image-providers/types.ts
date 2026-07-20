@@ -11,6 +11,7 @@ export interface GenerateImageParams {
   apiKey: string
   model: string
   size?: string
+  layout?: 'single' | 'sprite-sheet'
 }
 
 export interface ImageProvider {

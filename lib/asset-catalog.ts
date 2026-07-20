@@ -74,10 +74,58 @@ export const ASSET_CATALOG_BY_CATEGORY = Object.fromEntries(
 ) as Record<AssetCategory, AssetCatalogEntry>
 
 export const DEFAULT_ANIMATION: AnimationSpec = {
+  layoutVersion: 2,
+  columns: 6,
+  rows: 6,
+  fps: 8,
+  states: { idle: 0, walk: 1, jump: 2, attack: 3, hit: 4, death: 5 },
+}
+
+export const LEGACY_ANIMATION: AnimationSpec = {
+  layoutVersion: 1,
   columns: 6,
   rows: 5,
   fps: 8,
-  states: { idle: 4, move: 6, attack: 6, hit: 2, death: 6 },
+  states: { idle: 0, walk: 1, jump: 1, attack: 2, hit: 3, death: 4 },
+}
+
+export function normalizeAnimationSpec(value: unknown): AnimationSpec {
+  const raw = value && typeof value === 'object' ? value as {
+    layoutVersion?: unknown
+    columns?: unknown
+    rows?: unknown
+    fps?: unknown
+    states?: Record<string, unknown>
+  } : {}
+  const rows = Number(raw.rows)
+  const legacy = rows === 5 || raw.layoutVersion === 1 || !raw.states || !('jump' in raw.states)
+  const base = legacy ? LEGACY_ANIMATION : DEFAULT_ANIMATION
+  const fps = Number(raw.fps)
+  if (legacy) {
+    return {
+      ...LEGACY_ANIMATION,
+      fps: Number.isFinite(fps) ? Math.max(2, Math.min(24, Math.round(fps))) : LEGACY_ANIMATION.fps,
+      states: { ...LEGACY_ANIMATION.states },
+    }
+  }
+  const maxRow = DEFAULT_ANIMATION.rows - 1
+  const row = (pose: keyof AnimationSpec['states']) => {
+    const rawValue = raw.states?.[pose] ?? (pose === 'walk' ? raw.states?.move : undefined)
+    const numeric = Number(rawValue)
+    return Number.isFinite(numeric) ? Math.max(0, Math.min(maxRow, Math.round(numeric))) : base.states[pose]
+  }
+  return {
+    ...DEFAULT_ANIMATION,
+    fps: Number.isFinite(fps) ? Math.max(2, Math.min(24, Math.round(fps))) : DEFAULT_ANIMATION.fps,
+    states: {
+      idle: row('idle'),
+      walk: row('walk'),
+      jump: row('jump'),
+      attack: row('attack'),
+      hit: row('hit'),
+      death: row('death'),
+    },
+  }
 }
 
 function soundFor(category: AssetCategory): SoundSpec {

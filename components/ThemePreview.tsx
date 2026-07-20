@@ -3,19 +3,40 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button, Card, Checkbox, Empty, Image, Progress, Skeleton, Space, Switch, Tag, Typography, message } from 'antd'
 import { Download, RotateCcw, Trash2, Volume2 } from 'lucide-react'
-import type { AssetDefinition, ThemePreviewProps } from '@/types'
+import { normalizeAnimationSpec } from '@/lib/asset-catalog'
+import type { AnimationPose, AssetDefinition, ThemePreviewProps } from '@/types'
 import { ExportValidationError, exportGameZip } from '@/lib/export-game'
 
 const { Text, Title, Paragraph } = Typography
 
 function AnimatedSpritePreview({ asset }: { asset: AssetDefinition }) {
   const [frame, setFrame] = useState(0)
+  const [pose, setPose] = useState<AnimationPose>('idle')
+  const animation = normalizeAnimationSpec(asset.animation)
   useEffect(() => {
-    const timer = window.setInterval(() => setFrame((value) => (value + 1) % (asset.animation?.states.idle || 4)), 1000 / (asset.animation?.fps || 8))
+    setFrame(0)
+    const timer = window.setInterval(() => setFrame((value) => (value + 1) % animation.columns), 1000 / animation.fps)
     return () => window.clearInterval(timer)
-  }, [asset.animation])
+  }, [animation.columns, animation.fps, pose])
   if (!asset.url) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Not generated" />
-  return <div style={{ width: 190, height: 150, margin: '0 auto', backgroundImage: `url("${asset.url}")`, backgroundRepeat: 'no-repeat', backgroundSize: '600% 500%', backgroundPosition: `${frame * 20}% 0%`, imageRendering: 'pixelated' }} />
+  const x = animation.columns > 1 ? frame / (animation.columns - 1) * 100 : 0
+  const row = Math.max(0, Math.min(animation.rows - 1, animation.states[pose]))
+  const y = animation.rows > 1 ? row / (animation.rows - 1) * 100 : 0
+  const poses: Array<{ value: AnimationPose; label: string }> = [
+    { value: 'idle', label: '站立' },
+    { value: 'walk', label: '走路' },
+    { value: 'jump', label: '跳跃' },
+    { value: 'attack', label: '攻击' },
+    { value: 'hit', label: '受击' },
+    { value: 'death', label: '死亡' },
+  ]
+  return <div>
+    <div style={{ width: 190, height: 150, margin: '0 auto', backgroundImage: `url("${asset.url}")`, backgroundRepeat: 'no-repeat', backgroundSize: `${animation.columns * 100}% ${animation.rows * 100}%`, backgroundPosition: `${x}% ${y}%`, imageRendering: 'pixelated' }} />
+    <Space size={[4, 4]} wrap style={{ marginTop: 8 }}>
+      {poses.map((item) => <Button key={item.value} size="small" type={pose === item.value ? 'primary' : 'default'} onClick={() => setPose(item.value)}>{item.label}</Button>)}
+    </Space>
+    {animation.layoutVersion === 1 && <Tag color="gold" style={{ marginTop: 8 }}>旧版 5 行素材 · 跳跃暂用走路姿态</Tag>}
+  </div>
 }
 
 function PlannedAssetCard({ asset, levelOptions, loading, onRegenerate, onUpdate }: {

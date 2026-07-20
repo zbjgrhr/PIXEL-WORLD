@@ -38,6 +38,7 @@ async function processImageCutout(
   providerId: ProviderId,
   model: string,
   baseUrl: string,
+  preserveCanvas = false,
 ): Promise<string> {
   const cutoutMode = getCutoutMode(providerId, type, model)
   if (!cutoutMode) return imageUrl
@@ -48,7 +49,7 @@ async function processImageCutout(
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl, type, cutoutMode }),
+        body: JSON.stringify({ imageUrl, type, cutoutMode, preserveCanvas, gridSize: preserveCanvas ? 6 : undefined }),
       },
     )
     const result = await response.json()
@@ -156,9 +157,10 @@ async function generatePlannedAsset(
         assetType: type,
         apiKey,
         model,
+        layout: asset.kind === 'spriteSheet' ? 'sprite-sheet' : 'single',
       })
       await validateGeneratedImage(originalUrl, providerId, model)
-      const processedUrl = await processImageCutout(originalUrl, type, providerId, model, baseUrl)
+      const processedUrl = await processImageCutout(originalUrl, type, providerId, model, baseUrl, asset.kind === 'spriteSheet')
       if (processedUrl !== originalUrl) await validateGeneratedImage(processedUrl, providerId, model)
       return processedUrl
     } catch (error) {

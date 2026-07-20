@@ -39,12 +39,14 @@ export type AssetKind = 'image' | 'spriteSheet' | 'audio' | 'runtime'
 export type AssetStatus = 'pending' | 'generating' | 'success' | 'failed' | 'cancelled'
 export type EnemyMobility = 'ground' | 'air' | 'water' | 'boss'
 export type PlatformMode = 'ground' | 'water' | 'air'
+export type AnimationPose = 'idle' | 'walk' | 'jump' | 'attack' | 'hit' | 'death'
 
 export interface AnimationSpec {
+  layoutVersion: 1 | 2
   columns: 6
-  rows: 5
+  rows: 5 | 6
   fps: number
-  states: Record<'idle' | 'move' | 'attack' | 'hit' | 'death', number>
+  states: Record<AnimationPose, number>
 }
 
 export interface SoundSpec {

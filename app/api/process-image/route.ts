@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { CutoutMode } from '@/lib/game-prompts'
 import {
+  padImageToGrid,
   removeCheckerboardBackground,
   removeChromaGreenBackground,
 } from '@/lib/image-cutout'
@@ -12,6 +13,8 @@ interface ProcessImageRequest {
   imageUrl: string
   type: AssetType
   cutoutMode?: CutoutMode
+  preserveCanvas?: boolean
+  gridSize?: number
 }
 
 async function downloadImage(url: string): Promise<Buffer> {
@@ -31,17 +34,17 @@ async function downloadImage(url: string): Promise<Buffer> {
   return Buffer.from(arrayBuffer)
 }
 
-async function applyCutout(imageBuffer: Buffer, cutoutMode: CutoutMode): Promise<Buffer> {
+async function applyCutout(imageBuffer: Buffer, cutoutMode: CutoutMode, preserveCanvas: boolean): Promise<Buffer> {
   if (cutoutMode === 'chroma-green') {
-    return removeChromaGreenBackground(imageBuffer)
+    return removeChromaGreenBackground(imageBuffer, preserveCanvas)
   }
-  return removeCheckerboardBackground(imageBuffer)
+  return removeCheckerboardBackground(imageBuffer, preserveCanvas)
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body: ProcessImageRequest = await request.json()
-    const { imageUrl, type, cutoutMode = 'checkerboard' } = body
+    const { imageUrl, type, cutoutMode = 'checkerboard', preserveCanvas = false, gridSize } = body
 
     if (!imageUrl || !type) {
       return NextResponse.json(
@@ -63,9 +66,12 @@ export async function POST(request: NextRequest) {
 
     let processedImageBuffer: Buffer
     if (type !== 'background' && type !== 'ground') {
-      processedImageBuffer = await applyCutout(originalImageBuffer, cutoutMode)
+      processedImageBuffer = await applyCutout(originalImageBuffer, cutoutMode, preserveCanvas)
     } else {
       processedImageBuffer = await sharp(originalImageBuffer).png().toBuffer()
+    }
+    if (preserveCanvas && gridSize && Number.isInteger(gridSize) && gridSize >= 2 && gridSize <= 12) {
+      processedImageBuffer = await padImageToGrid(processedImageBuffer, gridSize)
     }
 
     const base64Image = processedImageBuffer.toString('base64')
@@ -78,6 +84,8 @@ export async function POST(request: NextRequest) {
         processedUrl: dataUrl,
         type,
         cutoutMode,
+        preserveCanvas,
+        gridSize,
       },
       timestamp: new Date().toISOString(),
     })

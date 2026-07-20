@@ -154,7 +154,7 @@ export function buildPlannedAssetPrompt(
   const sharedStyle = style(spec)
   const requestedAsset = cleanPromptFragment(asset.prompt)
   if (asset.kind === 'spriteSheet') {
-    return `${COMMON_STYLE}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. This asset only: ${requestedAsset}. Create one exact 6-column by 5-row animation sprite sheet on ${isolationBackground(providerId, model)}. Row 1 idle animation, row 2 movement animation, row 3 attack animation, row 4 hit reaction, row 5 defeat animation. Exactly 30 equally sized cells, consistent character proportions and colors in every cell, full body visible, side view, no labels, no letters, no numbers, no grid lines, no scenery, no separate weapon, no extra character.`
+    return `${COMMON_STYLE}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. This asset only: ${requestedAsset}. Create one exact square 6-column by 6-row animation sprite sheet on ${isolationBackground(providerId, model)}. Row 1 standing idle, row 2 walking, row 3 jumping, row 4 attacking, row 5 hit reaction, row 6 defeat. Exactly 36 equally sized cells. Keep one identical original character in every cell with the same face, head, body proportions, costume, colors, side-view direction, camera scale and ground baseline. Every cell must show the complete body from the highest point of the head to the lowest point of the feet, with generous transparent-safe margin on all four sides. No cropped head, hair, feet, wings, weapon, or limbs. No labels, letters, numbers, grid lines, scenery, separate weapon, extra character, shadows crossing cell boundaries, or content spilling into adjacent cells.`
   }
   const base = getPositiveTemplate(generationType, providerId, model)
   return `${base}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. This asset only: ${requestedAsset}. Generate only this one category and never merge it with a character, scene, weapon, creature, platform, obstacle, projectile, pickup, or effect from another category.`
@@ -170,7 +170,7 @@ export function buildModerationSafePlannedAssetPrompt(
   const catalogPrompt = cleanPromptFragment(ASSET_CATALOG_BY_CATEGORY[asset.category]?.defaultPrompt || asset.prompt, 240)
   const base = getPositiveTemplate(generationType, providerId, model)
   if (asset.kind === 'spriteSheet') {
-    return `${COMMON_STYLE}. ${ORIGINALITY}. ${catalogPrompt}. One exact 6-column by 5-row side-view animation sprite sheet on ${isolationBackground(providerId, model)}. Rows: idle, movement, attack, hit reaction, defeat. Exactly 30 equal cells, one consistent original subject, full body visible, no names, no story, no text, no logo, no scenery, no extra subject.`
+    return `${COMMON_STYLE}. ${ORIGINALITY}. ${catalogPrompt}. One exact square 6-column by 6-row side-view animation sprite sheet on ${isolationBackground(providerId, model)}. Rows in order: standing idle, walking, jumping, attacking, hit reaction, defeat. Exactly 36 equal cells. One consistent original subject at a fixed camera scale and baseline, complete head-to-feet body visible with generous empty margin in every cell. No crop, no names, no story, no text, no logo, no scenery, no extra subject, and no content crossing cell boundaries.`
   }
   return `${base}. ${ORIGINALITY}. ${catalogPrompt}. Use a simple dark-neutral and cyan-orange pixel palette. One asset only, no names, no story, no text, no logo, no mixed categories.`
 }

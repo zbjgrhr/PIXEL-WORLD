@@ -108,6 +108,7 @@ async function trimTransparentBounds(imageBuffer: Buffer): Promise<Buffer> {
 async function cutoutWithMask(
   imageBuffer: Buffer,
   isBackground: (r: number, g: number, b: number) => boolean,
+  preserveCanvas = false,
 ): Promise<Buffer> {
   const image = sharp(imageBuffer)
   const { width, height } = await image.metadata()
@@ -125,13 +126,33 @@ async function cutoutWithMask(
     .png({ quality: 100, compressionLevel: 6 })
     .toBuffer()
 
-  return trimTransparentBounds(cutout)
+  return preserveCanvas ? cutout : trimTransparentBounds(cutout)
 }
 
-export async function removeCheckerboardBackground(imageBuffer: Buffer): Promise<Buffer> {
-  return cutoutWithMask(imageBuffer, isCheckerboardPixel)
+export async function removeCheckerboardBackground(imageBuffer: Buffer, preserveCanvas = false): Promise<Buffer> {
+  return cutoutWithMask(imageBuffer, isCheckerboardPixel, preserveCanvas)
 }
 
-export async function removeChromaGreenBackground(imageBuffer: Buffer): Promise<Buffer> {
-  return cutoutWithMask(imageBuffer, isChromaGreenPixel)
+export async function removeChromaGreenBackground(imageBuffer: Buffer, preserveCanvas = false): Promise<Buffer> {
+  return cutoutWithMask(imageBuffer, isChromaGreenPixel, preserveCanvas)
+}
+
+export async function padImageToGrid(imageBuffer: Buffer, gridSize: number): Promise<Buffer> {
+  const metadata = await sharp(imageBuffer).metadata()
+  if (!metadata.width || !metadata.height || gridSize < 2) return imageBuffer
+  const targetWidth = Math.ceil(metadata.width / gridSize) * gridSize
+  const targetHeight = Math.ceil(metadata.height / gridSize) * gridSize
+  const extraX = targetWidth - metadata.width
+  const extraY = targetHeight - metadata.height
+  if (!extraX && !extraY) return imageBuffer
+  return sharp(imageBuffer)
+    .extend({
+      left: Math.floor(extraX / 2),
+      right: Math.ceil(extraX / 2),
+      top: Math.floor(extraY / 2),
+      bottom: Math.ceil(extraY / 2),
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    })
+    .png({ quality: 100, compressionLevel: 6 })
+    .toBuffer()
 }

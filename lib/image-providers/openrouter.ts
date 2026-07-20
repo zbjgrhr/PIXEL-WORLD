@@ -28,7 +28,8 @@ function getOpenRouterHeaders(): Record<string, string> {
   }
 }
 
-function getAspectRatio(assetType: GenerateImageParams['assetType']): string {
+function getAspectRatio(assetType: GenerateImageParams['assetType'], layout?: GenerateImageParams['layout']): string {
+  if (layout === 'sprite-sheet') return '1:1'
   return assetType === 'background' ? '16:9' : '1:1'
 }
 
@@ -55,7 +56,7 @@ function buildImageRequestBody(
     return {
       ...commonBody,
       resolution: '2K',
-      aspect_ratio: getAspectRatio(params.assetType),
+      aspect_ratio: getAspectRatio(params.assetType, params.layout),
     }
   }
 

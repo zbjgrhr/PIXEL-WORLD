@@ -1,4 +1,4 @@
-import { ASSET_CATALOG, createAssetPlan } from '@/lib/asset-catalog'
+import { ASSET_CATALOG, createAssetPlan, normalizeAnimationSpec } from '@/lib/asset-catalog'
 import type {
   AssetCategory,
   AssetDefinition,
@@ -441,7 +441,7 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
       status,
       url: url || undefined,
       error: text(asset.error, '') || undefined,
-      animation: asset.animation || base.animation,
+      animation: base.kind === 'spriteSheet' ? normalizeAnimationSpec(asset.animation || base.animation) : undefined,
       sound: asset.sound || base.sound,
       motion: asset.motion || base.motion,
     }
