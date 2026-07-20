@@ -6,78 +6,88 @@ export interface PromptTemplate {
   prompt: string
 }
 
-export const PROMPT_TEMPLATES: PromptTemplate[] = [
-  {
-    id: 'pixel-world-odyssey',
-    name: 'Pixel World Odyssey · 龙之城堡五关冒险',
-    themeName: 'Pixel World Odyssey',
-    levelCount: 5,
-    prompt: `Epic fantasy pixel side-scroller world — cohesive 16-bit retro pixel art style, high contrast colors, hand-drawn texture, atmospheric lighting, unified color palette across all levels (deep teal shadows, warm orange highlights, mystical purple accents).
+export const PROMPT_TEMPLATES: PromptTemplate[] = [{
+  id: 'pixel-world-odyssey',
+  name: 'Pixel World Odyssey · 龙之城堡五关冒险',
+  themeName: '龙之城堡：余烬王冠',
+  levelCount: 5,
+  prompt: `游戏标题：龙之城堡：余烬王冠
+世界观与故事：古龙夺走维系王国四季的余烬王冠，五片领地被诅咒割裂。年轻骑士艾琳必须回收星火结晶、解除五座传送门，并在熔火圣殿击败赤焰古龙。
+整体像素风格：统一16-bit横版像素美术；深青阴影、暖橙高光、神秘紫色魔法点缀；清晰轮廓、左上方一致光源、适合平台动作游戏的高辨识度。
 
-═══ HERO / 主角 ═══
-A courageous young knight-errant, silver-blue armor with gold trim, flowing crimson cape, confident upright posture, facing right. Weapon: a glowing azure longsword with runic engravings along the blade, faint magical particle effects. Personality: brave, agile, determined explorer.
+主角 / Hero：银蓝铠甲、金色包边、深红披风的年轻骑士艾琳，持剑时面向右侧，勇敢敏捷。
+地面敌人 / Ground Enemy：石像守卫、骷髅剑士与暗精灵追猎者；造型逐关升级。
+地面敌人攻击特效：石屑冲击、锈红剑气和紫色毒刃闪光。
+地面敌人行动形态：巡逻、发现玩家后追击、近距离攻击。
+地面敌人攻击音效：短促石击与金属碰撞。
+地面敌人行动音效：沉重脚步与骨骼摩擦。
+空中敌人 / Air Enemy：红眼暗影蝙蝠与塔顶雷翼魔像。
+空中敌人攻击特效：紫黑俯冲轨迹与蓝紫闪电弹。
+空中敌人行动形态：悬停巡航、弧线飞行、锁定后俯冲。
+空中敌人攻击音效：尖锐破空与电弧爆裂。
+空中敌人行动音效：翅膀拍动与魔法脉冲。
+水中敌人 / Water Enemy：地下河中的盔甲鳗与水晶水妖。
+水中敌人攻击特效：气泡冲击和青蓝水刃。
+水中敌人行动形态：波浪游动、缓慢追踪、短距离冲刺。
+水中敌人攻击音效：低沉水爆。
+水中敌人行动音效：连续气泡与水流。
+BOSS：赤焰古龙，黑铁鳞甲、熔岩裂纹、巨大双翼，只在第五关出现。
+BOSS攻击特效：扇形火焰、落石警示圈、熔岩冲击波。
+BOSS行动形态：地面追击、升空吐息、半血狂暴三阶段。
+BOSS攻击音效：低频龙吼与火焰爆发。
+BOSS行动音效：重踏、振翅和鳞片摩擦。
+近战武器：符文长剑“晨星”，蔚蓝火焰刃口。
+远程武器：腕装星火弩，与长剑共享蓝金符文设计。
+近战攻击特效：紧凑蓝色新月剑气。
+近战攻击音效：清晰挥剑与金属命中。
+远程弹射物：细长蓝金星火箭矢，面向右侧。
+远程攻击/命中特效：弩口闪光、飞行尾迹和小型星火爆裂。
+远程攻击音效：短促弩弦、魔法发射与清脆命中。
+收集品：发光的六角星火结晶，收集后增强攻击力。
+地面平台：古老石砖家族，随关卡逐渐破损并转为火山岩。
+水域（低重力）：第三关地下河，进入后重力与下落速度降低。
+大气（漂浮）：第四关塔顶气流区，漂浮符文平台上下移动。
+触碰即死障碍物：尖刺、熔岩裂缝与龙焰喷口。
+弹跳障碍物：符文弹跳石与塔顶气流喷口。
+普通障碍物：倒塌石柱、铁栏、巨石和龙骨。
 
-═══ ENEMIES / 敌人 ═══
-Level 1 threats: small shadow bats with glowing red eyes, swooping attack pose.
-Level 2 threats: stone golem sentries with cracked granite bodies and glowing core, slow heavy stance.
-Level 3 threats: armored skeleton warriors with rusty iron swords and tattered capes.
-Level 4 threats: dark elf archers in purple hooded cloaks with enchanted bows.
-Level 5 BOSS: colossal ancient red dragon with spread wings, fire breath, menacing silhouette against stormy sky.
+关卡 1：诅咒城门
+背景：暮色庭院、破碎城墙、枯树、远处盘旋龙影，右端为发光城门。
+平台类型：地面。
+障碍物：倒塌石柱、普通障碍物和少量尖刺。
+出现素材：主角、地面敌人、空中敌人、近战和远程武器、收集品。
+背景音乐：92 BPM，低沉但带有冒险希望的三角波主题。
+天气/滤镜/闪光：薄雾、冷色滤镜、无强闪光。
 
-═══ WEAPONS & COMBAT STYLE / 武器与战斗 ═══
-Hero weapon: magic longsword (azure flame edge, holy light on strike).
-Enemy weapons: bat claws, golem stone fists, skeleton chipped swords, elf poison arrows, dragon fire breath.
-Combat mood: classic action-platformer — dodge, jump, strike. Threat escalates each level.
+关卡 2：回声王座厅
+背景：哥特立柱、破碎彩窗、褪色王旗、月光光束，右端为地下入口。
+平台类型：地面。
+障碍物：铁栏、王室瓮、弹跳符文石。
+出现素材：石像守卫、骷髅剑士、空中蝙蝠和收集品。
+背景音乐：104 BPM，庄严弦律与断续鼓点。
+天气/滤镜/闪光：尘埃粒子、轻微暖色高光。
 
-═══ LEVEL DESIGN — CONTINUOUS ADVENTURE / 连贯关卡叙事 ═══
-All levels form ONE connected journey through a cursed dragon kingdom. Each level is the next zone deeper into the realm. Visual progression: exterior → interior → underground → tower → lair. Ground texture and obstacle style stay consistent (ancient stone, moss, cracked tiles) while background atmosphere intensifies.
+关卡 3：遗忘地下河
+背景：滴水岩壁、发光菌类、锁链与地下河倒影。
+平台类型：水域低重力。
+障碍物：水中尖刺、湿滑巨石和弹跳气泡。
+出现素材：地面敌人、水中敌人、远程武器和收集品。
+背景音乐：112 BPM，低通滤波的水下脉冲。
+天气/滤镜/闪光：水下滤镜、气泡与雾气。
 
-LEVEL 1 — Cursed Castle Gate (Twilight exterior):
-Misty castle courtyard, crumbling stone walls, dead trees, torches flickering, dragon silhouette circling in storm clouds above. Mood: ominous but inviting. Obstacles: fallen stone pillars, broken statues.
+关卡 4：黑曜法师塔
+背景：悬浮书籍、奥术法阵、紫色雷电、窗外星空，右端为龙翼桥。
+平台类型：大气漂浮。
+障碍物：漂浮符文平台、晶体尖刺、魔法屏障。
+出现素材：暗精灵、雷翼魔像、全部武器和强化收集品。
+背景音乐：128 BPM，紧张琶音与雷电脉冲。
+天气/滤镜/闪光：星尘、紫色梦境滤镜、攻击时短闪光。
 
-LEVEL 2 — Grand Hall of Echoes (Castle interior):
-Massive throne hall, towering gothic pillars, faded royal banners, magical runes glowing on marble floor, shafts of moonlight through broken stained glass. Mood: majestic and eerie. Obstacles: iron fence segments, ancient urns.
-
-LEVEL 3 — Forgotten Dungeon Depths (Underground):
-Dark underground passage, dripping stone walls, bioluminescent fungi, rusted chains hanging from ceiling, underground river reflections. Mood: claustrophobic tension. Obstacles: spike traps, moss-covered boulders.
-
-LEVEL 4 — Wizard's Obsidian Tower (Ascending spiral):
-Mystical tower interior, floating magical books, arcane circles on floor, purple lightning crackling in air, starry void visible through windows. Mood: intense magical danger. Obstacles: crystal shards, enchanted barriers.
-
-LEVEL 5 — Dragon's Molten Sanctum (Final lair):
-Volcanic dragon lair, rivers of lava, mountains of gold treasure, ancient dragon altar, apocalyptic red-orange sky, epic boss arena atmosphere. Mood: ultimate climax and triumph. Obstacles: lava rock formations, dragon bone remains.
-
-═══ VISUAL CONSISTENCY RULES / 视觉统一 ═══
-- Same pixel art density and outline style across all assets
-- Character, ground, obstacles, and backgrounds share the same fantasy medieval palette
-- Each level background shows clear depth layers (foreground ruins, midground architecture, background sky/mountains)
-- Ground texture: ancient weathered stone tiles, seamless tileable, moss accents
-- Obstacles: theme-appropriate stone and magical objects, clear collision-friendly silhouettes
-- No modern elements, no sci-fi, no realistic 3D — pure 16-bit pixel game aesthetic throughout
-
-═══ LEVEL RICHNESS / 关卡丰富度（每关必须遵守）═══
-Each level background MUST include:
-- 3 clear depth layers: foreground ruins, midground architecture, background sky/mountains
-- Visible platform ledges at 2-3 different heights (suggest jump paths)
-- Environmental storytelling props: torches, banners, chains, crystals, lava glow, bones
-- A distinct "goal zone" on the far right (gate, portal, bridge, altar) as level exit
-
-Per-level obstacle theme (for ground + obstacle assets):
-LEVEL 1: fallen pillars, broken statues, cracked stone blocks
-LEVEL 2: iron fences, royal urns, carpet rolls, throne debris
-LEVEL 3: spike traps, moss boulders, hanging chains, flooded patches
-LEVEL 4: crystal shards, magic barriers, floating rune stones, bookshelf debris
-LEVEL 5: lava rocks, dragon bones, treasure chests, molten cracks
-
-Ground texture per level: same stone family but escalating decay —
-clean courtyard tiles → worn hall marble → wet dungeon stone → arcane tower floor → volcanic cracked rock
-
-Background must feel WIDER than screen — horizontal scrolling composition,
-extra content extending beyond left and right edges, parallax-ready layers.
-
-Difficulty curve: later levels feel denser and more dangerous visually.
-
-═══ STORY HOOK / 剧情引子 ═══
-The kingdom fell when the ancient dragon claimed the castle. Our hero must traverse five cursed zones, defeat escalating guardians, and reach the dragon's lair to restore the realm. Every step forward reveals deeper corruption — and greater courage.`,
-  },
-]
+关卡 5：巨龙熔火圣殿
+背景：熔岩河、龙骨、金山与末日红云，中央留出宽阔Boss战区域。
+平台类型：地面。
+障碍物：熔岩裂缝、龙焰喷口、弹跳热气流。
+出现素材：精英地面敌人、空中敌人、赤焰古龙、全部武器和星火结晶。
+背景音乐：144 BPM，锯齿波低音、战鼓节奏和胜利动机。
+天气/滤镜/闪光：余烬雨、危险暖色滤镜、Boss重击闪光。`,
+}]

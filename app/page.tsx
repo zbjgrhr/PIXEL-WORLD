@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Splitter, message } from 'antd'
 import { useGameStore } from '@/lib/store'
 import { buildVirtualGameData } from '@/lib/virtual-levels'
+import { buildGameDataFromSpec } from '@/lib/virtual-levels'
 import { ensureThemeSpec, getThemeSourcePrompt, isStoredTheme } from '@/lib/theme-migration'
 import { GameCanvas, SideMenu, ThemesList, ThemePreview } from '@/components/ui'
 import { PRESET_THEMES } from '@/configs'
@@ -13,6 +14,7 @@ import { loadImageApiPrefs, saveImageApiPrefs } from '@/lib/image-api-prefs'
 import { ASSET_TYPES } from '@/types'
 import type {
   AssetType,
+  AssetDefinition,
   GameData,
   GameTheme,
   GenerateImageRequest,
@@ -42,6 +44,7 @@ export default function Home() {
   const [showGameInterface, setShowGameInterface] = useState(false)
   const [themes, setThemes] = useState<Theme[]>([...PRESET_THEMES])
   const [regeneratingImages, setRegeneratingImages] = useState<RegeneratingImages>(EMPTY_REGENERATING)
+  const [regeneratingAssetIds, setRegeneratingAssetIds] = useState<string[]>([])
   const themesListRef = useRef<HTMLDivElement>(null)
   const [apiKey, setApiKey] = useState('')
   const [selectedProvider, setSelectedProvider] = useState<ProviderId>(getDefaultProvider())
@@ -213,6 +216,44 @@ export default function Home() {
     }
   }
 
+  const handleUpdateAsset = (themeId: string, assetId: string, patch: Partial<AssetDefinition>) => {
+    const current = getGameDataForTheme(themeId)
+    const theme = themes.find((item) => item.id === themeId)
+    const spec = current.data?.spec || theme?.spec
+    if (!spec) return
+    const nextSpec = { ...spec, assets: spec.assets.map((asset) => asset.id === assetId ? { ...asset, ...patch } : asset) }
+    updateTheme(themeId, (item) => ({ ...item, spec: nextSpec }))
+    const nextData = buildGameDataFromSpec(nextSpec)
+    setGameData(nextData, themeId)
+  }
+
+  const handleRegenerateAsset = async (themeId: string, assetId: string, key: string) => {
+    const theme = themes.find((item) => item.id === themeId)
+    const current = getGameDataForTheme(themeId)
+    const spec = current.data?.spec || theme?.spec
+    const asset = spec?.assets.find((item) => item.id === assetId)
+    if (!theme || !spec || !asset) return void message.error('没有找到需要重新生成的素材。')
+    if (!key.trim()) return void message.error('请先填写 API Key。')
+    setRegeneratingAssetIds((items) => [...items, assetId])
+    handleUpdateAsset(themeId, assetId, { status: 'generating', error: undefined })
+    try {
+      const levelIndex = Math.max(0, spec.levels.findIndex((level) => level.id === asset.levelIds[0]))
+      const response = await fetch('/api/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: spec.title, prompt: theme.description, provider: selectedProvider, model: selectedModel, apiKey: key.trim(), levelCount: spec.levels.length, spec, asset, levelIndex }),
+      })
+      const result = await response.json().catch(() => null)
+      if (!response.ok || !result?.success || !result.data?.asset?.url) throw new Error(formatGenerationError(result?.error || `HTTP ${response.status}`))
+      handleUpdateAsset(themeId, assetId, { ...result.data.asset, status: 'success', error: undefined })
+      message.success(`${asset.title} 已重新生成。`)
+    } catch (error) {
+      handleUpdateAsset(themeId, assetId, { status: 'failed', error: error instanceof Error ? error.message : 'Generation failed.' })
+      message.error(error instanceof Error ? error.message : '素材重新生成失败。')
+    } finally {
+      setRegeneratingAssetIds((items) => items.filter((id) => id !== assetId))
+    }
+  }
+
   const activeGameData = getGameDataForTheme(selectedTheme)
 
   return (
@@ -258,6 +299,9 @@ export default function Home() {
                   regeneratingImages={regeneratingImages}
                   apiKey={apiKey}
                   onRegenerateImage={handleRegenerateImage}
+                  regeneratingAssetIds={regeneratingAssetIds}
+                  onRegenerateAsset={handleRegenerateAsset}
+                  onUpdateAsset={handleUpdateAsset}
                   onDeleteTheme={handleDeleteTheme}
                 />
               </div>

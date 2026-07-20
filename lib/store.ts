@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import { createFallbackGameSpec, normalizeGameSpec } from '@/lib/game-spec'
 import { GameTheme, getThemeId, isCustomTheme, resolveValidTheme } from '@/lib/theme-utils'
 import { ASSET_TYPES } from '@/types'
+import { hydrateSpecAssets, stripLargeAssetUrls } from '@/lib/asset-db'
+import { buildGameDataFromSpec } from '@/lib/virtual-levels'
 import type { AssetType, GameData, LevelData, ObstacleData } from '@/types'
 
 export type { GameTheme } from '@/lib/theme-utils'
@@ -18,6 +20,32 @@ interface GroundTile {
 }
 
 type ProcessedImages = Record<string, Partial<Record<AssetType, string>>>
+
+const stripLargeUrl = (url: string | undefined) => url?.startsWith('data:') || url?.startsWith('blob:') ? '' : url || ''
+
+function stripGameData(gameData: GameData): GameData {
+  if (!gameData.data?.spec) return gameData
+  return {
+    ...gameData,
+    data: {
+      ...gameData.data,
+      characterUrl: stripLargeUrl(gameData.data.characterUrl),
+      enemyUrl: stripLargeUrl(gameData.data.enemyUrl),
+      weaponUrl: stripLargeUrl(gameData.data.weaponUrl),
+      projectileUrl: stripLargeUrl(gameData.data.projectileUrl),
+      attackEffectUrl: stripLargeUrl(gameData.data.attackEffectUrl),
+      collectibleUrl: stripLargeUrl(gameData.data.collectibleUrl),
+      bossUrl: stripLargeUrl(gameData.data.bossUrl),
+      levels: gameData.data.levels.map((level) => ({
+        ...level,
+        backgroundUrl: stripLargeUrl(level.backgroundUrl),
+        groundUrl: stripLargeUrl(level.groundUrl),
+        obstacleUrl: stripLargeUrl(level.obstacleUrl),
+      })),
+      spec: stripLargeAssetUrls(gameData.data.spec),
+    },
+  }
+}
 
 interface GameStore {
   gameState: GameState
@@ -229,10 +257,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
   saveToLocalStorage: () => {
     if (typeof window === 'undefined') return
     const state = get()
+    const sanitizedImages = Object.fromEntries(Object.entries(state.processedImages).map(([themeId, images]) => [
+      themeId,
+      Object.fromEntries(Object.entries(images).map(([type, url]) => [type, stripLargeUrl(url)])),
+    ]))
     localStorage.setItem('pixel-seed-game-data', JSON.stringify({
-      gameData: state.gameData,
-      gameDataByTheme: state.gameDataByTheme,
-      processedImages: state.processedImages,
+      gameData: stripGameData(state.gameData),
+      gameDataByTheme: Object.fromEntries(Object.entries(state.gameDataByTheme).map(([id, value]) => [id, stripGameData(value)])),
+      processedImages: sanitizedImages,
       selectedTheme: state.selectedTheme,
       customPrompt: state.customPrompt,
     }))
@@ -266,6 +298,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
         customPrompt: data.customPrompt || '',
         totalLevels: gameData.data?.levels?.length || 1,
       })
+      void Promise.all(Object.entries(gameDataByTheme).map(async ([themeId, value]) => {
+        if (!value.data?.spec) return [themeId, value] as const
+        const hydratedSpec = await hydrateSpecAssets(themeId, value.data.spec)
+        return [themeId, buildGameDataFromSpec(hydratedSpec)] as const
+      })).then((entries) => {
+        const hydratedByTheme = Object.fromEntries(entries)
+        const activeTheme = get().selectedTheme
+        set({
+          gameDataByTheme: hydratedByTheme,
+          gameData: hydratedByTheme[activeTheme] || get().gameData,
+          totalLevels: hydratedByTheme[activeTheme]?.data?.levels.length || get().totalLevels,
+        })
+      }).catch((error) => console.warn('Failed to restore cached assets:', error))
     } catch (error) {
       console.error('Failed to load saved game:', error)
     }

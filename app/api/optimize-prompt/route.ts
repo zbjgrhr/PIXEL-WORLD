@@ -14,7 +14,7 @@ interface OptimizeRequest {
   apiKey?: string
 }
 
-const SYSTEM_PROMPT = `You are a game-design prompt compiler. Convert the user's idea into one strict JSON GameSpec for a playable 2D side-scrolling pixel platform combat game.
+const SYSTEM_PROMPT = `You are a game-design prompt compiler. Convert the user's idea into one strict JSON GameSpec version 3 for a playable 2D side-scrolling pixel platform combat game.
 
 Rules:
 - Keep background, hero, enemy, weapon, ground, obstacle, projectile, attack effect, collectible, and boss visually separate.
@@ -22,7 +22,11 @@ Rules:
 - Preserve the user's theme and important creative choices.
 - Produce coherent art direction, palette, lighting, and pixel scale shared by all assets.
 - Write backgroundStory as a vivid 120-180 word game introduction with a clear conflict, the hero's goal, the collectible's importance, and the final boss. Do not describe UI or controls.
-- Every game includes melee and ranged combat, ordinary enemies, collectibles, projectiles, attack effects, and a final boss.
+- Preserve every non-empty user field verbatim in meaning. Only enrich fields that are blank or underspecified.
+- Keep the exact V3 keys from the schema example, including assets, levelIds, animation, sound, motion, music, effects, and platformMode.
+- Every game includes melee and ranged combat, ground enemies, optional air and water enemies, collectibles, projectiles, attack effects, procedural audio specifications, and at least one boss.
+- Image and spriteSheet assets use pending status unless a URL already exists. Audio and runtime assets use success status because they are synthesized locally.
+- Asset levelIds must reference real level ids. Level-specific backgrounds, music, and effects must each target exactly one level.
 - The final level hasBoss=true; earlier levels haveBoss=false.
 - Return JSON only, without markdown.`
 

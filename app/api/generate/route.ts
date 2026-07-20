@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { formatGenerationError, mapUpstreamHttpStatus } from '@/lib/format-generation-error'
-import { buildGamePrompt, getCutoutMode, getNegativeTemplate } from '@/lib/game-prompts'
+import { buildGamePrompt, buildPlannedAssetPrompt, getCutoutMode, getNegativeTemplate } from '@/lib/game-prompts'
+import { generationTypeForAsset } from '@/lib/asset-catalog'
 import { createFallbackGameSpec, normalizeGameSpec } from '@/lib/game-spec'
 import {
   getImageProvider,
@@ -11,7 +12,7 @@ import {
   UpstreamApiError,
 } from '@/lib/image-providers'
 import { ASSET_TYPES } from '@/types'
-import type { AssetType, GameSpec, LevelData, ProviderId, SpawnPoint } from '@/types'
+import type { AssetDefinition, AssetType, GameSpec, LevelData, ProviderId, SpawnPoint } from '@/types'
 
 interface GenerateRequest {
   theme: string
@@ -22,6 +23,8 @@ interface GenerateRequest {
   levelCount?: number
   apiKey?: string
   spec?: GameSpec
+  asset?: AssetDefinition
+  levelIndex?: number
 }
 
 const GLOBAL_ASSET_TYPES: AssetType[] = [
@@ -75,6 +78,77 @@ async function generateAsset(
     model,
   })
   return processImageCutout(originalUrl, type, providerId, model, baseUrl)
+}
+
+function isRetryable(error: unknown): boolean {
+  return error instanceof UpstreamApiError && (
+    error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500
+  )
+}
+
+async function validateGeneratedImage(url: string, providerId: ProviderId, model: string): Promise<void> {
+  const dataMatch = url.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\r\n]+)$/i)
+  if (dataMatch) {
+    const bytes = Buffer.from(dataMatch[2], 'base64')
+    if (bytes.length < 1024) throw new UpstreamApiError(providerId, model, 502, 'The provider returned empty or truncated image data.')
+    if (dataMatch[1].toLowerCase() === 'image/png' && bytes.length >= 24) {
+      const signature = bytes.subarray(0, 8).toString('hex')
+      const width = bytes.readUInt32BE(16)
+      const height = bytes.readUInt32BE(20)
+      if (signature !== '89504e470d0a1a0a' || width < 64 || height < 64) {
+        throw new UpstreamApiError(providerId, model, 502, `Invalid PNG result (${width}x${height}).`)
+      }
+    }
+    return
+  }
+  if (!/^https?:\/\//i.test(url)) throw new UpstreamApiError(providerId, model, 502, 'The provider returned an invalid image URL.')
+  let response = await fetch(url, { headers: { Range: 'bytes=0-2047' }, cache: 'no-store' })
+  if (!response.ok) response = await fetch(url, { cache: 'no-store' })
+  if (!response.ok) throw new UpstreamApiError(providerId, model, 502, `The generated image is not accessible (${response.status}).`)
+  const contentType = response.headers.get('content-type') || ''
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  if (!contentType.startsWith('image/') || bytes.length < 64) {
+    throw new UpstreamApiError(providerId, model, 502, 'The generated URL did not return valid image data.')
+  }
+}
+
+async function generatePlannedAsset(
+  providerId: ProviderId,
+  model: string,
+  apiKey: string,
+  asset: AssetDefinition,
+  theme: string,
+  spec: GameSpec,
+  levelIndex: number,
+  baseUrl: string,
+): Promise<string> {
+  const type = generationTypeForAsset(asset)
+  if (!type || (asset.kind !== 'image' && asset.kind !== 'spriteSheet')) {
+    throw new ProviderValidationError(`Asset ${asset.id} does not require image generation.`, providerId)
+  }
+  const provider = getImageProvider(providerId)
+  const prompt = buildPlannedAssetPrompt(asset, type, theme, spec, levelIndex, providerId, model)
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const originalUrl = await provider.generateImage({
+        prompt,
+        negativePrompt: getNegativeTemplate(type, providerId, model),
+        assetType: type,
+        apiKey,
+        model,
+      })
+      await validateGeneratedImage(originalUrl, providerId, model)
+      const processedUrl = await processImageCutout(originalUrl, type, providerId, model, baseUrl)
+      if (processedUrl !== originalUrl) await validateGeneratedImage(processedUrl, providerId, model)
+      return processedUrl
+    } catch (error) {
+      lastError = error
+      if (!isRetryable(error) || attempt === 2) throw error
+      await new Promise((resolve) => setTimeout(resolve, 700 * 2 ** attempt))
+    }
+  }
+  throw lastError
 }
 
 function spreadSpawns(prefix: string, count: number, start = 260, end = 850, y = 352): SpawnPoint[] {
@@ -158,6 +232,21 @@ export async function POST(request: NextRequest) {
     const fallback = createFallbackGameSpec(prompt, theme, levelCount)
     const spec = normalizeGameSpec(body.spec || fallback, fallback, levelCount)
     const baseUrl = request.nextUrl.origin
+
+    if (body.asset) {
+      const asset = spec.assets.find((candidate) => candidate.id === body.asset?.id) || body.asset
+      const levelIndex = Math.min(levelCount - 1, Math.max(0, body.levelIndex || 0))
+      const url = await generatePlannedAsset(
+        providerId, modelId, apiKey, asset, theme, spec, levelIndex, baseUrl,
+      )
+      return NextResponse.json({
+        success: true,
+        data: { asset: { ...asset, url, status: 'success', error: undefined }, spec },
+        generationId: `asset_${asset.id}_${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        metadata: { generationTime: (Date.now() - startedAt) / 1000, assetCount: 1, provider: providerId, model: modelId },
+      })
+    }
 
     const assets: Record<string, string> = {
       characterUrl: '', enemyUrl: '', weaponUrl: '', projectileUrl: '',

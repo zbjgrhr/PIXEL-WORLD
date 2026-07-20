@@ -20,6 +20,80 @@ export const ASSET_TYPES = [
 export type AssetType = (typeof ASSET_TYPES)[number]
 export type CombatMode = 'melee' | 'ranged' | 'hybrid'
 
+export const ASSET_CATEGORIES = [
+  'hero',
+  'groundEnemy', 'groundEnemyAttackEffect', 'groundEnemyMotion', 'groundEnemyAttackSound', 'groundEnemyMoveSound',
+  'airEnemy', 'airEnemyAttackEffect', 'airEnemyMotion', 'airEnemyAttackSound', 'airEnemyMoveSound',
+  'waterEnemy', 'waterEnemyAttackEffect', 'waterEnemyMotion', 'waterEnemyAttackSound', 'waterEnemyMoveSound',
+  'boss', 'bossAttackEffect', 'bossMotion', 'bossAttackSound', 'bossMoveSound',
+  'meleeWeapon', 'rangedWeapon', 'meleeAttackEffect', 'meleeAttackSound',
+  'rangedProjectile', 'rangedAttackEffect', 'rangedAttackSound',
+  'collectible',
+  'groundPlatform', 'waterPlatform', 'airPlatform',
+  'deathObstacle', 'bounceObstacle', 'normalObstacle',
+  'levelBackground', 'levelMusic', 'levelEffect',
+] as const
+
+export type AssetCategory = (typeof ASSET_CATEGORIES)[number]
+export type AssetKind = 'image' | 'spriteSheet' | 'audio' | 'runtime'
+export type AssetStatus = 'pending' | 'generating' | 'success' | 'failed' | 'cancelled'
+export type EnemyMobility = 'ground' | 'air' | 'water' | 'boss'
+export type PlatformMode = 'ground' | 'water' | 'air'
+
+export interface AnimationSpec {
+  columns: 6
+  rows: 5
+  fps: number
+  states: Record<'idle' | 'move' | 'attack' | 'hit' | 'death', number>
+}
+
+export interface SoundSpec {
+  waveform: OscillatorType
+  frequency: number
+  durationMs: number
+  volume: number
+  noise: number
+  pitchSweep: number
+}
+
+export interface MotionSpec {
+  mobility: EnemyMobility
+  pattern: 'patrol' | 'chase' | 'ranged' | 'hover' | 'dive' | 'swim' | 'phase'
+  amplitude: number
+  frequency: number
+}
+
+export interface AssetDefinition {
+  id: string
+  category: AssetCategory
+  title: string
+  prompt: string
+  enabled: boolean
+  levelIds: string[]
+  kind: AssetKind
+  status: AssetStatus
+  url?: string
+  error?: string
+  animation?: AnimationSpec
+  sound?: SoundSpec
+  motion?: MotionSpec
+}
+
+export interface MusicSpec {
+  tempo: number
+  rootFrequency: number
+  waveform: OscillatorType
+  scale: number[]
+  intensity: number
+}
+
+export interface LevelEffectSpec {
+  weather: 'none' | 'rain' | 'snow' | 'embers' | 'mist' | 'stars'
+  filter: 'none' | 'cold' | 'warm' | 'dream' | 'danger' | 'underwater'
+  flash: boolean
+  intensity: number
+}
+
 export interface VisualStyleSpec {
   artDirection: string
   palette: string
@@ -71,6 +145,7 @@ export interface CollectibleSpec {
 }
 
 export interface LevelSpec {
+  id: string
   name: string
   environment: string
   ground: string
@@ -78,10 +153,13 @@ export interface LevelSpec {
   enemyCount: number
   collectibleCount: number
   hasBoss: boolean
+  platformMode: PlatformMode
+  music: MusicSpec
+  effects: LevelEffectSpec
 }
 
 export interface GameSpec {
-  version: 2
+  version: 3
   title: string
   world: string
   backgroundStory: string
@@ -94,6 +172,7 @@ export interface GameSpec {
   projectile: string
   attackEffect: string
   levels: LevelSpec[]
+  assets: AssetDefinition[]
 }
 
 export interface Theme {
@@ -183,6 +262,8 @@ export interface GenerateImageRequest {
   levelCount?: number
   apiKey: string
   spec?: GameSpec
+  asset?: AssetDefinition
+  levelIndex?: number
 }
 
 export interface ThemeCustomizerProps {
@@ -225,6 +306,9 @@ export interface ThemePreviewProps {
   regeneratingImages?: RegeneratingImages
   apiKey?: string
   onRegenerateImage?: (themeId: string, imageType: AssetType, apiKey: string) => Promise<void>
+  regeneratingAssetIds?: string[]
+  onRegenerateAsset?: (themeId: string, assetId: string, apiKey: string) => Promise<void>
+  onUpdateAsset?: (themeId: string, assetId: string, patch: Partial<AssetDefinition>) => void
   onDeleteTheme?: (themeId: string) => void
 }
 

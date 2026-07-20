@@ -14,7 +14,7 @@ import {
 } from '@/lib/game-settings'
 import { loadImageApiPrefs } from '@/lib/image-api-prefs'
 import type { DisplaySize, GameSettings } from '@/lib/game-settings'
-import type { AssetType, GameCanvasProps, ObstacleData } from '@/types'
+import type { AssetCategory, AssetDefinition, AssetType, GameCanvasProps, ObstacleData } from '@/types'
 
 const { Title, Text } = Typography
 const PLAYER_WIDTH = 54
@@ -48,6 +48,8 @@ interface PlayerRuntime {
   invulnerableUntil: number
   meleeReadyAt: number
   rangedReadyAt: number
+  action: 'idle' | 'move' | 'attack' | 'hit' | 'death'
+  actionUntil: number
 }
 
 interface EnemyRuntime {
@@ -66,6 +68,12 @@ interface EnemyRuntime {
   lastShotAt: number
   ranged: boolean
   isBoss: boolean
+  assetId: string
+  mobility: 'ground' | 'air' | 'water' | 'boss'
+  baseY: number
+  phase: number
+  action: 'idle' | 'move' | 'attack' | 'hit' | 'death'
+  actionUntil: number
 }
 
 interface ProjectileRuntime {
@@ -92,6 +100,14 @@ interface EffectRuntime {
   y: number
   facing: 1 | -1
   expiresAt: number
+  kind: 'melee' | 'ranged' | 'impact' | 'enemy'
+  hostile?: boolean
+}
+
+interface RuntimeObstacle extends ObstacleData {
+  assetId?: string
+  baseY?: number
+  phase?: number
 }
 
 function intersects(
@@ -120,6 +136,36 @@ function fallbackSprite(label: string, color: string, size = 48) {
   )
 }
 
+function plannedSprite(
+  asset: AssetDefinition | undefined,
+  url: string,
+  state: 'idle' | 'move' | 'attack' | 'hit' | 'death',
+  tick: number,
+  alt: string,
+  style: CSSProperties,
+  fallback: ReactNode,
+) {
+  if (!url) return fallback
+  if (asset?.kind !== 'spriteSheet' || !asset.animation) {
+    return <img src={url} alt={alt} draggable={false} style={{ ...style, imageRendering: 'pixelated', userSelect: 'none', pointerEvents: 'none' }} />
+  }
+  const animation = asset.animation
+  const row = Math.max(0, animation.states[state])
+  const frame = Math.floor(tick / Math.max(2, Math.round(60 / animation.fps))) % animation.columns
+  const x = animation.columns > 1 ? frame / (animation.columns - 1) * 100 : 0
+  const y = animation.rows > 1 ? row / (animation.rows - 1) * 100 : 0
+  return <div role="img" aria-label={alt} style={{
+    ...style,
+    backgroundImage: `url("${url}")`,
+    backgroundSize: `${animation.columns * 100}% ${animation.rows * 100}%`,
+    backgroundPosition: `${x}% ${y}%`,
+    backgroundRepeat: 'no-repeat',
+    imageRendering: 'pixelated',
+    userSelect: 'none',
+    pointerEvents: 'none',
+  }} />
+}
+
 const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
   const {
     gameData,
@@ -141,7 +187,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
   const projectilesRef = useRef<ProjectileRuntime[]>([])
   const collectiblesRef = useRef<CollectibleRuntime[]>([])
   const effectsRef = useRef<EffectRuntime[]>([])
-  const obstaclesRef = useRef<ObstacleData[]>([])
+  const obstaclesRef = useRef<RuntimeObstacle[]>([])
   const scoreRef = useRef(0)
   const powerRef = useRef(1)
   const modeRef = useRef<GameMode>('playing')
@@ -168,22 +214,37 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
   }, [])
 
   const processed = getProcessedImagesForTheme(getThemeId(selectedTheme))
+  const levelSpec = spec?.levels[currentLevelIndex]
+  const plannedAssets = spec?.assets || []
+  const assetFor = useCallback((category: AssetCategory, levelId?: string) => plannedAssets.find((asset) =>
+    asset.enabled
+    && asset.category === category
+    && (!levelId || asset.levelIds.length === 0 || asset.levelIds.includes(levelId)),
+  ), [plannedAssets])
+  const assetById = useCallback((id: string) => plannedAssets.find((asset) => asset.id === id), [plannedAssets])
   const assets = useMemo(() => {
     const globalUrl = (type: Exclude<AssetType, 'background' | 'ground' | 'obstacle'>) =>
       processed[type] || data?.[`${type}Url`] || ''
     return {
-      character: globalUrl('character'),
-      enemy: globalUrl('enemy'),
-      weapon: globalUrl('weapon'),
-      projectile: globalUrl('projectile'),
-      attackEffect: globalUrl('attackEffect'),
-      collectible: globalUrl('collectible'),
-      boss: globalUrl('boss'),
-      background: processed.background || level?.backgroundUrl || '',
-      ground: processed.ground || level?.groundUrl || '',
-      obstacle: processed.obstacle || level?.obstacleUrl || '',
+      character: assetFor('hero', levelSpec?.id)?.url || globalUrl('character'),
+      enemy: assetFor('groundEnemy', levelSpec?.id)?.url || globalUrl('enemy'),
+      weapon: assetFor('meleeWeapon', levelSpec?.id)?.url || globalUrl('weapon'),
+      rangedWeapon: assetFor('rangedWeapon', levelSpec?.id)?.url || globalUrl('weapon'),
+      projectile: assetFor('rangedProjectile', levelSpec?.id)?.url || globalUrl('projectile'),
+      attackEffect: assetFor('meleeAttackEffect', levelSpec?.id)?.url || globalUrl('attackEffect'),
+      rangedEffect: assetFor('rangedAttackEffect', levelSpec?.id)?.url || globalUrl('attackEffect'),
+      enemyEffect: assetFor('groundEnemyAttackEffect', levelSpec?.id)?.url || globalUrl('attackEffect'),
+      collectible: assetFor('collectible', levelSpec?.id)?.url || globalUrl('collectible'),
+      boss: assetFor('boss', levelSpec?.id)?.url || globalUrl('boss'),
+      background: assetFor('levelBackground', levelSpec?.id)?.url || processed.background || level?.backgroundUrl || '',
+      ground: assetFor('groundPlatform', levelSpec?.id)?.url || processed.ground || level?.groundUrl || '',
+      water: assetFor('waterPlatform', levelSpec?.id)?.url || '',
+      air: assetFor('airPlatform', levelSpec?.id)?.url || '',
+      obstacle: assetFor('normalObstacle', levelSpec?.id)?.url || processed.obstacle || level?.obstacleUrl || '',
+      deathObstacle: assetFor('deathObstacle', levelSpec?.id)?.url || processed.obstacle || level?.obstacleUrl || '',
+      bounceObstacle: assetFor('bounceObstacle', levelSpec?.id)?.url || processed.obstacle || level?.obstacleUrl || '',
     }
-  }, [processed, data, level])
+  }, [assetFor, processed, data, level, levelSpec?.id])
 
   const displayPreset = DISPLAY_PRESETS[settings.displaySize]
   const stageHeight = displayPreset.stageHeight
@@ -239,7 +300,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
     const playNote = () => {
       if (context.state !== 'running') return
-      const notes = [130.81, 164.81, 196, 246.94, 196, 164.81, 146.83, 196]
+      const music = levelSpec?.music
+      const root = music?.rootFrequency || 130.81
+      const scale = music?.scale?.length ? music.scale : [0, 4, 7, 11, 7, 4, 2, 7]
+      const notes = scale.map((semitones) => root * 2 ** (semitones / 12))
       const frequency = notes[musicStepRef.current % notes.length] * (1 + currentLevelIndex * 0.015)
       musicStepRef.current += 1
       const oscillator = context.createOscillator()
@@ -255,8 +319,29 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       oscillator.stop(context.currentTime + 0.8)
     }
     playNote()
-    musicTimerRef.current = window.setInterval(playNote, 720)
-  }, [currentLevelIndex])
+    const tempo = Math.max(45, Math.min(180, levelSpec?.music.tempo || 84))
+    musicTimerRef.current = window.setInterval(playNote, Math.round(60000 / tempo))
+  }, [currentLevelIndex, levelSpec?.music])
+
+  const playEffectSound = useCallback((asset: AssetDefinition | undefined, fallbackPitch = 440) => {
+    const context = musicContextRef.current
+    const master = musicGainRef.current
+    if (!context || !master || context.state !== 'running' || !settingsRef.current.musicEnabled) return
+    const sound = asset?.sound
+    const duration = Math.max(0.05, Math.min(1.2, sound?.durationMs ? sound.durationMs / 1000 : 0.15))
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    oscillator.type = sound?.waveform || 'square'
+    oscillator.frequency.setValueAtTime(sound?.frequency || fallbackPitch, context.currentTime)
+    oscillator.frequency.exponentialRampToValueAtTime(Math.max(40, (sound?.frequency || fallbackPitch) + (sound?.pitchSweep || -fallbackPitch * 0.38)), context.currentTime + duration)
+    gain.gain.setValueAtTime(0.0001, context.currentTime)
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.025, (sound?.volume || 0.45) * 0.22), context.currentTime + 0.012)
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + duration)
+    oscillator.connect(gain)
+    gain.connect(master)
+    oscillator.start()
+    oscillator.stop(context.currentTime + duration + 0.02)
+  }, [])
 
   useEffect(() => {
     settingsRef.current = settings
@@ -311,6 +396,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       invulnerableUntil: 0,
       meleeReadyAt: 0,
       rangedReadyAt: 0,
+      action: 'idle',
+      actionUntil: 0,
     }
     obstaclesRef.current = (level.obstacles || []).map((obstacle, index) => {
       const width = Math.max(42, Math.min(80, obstacle.width || 48))
@@ -323,8 +410,24 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         height,
         x: Math.max(150, Math.min(maxX, obstacle.x || 220 + index * 100)),
         y: groundTop - height,
+        assetId: assetFor(obstacle.type as AssetCategory, levelSpec?.id)?.id,
+        baseY: groundTop - height,
+        phase: index * 0.8,
       }
     })
+    if (levelSpec?.platformMode === 'air' && assetFor('airPlatform', levelSpec.id)?.enabled) {
+      obstaclesRef.current.push(...Array.from({ length: 3 }, (_, index): RuntimeObstacle => ({
+        id: `air-platform-${index}`,
+        x: 250 + index * 235,
+        y: groundTop - 115 - (index % 2) * 65,
+        baseY: groundTop - 115 - (index % 2) * 65,
+        width: 130,
+        height: 32,
+        type: 'airPlatform',
+        assetId: assetFor('airPlatform', levelSpec.id)?.id,
+        phase: index * 1.3,
+      })))
+    }
     const enemySpec = spec.enemies[0]
     const spawns = level.enemySpawns?.length
       ? level.enemySpawns
@@ -334,23 +437,35 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           y: groundTop - ENEMY_HEIGHT,
           kind: 'enemy',
         }))
-    enemiesRef.current = spawns.map((spawn, index): EnemyRuntime => ({
-      id: spawn.id,
-      x: Math.max(220, Math.min(exitX - 120, spawn.x)),
-      y: groundTop - ENEMY_HEIGHT,
-      width: ENEMY_WIDTH,
-      height: ENEMY_HEIGHT,
-      health: enemySpec.health + currentLevelIndex * 8,
-      maxHealth: enemySpec.health + currentLevelIndex * 8,
-      damage: enemySpec.damage + currentLevelIndex * 2,
-      speed: enemySpec.speed + currentLevelIndex * 0.08,
-      direction: index % 2 ? -1 : 1,
-      patrolMin: Math.max(150, spawn.x - 100),
-      patrolMax: Math.min(worldWidth - 100, spawn.x + 100),
-      lastShotAt: 0,
-      ranged: enemySpec.behavior === 'ranged' || index % 3 === 2,
-      isBoss: false,
-    }))
+    enemiesRef.current = spawns.map((spawn, index): EnemyRuntime => {
+      const asset = assetById(spawn.kind) || assetFor('groundEnemy', levelSpec?.id)
+      const mobility = asset?.motion?.mobility || (asset?.category === 'airEnemy' ? 'air' : asset?.category === 'waterEnemy' ? 'water' : 'ground')
+      const baseY = mobility === 'air' ? groundTop - 175 - (index % 2) * 45 : mobility === 'water' ? groundTop - 74 : groundTop - ENEMY_HEIGHT
+      const healthValue = enemySpec.health + currentLevelIndex * 8
+      return {
+        id: spawn.id,
+        x: Math.max(220, Math.min(exitX - 120, spawn.x)),
+        y: baseY,
+        width: ENEMY_WIDTH,
+        height: ENEMY_HEIGHT,
+        health: healthValue,
+        maxHealth: healthValue,
+        damage: enemySpec.damage + currentLevelIndex * 2,
+        speed: enemySpec.speed + currentLevelIndex * 0.08,
+        direction: index % 2 ? -1 : 1,
+        patrolMin: Math.max(150, spawn.x - 100),
+        patrolMax: Math.min(worldWidth - 100, spawn.x + 100),
+        lastShotAt: 0,
+        ranged: enemySpec.behavior === 'ranged' || mobility !== 'ground' || index % 3 === 2,
+        isBoss: false,
+        assetId: asset?.id || spawn.kind,
+        mobility,
+        baseY,
+        phase: index * 1.15,
+        action: 'move',
+        actionUntil: 0,
+      }
+    })
     if (level.bossSpawn) {
       enemiesRef.current.push({
         id: level.bossSpawn.id,
@@ -368,6 +483,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         lastShotAt: 0,
         ranged: true,
         isBoss: true,
+        assetId: level.bossSpawn.kind,
+        mobility: 'boss',
+        baseY: groundTop - 94,
+        phase: 0,
+        action: 'move',
+        actionUntil: 0,
       })
     }
     collectiblesRef.current = (level.collectibleSpawns || []).map((spawn) => ({
@@ -385,7 +506,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     const timer = window.setTimeout(() => setBanner(''), 1500)
     setRenderTick((value) => value + 1)
     return () => window.clearTimeout(timer)
-  }, [currentLevelIndex, data, exitX, groundTop, level, setMode, spec, worldWidth])
+  }, [assetById, assetFor, currentLevelIndex, data, exitX, groundTop, level, levelSpec, setMode, spec, worldWidth])
 
   useEffect(() => initializeLevel(), [initializeLevel])
 
@@ -396,6 +517,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
   const damageEnemy = useCallback((enemy: EnemyRuntime, damage: number) => {
     if (enemy.health <= 0) return
     enemy.health -= Math.round(damage * powerRef.current)
+    enemy.action = enemy.health <= 0 ? 'death' : 'hit'
+    enemy.actionUntil = performance.now() + (enemy.health <= 0 ? 360 : 180)
     if (enemy.health <= 0) awardEnemy(enemy)
   }, [awardEnemy])
 
@@ -407,6 +530,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     const now = performance.now()
     if (now < player.meleeReadyAt) return
     player.meleeReadyAt = now + currentSpec.weapon.cooldownMs
+    player.action = 'attack'
+    player.actionUntil = now + 220
     const hitbox = {
       x: player.facing === 1 ? player.x + player.width - 4 : player.x - 88,
       y: player.y - 4,
@@ -422,8 +547,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       y: hitbox.y,
       facing: player.facing,
       expiresAt: now + 180,
+      kind: 'melee',
     })
-  }, [damageEnemy, gameData.data?.spec, startMusic])
+    playEffectSound(assetFor('meleeAttackSound', levelSpec?.id), 180)
+  }, [assetFor, damageEnemy, gameData.data?.spec, levelSpec?.id, playEffectSound, startMusic])
 
   const rangedAttack = useCallback(() => {
     void startMusic()
@@ -433,9 +560,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     const now = performance.now()
     if (now < player.rangedReadyAt) return
     player.rangedReadyAt = now + Math.max(240, currentSpec.weapon.cooldownMs * 1.2)
+    player.action = 'attack'
+    player.actionUntil = now + 240
+    const muzzleX = player.facing === 1 ? player.x + player.width : player.x - 32
     projectilesRef.current.push({
       id: `player-shot-${Date.now()}`,
-      x: player.facing === 1 ? player.x + player.width : player.x - 24,
+      x: muzzleX,
       y: player.y + 24,
       width: 24,
       height: 16,
@@ -443,7 +573,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       damage: currentSpec.weapon.rangedDamage,
       hostile: false,
     })
-  }, [gameData.data?.spec, startMusic])
+    effectsRef.current.push({
+      id: `muzzle-${Date.now()}`,
+      x: muzzleX,
+      y: player.y + 6,
+      facing: player.facing,
+      expiresAt: now + 160,
+      kind: 'ranged',
+    })
+    playEffectSound(assetFor('rangedAttackSound', levelSpec?.id), 620)
+  }, [assetFor, gameData.data?.spec, levelSpec?.id, playEffectSound, startMusic])
 
   const damagePlayer = useCallback((damage: number) => {
     const player = playerRef.current
@@ -451,6 +590,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     const now = performance.now()
     if (now < player.invulnerableUntil) return
     player.health = Math.max(0, player.health - damage)
+    player.action = player.health <= 0 ? 'death' : 'hit'
+    player.actionUntil = now + (player.health <= 0 ? 500 : 240)
     player.invulnerableUntil = now + 850
     if (player.health <= 0) setMode('dead')
   }, [setMode])
@@ -510,6 +651,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       last = now
       const player = playerRef.current
       if (modeRef.current === 'playing' && player) {
+        if (now >= player.actionUntil) player.action = Math.abs(player.vx) > 0.1 ? 'move' : 'idle'
+        obstaclesRef.current.forEach((obstacle) => {
+          if (obstacle.type === 'airPlatform' && obstacle.baseY !== undefined) {
+            obstacle.y = obstacle.baseY + Math.sin(now / 850 + (obstacle.phase || 0)) * 18
+          }
+        })
         const moveLeft = keysRef.current.has('a') || keysRef.current.has('arrowleft')
         const moveRight = keysRef.current.has('d') || keysRef.current.has('arrowright')
         const jump = keysRef.current.has(' ') || keysRef.current.has('w') || keysRef.current.has('arrowup')
@@ -522,10 +669,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
         let nextX = Math.max(0, Math.min(worldWidth - player.width, player.x + player.vx * delta))
         const horizontalBox = { ...player, x: nextX }
-        if (obstaclesRef.current.some((obstacle) => intersects(horizontalBox, obstacle))) nextX = player.x
+        const horizontalHit = obstaclesRef.current.find((obstacle) => intersects(horizontalBox, obstacle))
+        if (horizontalHit?.type === 'deathObstacle') damagePlayer(player.maxHealth)
+        else if (horizontalHit) nextX = player.x
         player.x = nextX
 
-        player.vy += 0.82 * delta
+        const gravityScale = levelSpec?.platformMode === 'water' ? 0.34 : levelSpec?.platformMode === 'air' ? 0.68 : 1
+        player.vy += 0.82 * gravityScale * delta
         let nextY = player.y + player.vy * delta
         player.onGround = false
         if (nextY + player.height >= groundTop) {
@@ -537,9 +687,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           for (const obstacle of obstaclesRef.current) {
             const overlapsX = player.x + player.width > obstacle.x && player.x < obstacle.x + obstacle.width
             if (overlapsX && previousBottom <= obstacle.y + 7 && nextY + player.height >= obstacle.y) {
-              nextY = obstacle.y - player.height
-              player.vy = 0
-              player.onGround = true
+              if (obstacle.type === 'deathObstacle') {
+                damagePlayer(player.maxHealth)
+              } else if (obstacle.type === 'bounceObstacle') {
+                nextY = obstacle.y - player.height
+                player.vy = -spec.hero.jumpPower * 1.35
+                player.onGround = false
+              } else {
+                nextY = obstacle.y - player.height
+                player.vy = 0
+                player.onGround = true
+              }
               break
             }
           }
@@ -548,17 +706,27 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
         enemiesRef.current.forEach((enemy) => {
           if (enemy.health <= 0) return
+          if (now >= enemy.actionUntil) enemy.action = 'move'
           const distance = player.x - enemy.x
           if (Math.abs(distance) < (enemy.isBoss ? 480 : 300)) enemy.direction = distance >= 0 ? 1 : -1
           else if (enemy.x <= enemy.patrolMin) enemy.direction = 1
           else if (enemy.x >= enemy.patrolMax) enemy.direction = -1
-          enemy.x = Math.max(120, Math.min(exitX - enemy.width - 32, enemy.x + enemy.speed * enemy.direction * delta))
-          enemy.y = groundTop - enemy.height
+          const speedScale = enemy.mobility === 'water' ? 0.72 : enemy.mobility === 'air' ? 1.12 : 1
+          enemy.x = Math.max(120, Math.min(exitX - enemy.width - 32, enemy.x + enemy.speed * speedScale * enemy.direction * delta))
+          if (enemy.mobility === 'air') {
+            const hover = Math.sin(now / 520 + enemy.phase) * 34
+            const dive = Math.abs(distance) < 190 ? Math.min(80, Math.max(0, 190 - Math.abs(distance)) * 0.42) : 0
+            enemy.y = Math.max(54, Math.min(groundTop - enemy.height - 24, enemy.baseY + hover + dive))
+          } else if (enemy.mobility === 'water') {
+            enemy.y = Math.min(groundTop - enemy.height * 0.45, enemy.baseY + Math.sin(now / 630 + enemy.phase) * 22)
+          } else enemy.y = groundTop - enemy.height
 
           if (intersects(player, enemy)) damagePlayer(enemy.damage)
           const shotDelay = enemy.isBoss ? 1050 : 2200
           if (enemy.ranged && Math.abs(distance) < 520 && now - enemy.lastShotAt > shotDelay) {
             enemy.lastShotAt = now
+            enemy.action = 'attack'
+            enemy.actionUntil = now + 260
             projectilesRef.current.push({
               id: `enemy-shot-${enemy.id}-${Date.now()}`,
               x: enemy.x + enemy.width / 2,
@@ -569,6 +737,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
               damage: enemy.isBoss ? Math.round(enemy.damage * 0.75) : Math.round(enemy.damage * 0.6),
               hostile: true,
             })
+            const category: AssetCategory = enemy.isBoss
+              ? 'bossAttackSound'
+              : enemy.mobility === 'air'
+                ? 'airEnemyAttackSound'
+                : enemy.mobility === 'water'
+                  ? 'waterEnemyAttackSound'
+                  : 'groundEnemyAttackSound'
+            playEffectSound(assetFor(category, levelSpec?.id), enemy.isBoss ? 90 : 240)
           }
         })
 
@@ -577,12 +753,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           if (shot.hostile) {
             if (intersects(shot, player)) {
               damagePlayer(shot.damage)
+              effectsRef.current.push({ id: `enemy-impact-${shot.id}`, x: shot.x - 22, y: shot.y - 24, facing: shot.vx >= 0 ? 1 : -1, expiresAt: now + 180, kind: 'impact', hostile: true })
               shot.x = -9999
             }
           } else {
             const target = enemiesRef.current.find((enemy) => enemy.health > 0 && intersects(shot, enemy))
             if (target) {
               damageEnemy(target, shot.damage)
+              effectsRef.current.push({ id: `impact-${shot.id}`, x: target.x - 16, y: target.y - 12, facing: shot.vx >= 0 ? 1 : -1, expiresAt: now + 180, kind: 'impact' })
               shot.x = -9999
             }
           }
@@ -621,7 +799,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     return () => {
       if (animationRef.current) cancelAnimationFrame(animationRef.current)
     }
-  }, [damageEnemy, damagePlayer, data, enterExit, exitX, exitY, groundTop, level, spec, worldWidth])
+  }, [assetFor, damageEnemy, damagePlayer, data, enterExit, exitX, exitY, groundTop, level, levelSpec?.id, levelSpec?.platformMode, playEffectSound, spec, worldWidth])
 
   const restartCampaign = () => {
     scoreRef.current = 0
@@ -716,7 +894,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     )
   }
 
-  void renderTick
   const player = playerRef.current
   const cameraX = player ? Math.max(0, Math.min(worldWidth - viewportWidth, player.x - viewportWidth * 0.42)) : 0
   const boss = enemiesRef.current.find((enemy) => enemy.isBoss)
@@ -731,6 +908,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
   const renderImage = (url: string, alt: string, style: CSSProperties, fallback: ReactNode) =>
     url ? <img src={url} alt={alt} draggable={false} style={{ ...style, imageRendering: 'pixelated', userSelect: 'none', pointerEvents: 'none' }} /> : fallback
+  const heroAsset = assetFor('hero', levelSpec?.id)
+  const meleeWeaponAsset = assetFor('meleeWeapon', levelSpec?.id)
+  const rangedWeaponAsset = assetFor('rangedWeapon', levelSpec?.id)
+  const weather = levelSpec?.effects.weather || ''
+  const effectFilters: Record<string, string> = {
+    none: '', cold: 'saturate(.9) hue-rotate(12deg)', warm: 'sepia(.18) saturate(1.18)',
+    dream: 'saturate(1.16) brightness(1.05)', danger: 'sepia(.2) saturate(1.35) hue-rotate(-12deg)',
+    underwater: 'saturate(.86) hue-rotate(16deg) brightness(.9)',
+  }
+  const levelFilter = effectFilters[levelSpec?.effects.filter || 'none'] || ''
+  const filterStyle = `${getGraphicsFilter(settings.graphicsQuality)} ${levelFilter}`.trim()
 
   return (
     <>
@@ -786,9 +974,38 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           backgroundSize: 'cover',
           backgroundPosition: `${50 - cameraX / worldWidth * 14}% center`,
           imageRendering: 'pixelated',
+          filter: levelFilter,
         }} />
 
-        <div style={{ position: 'absolute', width: worldWidth, height: stageHeight, transform: `translateX(${-cameraX}px)`, willChange: 'transform', filter: getGraphicsFilter(settings.graphicsQuality) }}>
+        {levelSpec?.platformMode === 'water' && <div style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: '46%',
+          backgroundImage: assets.water ? `linear-gradient(rgba(0,132,180,.38), rgba(0,42,92,.68)), url("${assets.water}")` : 'linear-gradient(rgba(0,140,190,.3), rgba(0,38,90,.72))',
+          backgroundSize: '180px 90px',
+          opacity: 0.78,
+          pointerEvents: 'none',
+          animation: 'waterDrift 5s linear infinite',
+          zIndex: 1,
+        }} />}
+
+        {weather && weather !== 'none' && <div aria-label={`Weather effect: ${weather}`} style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 9 }}>
+          {Array.from({ length: 22 }, (_, index) => <i key={index} style={{
+            position: 'absolute',
+            left: `${(index * 47) % 100}%`,
+            top: `${-10 - (index % 5) * 14}%`,
+            width: weather.includes('snow') ? 5 : 2,
+            height: weather.includes('snow') ? 5 : 28,
+            borderRadius: weather.includes('snow') ? '50%' : 2,
+            background: weather.includes('ash') ? '#b4a49a' : weather.includes('snow') ? '#fff' : '#7fd7ff',
+            opacity: 0.72,
+            animation: `weatherFall ${1.8 + (index % 6) * 0.34}s linear ${-(index % 7) * 0.25}s infinite`,
+          }} />)}
+        </div>}
+
+        <div style={{ position: 'absolute', width: worldWidth, height: stageHeight, transform: `translateX(${-cameraX}px)`, willChange: 'transform', filter: filterStyle, zIndex: 2 }}>
           <div style={{
             position: 'absolute',
             left: 0,
@@ -801,11 +1018,20 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
             borderTop: '4px solid rgba(220,255,145,.75)',
           }} />
 
-          {obstaclesRef.current.map((obstacle) => (
+          {obstaclesRef.current.map((obstacle) => {
+            const obstacleAsset = obstacle.assetId ? assetById(obstacle.assetId) : undefined
+            const obstacleUrl = obstacle.type === 'deathObstacle'
+              ? assets.deathObstacle
+              : obstacle.type === 'bounceObstacle'
+                ? assets.bounceObstacle
+                : obstacle.type === 'airPlatform'
+                  ? assets.air
+                  : assets.obstacle
+            return (
             <div key={obstacle.id} style={{ position: 'absolute', left: obstacle.x, top: obstacle.y, width: obstacle.width, height: obstacle.height }}>
-              {renderImage(assets.obstacle, 'Obstacle', { width: '100%', height: '100%', objectFit: 'contain' }, fallbackSprite('BLOCK', '#6d4c41', obstacle.width))}
+              {renderImage(obstacleAsset?.url || obstacleUrl, obstacle.type, { width: '100%', height: '100%', objectFit: 'contain' }, fallbackSprite(obstacle.type === 'deathObstacle' ? 'SPIKE' : obstacle.type === 'bounceObstacle' ? 'BOUNCE' : 'BLOCK', obstacle.type === 'deathObstacle' ? '#a42036' : obstacle.type === 'bounceObstacle' ? '#8e44ad' : '#6d4c41', obstacle.width))}
             </div>
-          ))}
+          )})}
 
           {collectiblesRef.current.filter((item) => !item.collected).map((item) => (
             <div key={item.id} style={{ position: 'absolute', left: item.x, top: item.y, width: 36, height: 36, filter: 'drop-shadow(0 0 8px #77f7ff)', animation: 'pulse 1s infinite alternate' }}>
@@ -813,22 +1039,28 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
             </div>
           ))}
 
-          {enemiesRef.current.map((enemy) => (
+          {enemiesRef.current.map((enemy) => {
+            const enemyAsset = assetById(enemy.assetId) || assetFor(enemy.isBoss ? 'boss' : enemy.mobility === 'air' ? 'airEnemy' : enemy.mobility === 'water' ? 'waterEnemy' : 'groundEnemy', levelSpec?.id)
+            const enemyUrl = enemyAsset?.url || (enemy.isBoss ? assets.boss : assets.enemy)
+            return (
             <div key={enemy.id} style={{ position: 'absolute', left: enemy.x, top: enemy.y, width: enemy.width, height: enemy.height }}>
               <div style={{ position: 'absolute', left: 0, top: -9, width: '100%', height: 5, background: '#2b2030', borderRadius: 3 }}>
                 <div style={{ width: `${Math.max(0, enemy.health / enemy.maxHealth * 100)}%`, height: '100%', background: enemy.isBoss ? '#ff375f' : '#ff7547', borderRadius: 3 }} />
               </div>
-              {renderImage(
-                enemy.isBoss ? assets.boss : assets.enemy,
+              {plannedSprite(
+                enemyAsset,
+                enemyUrl,
+                enemy.action,
+                renderTick,
                 enemy.isBoss ? spec.boss.name : spec.enemies[0].name,
                 { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${enemy.direction === 1 ? -1 : 1})`, filter: 'drop-shadow(0 5px 3px rgba(0,0,0,.55))' },
                 fallbackSprite(enemy.isBoss ? 'BOSS' : 'ENEMY', enemy.isBoss ? '#8e2145' : '#9b3a32', enemy.width),
               )}
             </div>
-          ))}
+          )})}
 
           {projectilesRef.current.map((shot) => (
-            <div key={shot.id} style={{ position: 'absolute', left: shot.x, top: shot.y, width: shot.width, height: shot.height, filter: shot.hostile ? 'hue-rotate(150deg) drop-shadow(0 0 6px #ff3b64)' : 'drop-shadow(0 0 6px #6ee7ff)' }}>
+            <div key={shot.id} data-testid="game-projectile" data-hostile={shot.hostile ? 'true' : 'false'} style={{ position: 'absolute', left: shot.x, top: shot.y, width: shot.width, height: shot.height, filter: shot.hostile ? 'hue-rotate(150deg) drop-shadow(0 0 6px #ff3b64)' : 'drop-shadow(0 0 6px #6ee7ff)' }}>
               {renderImage(assets.projectile, 'Projectile', { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${shot.vx < 0 ? -1 : 1})` }, fallbackSprite('•', shot.hostile ? '#ff365e' : '#1fb7f2', shot.width))}
             </div>
           ))}
@@ -840,7 +1072,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           ))}
 
           {player && (
-            <div style={{
+            <div data-testid="game-player" data-action={player.action} style={{
               position: 'absolute',
               left: player.x,
               top: player.y,
@@ -849,9 +1081,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
               opacity: performance.now() < player.invulnerableUntil && Math.floor(performance.now() / 80) % 2 ? 0.35 : 1,
               filter: 'drop-shadow(0 5px 3px rgba(0,0,0,.6))',
             }}>
-              {renderImage(assets.character, spec.hero.name, { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${player.facing})` }, fallbackSprite('HERO', '#2664c9', 54))}
+              {plannedSprite(heroAsset, assets.character, player.action, renderTick, spec.hero.name, { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${player.facing})` }, fallbackSprite('HERO', '#2664c9', 54))}
               <div style={{ position: 'absolute', left: player.facing === 1 ? 34 : -14, top: 25, width: 34, height: 20 }}>
-                {renderImage(assets.weapon, spec.weapon.name, { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${player.facing}) rotate(${player.facing === 1 ? -10 : 10}deg)` }, null)}
+                {renderImage(player.action === 'attack' && assets.rangedWeapon ? rangedWeaponAsset?.url || assets.rangedWeapon : meleeWeaponAsset?.url || assets.weapon, spec.weapon.name, { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${player.facing}) rotate(${player.facing === 1 ? -10 : 10}deg)` }, null)}
               </div>
             </div>
           )}
@@ -913,8 +1145,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           >Jump</Button>
         </div>
         <div style={{ position: 'absolute', right: 16, bottom: 14, display: 'flex', gap: 8, zIndex: 12 }}>
-          <Button danger size="large" icon={<Swords size={17} />} onPointerDown={meleeAttack}>Slash</Button>
-          <Button type="primary" size="large" icon={<Crosshair size={17} />} onPointerDown={rangedAttack}>Shoot</Button>
+          <Button danger size="large" icon={<Swords size={17} />} onClick={meleeAttack}>Slash</Button>
+          <Button type="primary" size="large" icon={<Crosshair size={17} />} onClick={rangedAttack}>Shoot</Button>
         </div>
       </div>
 

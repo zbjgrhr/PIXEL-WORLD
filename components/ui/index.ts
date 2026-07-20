@@ -9,6 +9,7 @@ export { default as ThemesList } from '../ThemesList'
 export { default as ThemePreview } from '../ThemePreview'
 export { default as SideMenu } from '../SideMenu'
 export { default as GameCanvas } from '../GameCanvas'
+export { default as AssetPlanner } from '../AssetPlanner'
 
 // Re-export existing UI components
 export { default as CircularText } from './CircularText'

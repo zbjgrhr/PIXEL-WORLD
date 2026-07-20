@@ -1,17 +1,21 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { message } from 'antd'
 import { useGameStore } from '@/lib/store'
-import { isPresetTheme, resolveValidTheme } from '@/lib/theme-utils'
-import { ProjectHeader, ModelSelector, ThemeCustomizer, ActionButtons } from './ui/index'
+import { isPresetTheme } from '@/lib/theme-utils'
+import { ActionButtons, AssetPlanner, ModelSelector, ProjectHeader, ThemeCustomizer } from './ui/index'
 import { PRESET_THEMES } from '@/configs'
-import { syncPlayableLevels } from '@/lib/virtual-levels'
+import { buildGameDataFromSpec, syncPlayableLevels } from '@/lib/virtual-levels'
 import { formatGenerationError } from '@/lib/format-generation-error'
+import { buildStructuredPrompt } from '@/lib/asset-catalog'
+import { cacheAssetUrl, cacheSpecAssets, hydrateSpecAssets, stripLargeAssetUrls } from '@/lib/asset-db'
 import { ASSET_TYPES } from '@/types'
 import type {
+  AssetDefinition,
   GameData,
   GameSpec,
+  GameTheme,
   GenerateImageRequest,
   ProviderId,
   RegeneratingImages,
@@ -35,13 +39,14 @@ export interface SideMenuProps {
   style?: React.CSSProperties
 }
 
-const EMPTY_GENERATING = Object.fromEntries(
-  ASSET_TYPES.map((type) => [type, false]),
-) as RegeneratingImages
+const EMPTY_GENERATING = Object.fromEntries(ASSET_TYPES.map((type) => [type, false])) as RegeneratingImages
+const ALL_GENERATING = Object.fromEntries(ASSET_TYPES.map((type) => [type, true])) as RegeneratingImages
+const DRAFT_KEY = 'pixel-world-v3-generation-draft'
+const DRAFT_PROJECT_ID = 'active-draft'
 
-const ALL_GENERATING = Object.fromEntries(
-  ASSET_TYPES.map((type) => [type, true]),
-) as RegeneratingImages
+function patchSpecAsset(spec: GameSpec, id: string, patch: Partial<AssetDefinition>): GameSpec {
+  return { ...spec, assets: spec.assets.map((asset) => asset.id === id ? { ...asset, ...patch } : asset) }
+}
 
 const SideMenu: React.FC<SideMenuProps> = ({
   apiKey,
@@ -53,175 +58,192 @@ const SideMenu: React.FC<SideMenuProps> = ({
   onStartGame,
   onCreateTheme,
   onThemeUpdate,
-  generateImages,
   onRegeneratingImagesChange,
   themesListRef,
   className,
   style,
 }) => {
   const {
-    selectedTheme,
-    customPrompt,
-    levelCount,
-    setSelectedTheme,
-    setCustomPrompt,
-    setLevelCount,
-    setGameState,
-    setLoadingMessage,
-    gameData,
-    setGameData,
-    isLoading,
-    setLoading,
+    selectedTheme, customPrompt, levelCount, setSelectedTheme, setCustomPrompt, setLevelCount,
+    setGameState, setLoadingMessage, setGameData, isLoading, setLoading,
   } = useGameStore()
-
-  const [customThemeName, setCustomThemeName] = useState('')
+  const [customThemeName, setCustomThemeName] = useState('Pixel World')
   const [isThemeCreated, setIsThemeCreated] = useState(false)
   const [presetThemes, setPresetThemes] = useState<Theme[]>([...PRESET_THEMES])
   const [optimizedSpec, setOptimizedSpec] = useState<GameSpec | null>(null)
   const [isOptimizing, setIsOptimizing] = useState(false)
+  const [generationProgress, setGenerationProgress] = useState(0)
+  const [isTesting, setIsTesting] = useState(false)
+  const abortRef = useRef<AbortController | null>(null)
 
-  const optimizePrompt = async (
-    quiet = false,
-    promptOverride?: string,
-    themeOverride?: string,
-  ): Promise<GameSpec | null> => {
+  useEffect(() => {
+    if (!customPrompt.trim()) setCustomPrompt(buildStructuredPrompt(levelCount))
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY)
+      if (raw) {
+        const draft = JSON.parse(raw) as { name?: string; spec?: GameSpec; prompt?: string }
+        if (draft.spec?.version === 3) {
+          setOptimizedSpec(draft.spec)
+          setCustomThemeName(draft.name || draft.spec.title)
+          if (draft.prompt) setCustomPrompt(draft.prompt)
+          void hydrateSpecAssets(DRAFT_PROJECT_ID, draft.spec).then((hydrated) => setOptimizedSpec(hydrated))
+        }
+      }
+    } catch {
+      // Ignore malformed drafts.
+    }
+  }, [])
+
+  const persistDraft = (spec: GameSpec) => {
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ name: customThemeName, prompt: customPrompt, spec: stripLargeAssetUrls(spec) }))
+    } catch {
+      // Large image URLs are also cached by IndexedDB; draft failure must not interrupt generation.
+    }
+  }
+
+  const updateSpec = (spec: GameSpec) => {
+    setOptimizedSpec(spec)
+    persistDraft(spec)
+  }
+
+  const optimizePrompt = async (quiet = false, promptOverride?: string, themeOverride?: string): Promise<GameSpec | null> => {
     const prompt = (promptOverride ?? customPrompt).trim()
     if (!prompt) {
-      if (!quiet) message.error('请先输入游戏构想。')
+      if (!quiet) message.error('请先填写游戏构想。')
       return null
     }
     setIsOptimizing(true)
     try {
       const response = await fetch('/api/optimize-prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          theme: themeOverride?.trim() || customThemeName.trim() || 'Pixel World',
-          levelCount,
-          provider: selectedProvider,
-          apiKey: apiKey.trim(),
-        }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, theme: themeOverride?.trim() || customThemeName.trim() || 'Pixel World', levelCount, provider: selectedProvider, apiKey: apiKey.trim() }),
       })
       const result = await response.json()
-      if (!response.ok || !result.success) throw new Error(result.error || '提示词优化失败')
+      if (!response.ok || !result.success) throw new Error(result.error || '提示词优化失败。')
       const spec = result.data.spec as GameSpec
-      setOptimizedSpec(spec)
+      updateSpec(spec)
       setCustomPrompt(result.data.optimizedPrompt)
       if (!quiet) {
-        message.success(result.data.source === 'ai' ? 'AI 已完成结构化优化。' : '已完成本地结构化优化。')
-        if (result.data.warning) message.info(result.data.warning, 4)
+        message.success(result.data.source === 'ai' ? 'AI 已补全 V3 游戏规格。' : '本地编译器已补全 V3 游戏规格。')
+        if (result.data.warning) message.info(result.data.warning, 5)
       }
       return spec
     } catch (error) {
-      if (!quiet) message.error(error instanceof Error ? error.message : '提示词优化失败')
+      if (!quiet) message.error(error instanceof Error ? error.message : '提示词优化失败。')
       return null
     } finally {
       setIsOptimizing(false)
     }
   }
 
-  const handlePromptChange = (value: string) => {
-    setCustomPrompt(value)
-    setOptimizedSpec(null)
+  const requestAsset = async (spec: GameSpec, asset: AssetDefinition, signal?: AbortSignal): Promise<AssetDefinition> => {
+    const firstLevelId = asset.levelIds[0]
+    const levelIndex = Math.max(0, spec.levels.findIndex((level) => level.id === firstLevelId))
+    const response = await fetch('/api/generate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
+      body: JSON.stringify({ theme: spec.title, prompt: customPrompt, provider: selectedProvider, model: selectedModel, apiKey: apiKey.trim(), levelCount: spec.levels.length, spec, asset, levelIndex }),
+    })
+    const result = await response.json().catch(() => null)
+    if (!response.ok || !result?.success || !result.data?.asset?.url) throw new Error(formatGenerationError(result?.error || `HTTP ${response.status}`))
+    return result.data.asset as AssetDefinition
   }
 
-  const handleCreateTheme = async () => {
-    const hasCustomInput = Boolean(customThemeName.trim() || customPrompt.trim())
-    if (hasCustomInput && (!customThemeName.trim() || !customPrompt.trim())) {
-      message.error('自定义生成需要同时填写主题名称和游戏构想。')
-      return
-    }
-    if (!apiKey.trim()) {
-      message.error('图像生成需要 API Key。')
-      return
-    }
-
-    const selectedPreset = presetThemes.find((theme) => theme.id === selectedTheme)
-    const themeName = hasCustomInput ? customThemeName.trim() : selectedPreset?.name || 'Pixel World'
-    const sourcePrompt = hasCustomInput ? customPrompt : selectedPreset?.description || ''
-    const fallbackTheme = resolveValidTheme(selectedTheme)
+  const testApi = async () => {
+    if (!apiKey.trim()) return void message.error('请先填写 API Key。')
     let spec = optimizedSpec
-
-    if (!spec || spec.levels.length !== levelCount) {
-      if (!hasCustomInput && sourcePrompt) {
-        setCustomPrompt(sourcePrompt)
-        setCustomThemeName(themeName)
-      }
-      spec = await optimizePrompt(true, sourcePrompt, themeName)
-      if (!spec) {
-        message.error('无法建立结构化游戏规格，请先点击“一键优化提示词”。')
-        return
-      }
+    if (!spec) spec = await optimizePrompt(true)
+    if (!spec) return
+    const source = spec.assets.find((asset) => asset.category === 'collectible')
+    if (!source) return void message.error('当前规格没有可用于测试的收集品素材。')
+    setIsTesting(true)
+    try {
+      await requestAsset(spec, { ...source, id: `api-test-${Date.now()}`, title: 'API Test', prompt: 'One tiny luminous pixel crystal pickup for API validation.' })
+      message.success('API 测试成功：模型已经返回有效图片。')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'API 测试失败。')
+    } finally {
+      setIsTesting(false)
     }
+  }
 
-    const loadingId = `loading-${Date.now()}` as const
-    const loadingTheme: Theme = {
-      id: loadingId,
-      name: themeName,
-      description: sourcePrompt,
-      characterImage: '',
-      backgroundImage: '',
-      groundImage: '',
-      obstacleImage: '',
-      spec,
-      isLoading: true,
-    }
+  const generateSelectedAssets = async () => {
+    if (!apiKey.trim()) return void message.error('图片生成需要 API Key。')
+    let baseSpec = optimizedSpec
+    if (!baseSpec || baseSpec.levels.length !== levelCount) baseSpec = await optimizePrompt(true)
+    if (!baseSpec) return void message.error('请先点击“一键优化提示词”建立 V3 素材规划。')
+    const tasks = baseSpec.assets.filter((asset) => asset.enabled && (asset.kind === 'image' || asset.kind === 'spriteSheet') && (!asset.url || asset.status === 'failed' || asset.status === 'cancelled'))
+    if (!tasks.length) return void message.info('所有已启用图片素材都已生成。')
+
+    const loadingId = `loading-${Date.now()}` as GameTheme
+    const loadingTheme: Theme = { id: loadingId, name: baseSpec.title, description: customPrompt, characterImage: '', backgroundImage: '', groundImage: '', obstacleImage: '', spec: baseSpec, isLoading: true }
     const themesWithLoading = [...presetThemes, loadingTheme]
+    const controller = new AbortController()
+    abortRef.current = controller
+    const results = new Map<string, AssetDefinition>()
+    let cursor = 0
+    let finished = 0
+
+    const updateAsset = (id: string, patch: Partial<AssetDefinition>) => {
+      setOptimizedSpec((current) => {
+        if (!current) return current
+        const next = patchSpecAsset(current, id, patch)
+        persistDraft(next)
+        return next
+      })
+    }
 
     try {
       setLoading(true)
-      setLoadingMessage(`正在生成 ${levelCount} 个完整关卡与 10 类隔离素材…`)
+      setGenerationProgress(0)
+      setLoadingMessage(`正在生成 ${tasks.length} 个已选择素材；并发数 2。`)
       setGameState('loading')
       onRegeneratingImagesChange?.(ALL_GENERATING)
       setPresetThemes(themesWithLoading)
       setSelectedTheme(loadingId)
       onThemeUpdate?.(themesWithLoading)
 
-      if (!generateImages) throw new Error('图像生成服务未连接。')
-      const requestBody: GenerateImageRequest = {
-        theme: themeName,
-        prompt: sourcePrompt,
-        provider: selectedProvider,
-        model: selectedModel,
-        types: ASSET_TYPES,
-        levelCount,
-        apiKey: apiKey.trim(),
-        spec,
+      const worker = async () => {
+        while (!controller.signal.aborted) {
+          const taskIndex = cursor++
+          if (taskIndex >= tasks.length) return
+          const asset = tasks[taskIndex]
+          updateAsset(asset.id, { status: 'generating', error: undefined })
+          try {
+            const generated = await requestAsset(baseSpec!, asset, controller.signal)
+            const completedAsset = { ...asset, ...generated, status: 'success' as const, error: undefined }
+            if (completedAsset.url) await cacheAssetUrl(DRAFT_PROJECT_ID, completedAsset.id, completedAsset.url)
+            results.set(asset.id, completedAsset)
+            updateAsset(asset.id, completedAsset)
+          } catch (error) {
+            const cancelled = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
+            const failedAsset = { ...asset, status: cancelled ? 'cancelled' as const : 'failed' as const, error: cancelled ? 'Generation cancelled.' : error instanceof Error ? error.message : 'Generation failed.' }
+            results.set(asset.id, failedAsset)
+            updateAsset(asset.id, failedAsset)
+          } finally {
+            finished += 1
+            setGenerationProgress(Math.round(finished / tasks.length * 100))
+            setLoadingMessage(`素材生成进度 ${finished}/${tasks.length}`)
+          }
+        }
       }
-      const result = await generateImages(requestBody)
-      if (!result.success || !result.data) throw new Error('生成结果不完整。')
+      await Promise.all([worker(), worker()])
 
-      const finalId = `custom-${Date.now()}` as const
-      setGameData(result, finalId)
+      const finalAssets = baseSpec.assets.map((asset) => results.get(asset.id) || asset)
+      const finalSpec = { ...baseSpec, assets: finalAssets }
+      const gameData = buildGameDataFromSpec(finalSpec)
+      const firstLevel = gameData.data?.levels[0]
+      const finalId = `custom-${Date.now()}` as GameTheme
+      await cacheSpecAssets(finalId, finalSpec)
+      setGameData(gameData, finalId)
       useGameStore.getState().removeGameDataForTheme(loadingId)
-      const firstLevel = result.data.levels[0]
-      const updateProcessed = useGameStore.getState().updateProcessedImage
-      const globalTypes = ['character', 'enemy', 'weapon', 'projectile', 'attackEffect', 'collectible', 'boss'] as const
-      globalTypes.forEach((type) => {
-        const url = result.data?.[`${type}Url`]
-        if (url) updateProcessed(finalId, type, url)
-      })
-      ;(['background', 'ground', 'obstacle'] as const).forEach((type) => {
-        const url = firstLevel?.[`${type}Url`]
-        if (url) updateProcessed(finalId, type, url)
-      })
-
       const finalTheme: Theme = {
-        id: finalId,
-        name: themeName,
-        description: sourcePrompt,
-        characterImage: result.data.characterUrl,
-        backgroundImage: firstLevel?.backgroundUrl || '',
-        groundImage: firstLevel?.groundUrl || '',
-        obstacleImage: firstLevel?.obstacleUrl || '',
-        enemyImage: result.data.enemyUrl,
-        weaponImage: result.data.weaponUrl,
-        projectileImage: result.data.projectileUrl,
-        attackEffectImage: result.data.attackEffectUrl,
-        collectibleImage: result.data.collectibleUrl,
-        bossImage: result.data.bossUrl,
-        spec: result.data.spec,
+        id: finalId, name: finalSpec.title, description: customPrompt,
+        characterImage: gameData.data?.characterUrl || '', backgroundImage: firstLevel?.backgroundUrl || '',
+        groundImage: firstLevel?.groundUrl || '', obstacleImage: firstLevel?.obstacleUrl || '',
+        enemyImage: gameData.data?.enemyUrl || '', weaponImage: gameData.data?.weaponUrl || '',
+        projectileImage: gameData.data?.projectileUrl || '', attackEffectImage: gameData.data?.attackEffectUrl || '',
+        collectibleImage: gameData.data?.collectibleUrl || '', bossImage: gameData.data?.bossUrl || '', spec: finalSpec,
       }
       const finalThemes = themesWithLoading.map((theme) => theme.id === loadingId ? finalTheme : theme)
       setPresetThemes(finalThemes)
@@ -229,21 +251,15 @@ const SideMenu: React.FC<SideMenuProps> = ({
       setSelectedTheme(finalId)
       setIsThemeCreated(true)
       setGameState('menu')
-      setLoadingMessage('完整可玩世界已生成。')
-      message.success('完整游戏素材与关卡已生成！')
+      updateSpec(finalSpec)
+      const failures = finalAssets.filter((asset) => asset.status === 'failed').length
+      if (failures) message.warning(`已保留成功素材；${failures} 个任务失败，可在素材卡片中重试。`)
+      else if (controller.signal.aborted) message.info('生成已停止，已完成素材全部保留。')
+      else message.success('已选择素材全部生成完成，可以开始游戏或导出。')
       onCreateTheme?.()
-      setTimeout(() => {
-        if (themesListRef?.current) themesListRef.current.scrollTop = themesListRef.current.scrollHeight
-      }, 100)
-    } catch (error) {
-      message.error(formatGenerationError(error instanceof Error ? error.message : '生成失败'))
-      const restored = themesWithLoading.filter((theme) => theme.id !== loadingId)
-      setPresetThemes(restored)
-      onThemeUpdate?.(restored)
-      useGameStore.getState().removeGameDataForTheme(loadingId)
-      setSelectedTheme(fallbackTheme)
-      setGameState('menu')
+      setTimeout(() => { if (themesListRef?.current) themesListRef.current.scrollTop = themesListRef.current.scrollHeight }, 100)
     } finally {
+      abortRef.current = null
       setLoading(false)
       onRegeneratingImagesChange?.(EMPTY_GENERATING)
     }
@@ -268,42 +284,20 @@ const SideMenu: React.FC<SideMenuProps> = ({
     onStartGame?.()
   }
 
-  return (
-    <div className={className} style={{ padding: 20, height: '100%', overflowY: 'auto', ...style }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%' }}>
-        <ProjectHeader />
-        <ModelSelector
-          selectedProvider={selectedProvider}
-          onProviderChange={onProviderChange}
-          selectedModel={selectedModel}
-          onModelChange={onModelChange}
-          apiKey={apiKey}
-          onApiKeyChange={onApiKeyChange}
-        />
-        <ThemeCustomizer
-          customThemeName={customThemeName}
-          onThemeNameChange={setCustomThemeName}
-          customPrompt={customPrompt}
-          onPromptChange={handlePromptChange}
-          levelCount={levelCount}
-          onLevelCountChange={(count) => { setLevelCount(count); setOptimizedSpec(null) }}
-          onOptimizePrompt={() => { void optimizePrompt(false) }}
-          isOptimizing={isOptimizing}
-          optimizedSpec={optimizedSpec}
-        />
-        <ActionButtons
-          isThemeCreated={isThemeCreated}
-          isLoading={isLoading}
-          selectedTheme={selectedTheme}
-          customPrompt={customPrompt}
-          customThemeName={customThemeName}
-          apiKey={apiKey}
-          onCreateTheme={handleCreateTheme}
-          onStartGame={handleStartGame}
-        />
-      </div>
+  return <div className={className} style={{ padding: 20, height: '100%', overflowY: 'auto', ...style }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%' }}>
+      <ProjectHeader />
+      <ModelSelector selectedProvider={selectedProvider} onProviderChange={onProviderChange} selectedModel={selectedModel} onModelChange={onModelChange} apiKey={apiKey} onApiKeyChange={onApiKeyChange} />
+      <ThemeCustomizer
+        customThemeName={customThemeName} onThemeNameChange={setCustomThemeName}
+        customPrompt={customPrompt} onPromptChange={(value) => { setCustomPrompt(value); setOptimizedSpec(null) }}
+        levelCount={levelCount} onLevelCountChange={(count) => { setLevelCount(count); setOptimizedSpec(null); setCustomPrompt(buildStructuredPrompt(count)) }}
+        onOptimizePrompt={() => { void optimizePrompt(false) }} isOptimizing={isOptimizing} optimizedSpec={optimizedSpec}
+      />
+      {optimizedSpec && <AssetPlanner spec={optimizedSpec} onChange={updateSpec} onGenerate={() => { void generateSelectedAssets() }} onCancel={() => abortRef.current?.abort()} onTestApi={() => { void testApi() }} isGenerating={isLoading} isTesting={isTesting} progress={generationProgress} />}
+      <ActionButtons isThemeCreated={isThemeCreated} isLoading={isLoading} selectedTheme={selectedTheme} customPrompt={customPrompt} customThemeName={customThemeName} apiKey={apiKey} onCreateTheme={() => { void generateSelectedAssets() }} onStartGame={handleStartGame} />
     </div>
-  )
+  </div>
 }
 
 export default SideMenu

@@ -1,4 +1,4 @@
-import type { AssetType, GameSpec, ProviderId } from '@/types'
+import type { AssetDefinition, AssetType, GameSpec, ProviderId } from '@/types'
 
 export type GameAssetType = AssetType
 export type CutoutMode = 'checkerboard' | 'chroma-green'
@@ -127,4 +127,23 @@ export function buildGamePrompt(
   }
 
   return `${base}. Theme label: ${theme}. Shared visual contract: ${sharedStyle}. ${subject}`
+}
+
+export function buildPlannedAssetPrompt(
+  asset: AssetDefinition,
+  generationType: AssetType,
+  theme: string,
+  spec: GameSpec,
+  levelIndex: number,
+  providerId: ProviderId,
+  model?: string,
+): string {
+  const sharedStyle = style(spec)
+  const level = spec.levels[Math.min(levelIndex, spec.levels.length - 1)] || spec.levels[0]
+  if (asset.kind === 'spriteSheet') {
+    return `${COMMON_STYLE}. Theme: ${theme}. Shared visual contract: ${sharedStyle}. Character identity: ${asset.prompt}. Create one exact 6-column by 5-row animation sprite sheet on ${isolationBackground(providerId, model)}. Row 1 idle animation, row 2 movement animation, row 3 attack animation, row 4 hit reaction, row 5 death animation. Exactly 30 equally sized cells, consistent character proportions and colors in every cell, full body visible, side view, no labels, no letters, no numbers, no grid lines, no scenery, no weapons floating separately, no extra characters.`
+  }
+  const base = getPositiveTemplate(generationType, providerId, model)
+  const levelContext = asset.levelIds.length === 1 ? `Level context: ${level?.environment || spec.world}.` : ''
+  return `${base}. Theme: ${theme}. Shared visual contract: ${sharedStyle}. Requested asset: ${asset.prompt}. ${levelContext} Generate only this asset and never merge it with another category.`
 }

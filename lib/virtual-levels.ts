@@ -2,8 +2,70 @@ import { PRESET_THEMES } from '@/configs'
 import { createFallbackGameSpec } from '@/lib/game-spec'
 import { getThemeId } from '@/lib/theme-utils'
 import type { GameData, Theme } from '@/types'
+import type { AssetCategory, AssetDefinition, GameSpec, ObstacleData } from '@/types'
 
 const DEFAULT_VIRTUAL_LEVEL_COUNT = 3
+
+function activeAsset(assets: AssetDefinition[], category: AssetCategory, levelId?: string): AssetDefinition | undefined {
+  return assets.find((asset) => asset.enabled && asset.category === category && (!levelId || asset.levelIds.includes(levelId)) && asset.url)
+}
+
+export function buildGameDataFromSpec(spec: GameSpec): GameData {
+  const assets = spec.assets || []
+  const globalUrl = (category: AssetCategory) => activeAsset(assets, category)?.url || ''
+  const levels = spec.levels.map((level, levelIndex) => {
+    const obstacleCategories: AssetCategory[] = ['normalObstacle', 'bounceObstacle', 'deathObstacle']
+    const enabledObstacles = obstacleCategories.filter((category) => activeAsset(assets, category, level.id))
+    const obstacleCount = Math.min(8, 3 + levelIndex)
+    const obstacles: ObstacleData[] = Array.from({ length: obstacleCount }, (_, index) => ({
+      id: `${level.id}-obstacle-${index + 1}`,
+      x: 190 + index * Math.max(75, Math.floor(600 / Math.max(1, obstacleCount))),
+      y: 352,
+      width: 48,
+      height: 48,
+      type: enabledObstacles[index % Math.max(1, enabledObstacles.length)] || 'normalObstacle',
+    }))
+    const enemyAssets = assets.filter((asset) => asset.enabled && ['groundEnemy', 'airEnemy', 'waterEnemy'].includes(asset.category) && asset.levelIds.includes(level.id))
+    return {
+      id: level.id,
+      backgroundUrl: activeAsset(assets, 'levelBackground', level.id)?.url || '',
+      groundUrl: activeAsset(assets, 'groundPlatform', level.id)?.url || '',
+      obstacleUrl: activeAsset(assets, 'normalObstacle', level.id)?.url || activeAsset(assets, 'bounceObstacle', level.id)?.url || '',
+      obstacles,
+      enemySpawns: Array.from({ length: level.enemyCount }, (_, index) => ({
+        id: `${level.id}-enemy-${index + 1}`,
+        x: 270 + index * Math.max(80, Math.floor(560 / Math.max(1, level.enemyCount))),
+        y: 352 - (index % 2) * 55,
+        kind: enemyAssets[index % Math.max(1, enemyAssets.length)]?.id || 'groundEnemy',
+      })),
+      collectibleSpawns: Array.from({ length: level.collectibleCount }, (_, index) => ({
+        id: `${level.id}-collectible-${index + 1}`,
+        x: 220 + index * 120,
+        y: index % 2 ? 285 : 325,
+        kind: 'collectible',
+      })),
+      bossSpawn: level.hasBoss && activeAsset(assets, 'boss', level.id)
+        ? { id: `${level.id}-boss`, x: 780, y: 310, kind: activeAsset(assets, 'boss', level.id)?.id || 'boss' }
+        : undefined,
+    }
+  })
+  return {
+    success: true,
+    data: {
+      characterUrl: globalUrl('hero'),
+      enemyUrl: globalUrl('groundEnemy') || globalUrl('airEnemy') || globalUrl('waterEnemy'),
+      weaponUrl: globalUrl('meleeWeapon'),
+      projectileUrl: globalUrl('rangedProjectile'),
+      attackEffectUrl: globalUrl('meleeAttackEffect'),
+      collectibleUrl: globalUrl('collectible'),
+      bossUrl: globalUrl('boss'),
+      levels,
+      spec,
+    },
+    generationId: `v3-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+  }
+}
 
 function resolveSavedTheme(selectedTheme: string): Theme | undefined {
   let theme = PRESET_THEMES.find((item) => item.id === selectedTheme) as Theme | undefined
