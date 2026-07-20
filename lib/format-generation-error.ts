@@ -2,6 +2,10 @@
 export function formatGenerationError(raw: string): string {
   const lower = raw.toLowerCase()
 
+  if (lower.includes('bytestring') || lower.includes('greater than 255')) {
+    return 'API Key 中混入了中文符号、长破折号或隐藏字符。请清空输入框，并从平台控制台重新复制纯 API Key。'
+  }
+
   if (
     lower.includes('openrouter') &&
     (lower.includes('402') ||

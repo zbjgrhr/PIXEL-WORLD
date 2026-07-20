@@ -14,6 +14,7 @@ import {
   type ImageProvider,
   type ProviderId,
 } from '@/lib/image-providers/types'
+import { apiKeyHasUnsupportedCharacters, normalizeApiKey } from '@/lib/api-key'
 
 const providers: Record<ProviderId, ImageProvider> = {
   dashscope: dashscopeProvider,
@@ -35,9 +36,16 @@ export function resolveApiKey(providerId: ProviderId, requestKey?: string): stri
     throw new ProviderValidationError(`Unknown provider: ${providerId}`)
   }
 
-  const key = requestKey?.trim() || process.env[config.envKey]?.trim()
+  const rawKey = requestKey?.trim() || process.env[config.envKey]?.trim()
+  const key = normalizeApiKey(rawKey)
   if (!key) {
     throw new ProviderApiKeyError(providerId)
+  }
+  if (apiKeyHasUnsupportedCharacters(key)) {
+    throw new ProviderValidationError(
+      'API Key contains unsupported characters. Clear the field and paste only the key from the provider dashboard.',
+      providerId,
+    )
   }
   return key
 }

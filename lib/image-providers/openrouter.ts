@@ -25,8 +25,18 @@ interface OpenRouterEndpointsResponse {
 const referenceCapabilityCache = new Map<string, boolean>()
 
 function getOpenRouterHeaders(): Record<string, string> {
-  const referer =
+  const configuredReferer =
     process.env.NEXT_PUBLIC_BASE_URL?.trim() || 'https://prompt-play-pixel-game.vercel.app'
+  let referer = 'https://prompt-play-pixel-game.vercel.app'
+
+  try {
+    // URL serialisation percent-encodes any non-ASCII characters, keeping the
+    // HTTP header a valid ByteString even when the environment value contains
+    // a copied typographic character.
+    referer = new URL(configuredReferer).href
+  } catch {
+    // Keep the stable public fallback for malformed environment values.
+  }
 
   return {
     'HTTP-Referer': referer,

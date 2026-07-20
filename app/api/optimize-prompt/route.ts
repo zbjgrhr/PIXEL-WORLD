@@ -7,6 +7,7 @@ import {
 } from '@/lib/game-spec'
 import type { GameSpec, ProviderId } from '@/types'
 import { PROMPT_TEMPLATES } from '@/configs/prompt-templates'
+import { apiKeyHasUnsupportedCharacters, normalizeApiKey } from '@/lib/api-key'
 
 interface OptimizeRequest {
   prompt?: string
@@ -115,7 +116,13 @@ export async function POST(request: NextRequest) {
     const fallback = createFallbackGameSpec(prompt, theme, levelCount)
     const provider = body.provider || 'dashscope'
     const config = optimizerEndpoint(provider)
-    const apiKey = body.apiKey?.trim() || process.env[config.envKey]?.trim() || ''
+    const apiKey = normalizeApiKey(body.apiKey?.trim() || process.env[config.envKey]?.trim() || '')
+    if (apiKeyHasUnsupportedCharacters(apiKey)) {
+      return NextResponse.json(
+        { success: false, error: 'API Key contains unsupported characters. Clear the field and paste only the key from the provider dashboard.' },
+        { status: 400 },
+      )
+    }
 
     let spec = fallback
     let source: 'ai' | 'local' | 'template' = 'local'

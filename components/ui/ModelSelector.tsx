@@ -11,6 +11,7 @@ import {
 } from '@/configs/image-providers'
 import type { ProviderId } from '@/lib/image-providers/types'
 import { ModelSelectorProps } from '@/types'
+import { apiKeyHasUnsupportedCharacters, normalizeApiKey } from '@/lib/api-key'
 
 const { Text } = Typography
 const { Option } = Select
@@ -22,7 +23,10 @@ function looksLikeOpenAiKey(value: string): boolean {
 function looksLikeInvalidKey(value: string): boolean {
   const trimmed = value.trim()
   if (!trimmed) return false
-  return trimmed.startsWith('[') || trimmed.includes('[Intervention]') || trimmed.includes('Generation error')
+  return apiKeyHasUnsupportedCharacters(trimmed)
+    || trimmed.startsWith('[')
+    || trimmed.includes('[Intervention]')
+    || trimmed.includes('Generation error')
 }
 
 const ModelSelector: React.FC<ModelSelectorProps> = ({
@@ -49,18 +53,19 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
   }
 
   const handleApiKeyChange = (value: string) => {
-    onApiKeyChange(value)
+    const normalizedValue = normalizeApiKey(value)
+    onApiKeyChange(normalizedValue)
 
-    if (looksLikeInvalidKey(value)) {
+    if (looksLikeInvalidKey(normalizedValue)) {
       message.error('API Key 无效：请勿粘贴浏览器控制台内容，只粘贴平台提供的 Key。')
       return
     }
 
-    if (looksLikeOpenAiKey(value) && selectedProvider === 'dashscope') {
+    if (looksLikeOpenAiKey(normalizedValue) && selectedProvider === 'dashscope') {
       message.warning('这像是 OpenAI Key，请将 Provider 切换为 OpenAI。')
     }
 
-    if (selectedProvider === 'openai' && value.trim() && !looksLikeOpenAiKey(value)) {
+    if (selectedProvider === 'openai' && normalizedValue && !looksLikeOpenAiKey(normalizedValue)) {
       message.warning('OpenAI Key 通常以 sk- 或 sk-proj- 开头，请检查是否粘贴完整。')
     }
   }
