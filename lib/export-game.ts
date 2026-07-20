@@ -1,3 +1,4 @@
+import { animationClipPoses, normalizeAnimationSpec } from '@/lib/asset-catalog'
 import type { AssetDefinition, GameSpec } from '@/types'
 
 const encoder = new TextEncoder()
@@ -112,13 +113,29 @@ const OFFLINE_GAME_V2 = String.raw`
   const rect = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
   const setAction = (actor, action, duration = 0) => { if (actor.action !== action) { actor.action = action; actor.actionStart = sim } actor.actionUntil = duration ? sim + duration : 0 }
   const animationFor = (asset) => {
-    const raw = asset && asset.animation || {}, legacy = Number(raw.rows) === 5 || !raw.states || raw.states.jump == null
+    const raw = asset && asset.animation || {}
+    if (raw.layoutVersion === 3 || raw.format === 'action-strips') return { actionStrips: true, clips: raw.clips || {} }
+    const legacy = Number(raw.rows) === 5 || !raw.states || raw.states.jump == null
     if (legacy) return { columns: 6, rows: 5, fps: raw.fps || 8, states: { idle: 0, walk: 1, jump: 1, attack: 2, hit: 3, death: 4 } }
     const row = (value, fallback) => Math.max(0, Math.min(5, Number.isFinite(Number(value)) ? Math.round(Number(value)) : fallback))
     return { columns: 6, rows: 6, fps: raw.fps || 8, states: { idle: row(raw.states.idle, 0), walk: row(raw.states.walk, 1), jump: row(raw.states.jump, 2), attack: row(raw.states.attack, 3), hit: row(raw.states.hit, 4), death: row(raw.states.death, 5) } }
   }
   const sprite = (id, x, y, w, h, actor, face = 1) => {
-    const asset = spec.assets.find((candidate) => candidate.id === id), image = images[id]
+    const asset = spec.assets.find((candidate) => candidate.id === id)
+    if (asset && asset.animation) {
+      const animation = animationFor(asset), requestedState = actor.action || 'idle', state = requestedState === 'attack' ? 'meleeAttack' : requestedState
+      if (animation.actionStrips) {
+        const clip = animation.clips[state] || animation.clips.idle || {}, image = images[id + ':clip:' + state] || images[id + ':clip:idle'] || images[id]
+        if (!image) { c.fillStyle = '#ffd84d'; c.fillRect(x, y, w, h); return }
+        const count = Math.max(1, Number(clip.frameCount) || 1), elapsed = Math.max(0, sim - (actor.actionStart || 0)), duration = Math.max(1, (actor.actionUntil || 0) - (actor.actionStart || 0))
+        const oneShot = state === 'meleeAttack' || state === 'rangedAttack' || state === 'death'
+        const frame = state === 'idle' || state === 'hit' ? 0 : state === 'jump' ? Math.min(count - 1, actor.vy < 0 ? 0 : 1) : oneShot ? Math.min(count - 1, Math.floor(elapsed / duration * count)) : Math.floor(elapsed / (1000 / (clip.fps || 5))) % count
+        const cellW = image.width / count
+        c.save(); if (face < 0) { c.translate(x + w, y); c.scale(-1, 1); x = 0; y = 0 } else { c.translate(x, y); x = 0; y = 0 }
+        c.drawImage(image, frame * cellW, 0, cellW, image.height, x, y, w, h); c.restore(); return
+      }
+    }
+    const image = images[id]
     if (!image) { c.fillStyle = '#ffd84d'; c.fillRect(x, y, w, h); return }
     if (!asset || !asset.animation) { c.drawImage(image, x, y, w, h); return }
     const animation = animationFor(asset), state = actor.action || 'idle', elapsed = Math.max(0, sim - (actor.actionStart || 0))
@@ -128,9 +145,11 @@ const OFFLINE_GAME_V2 = String.raw`
     c.save(); if (face < 0) { c.translate(x + w, y); c.scale(-1, 1); x = 0; y = 0 } else { c.translate(x, y); x = 0; y = 0 }
     c.drawImage(image, frame * cellW, row * cellH, cellW, cellH, x, y, w, h); c.restore()
   }
-  const load = () => Promise.all(spec.assets.filter((asset) => asset.url).map((asset) => new Promise((resolve) => {
-    const image = new Image(); image.onload = () => { images[asset.id] = image; resolve() }; image.onerror = resolve; image.src = asset.url
-  })))
+  const load = () => Promise.all(spec.assets.flatMap((asset) => {
+    const sources = asset.url ? [[asset.id, asset.url]] : []
+    if (asset.animation && asset.animation.clips) Object.entries(asset.animation.clips).forEach(([pose, clip]) => { if (clip && clip.url) sources.push([asset.id + ':clip:' + pose, clip.url]) })
+    return sources.map(([key, url]) => new Promise((resolve) => { const image = new Image(); image.onload = () => { images[key] = image; resolve() }; image.onerror = resolve; image.src = url }))
+  }))
   const reset = () => {
     const current = spec.levels[level]; sim = 0
     player = { x: 55, y: G - 64, vx: 0, vy: 0, w: 54, h: 64, hp: spec.hero.maxHealth, face: 1, on: true, invulnerable: 0, meleeReady: 0, rangedReady: 0, action: 'idle', actionStart: 0, actionUntil: 0 }
@@ -145,8 +164,8 @@ const OFFLINE_GAME_V2 = String.raw`
   }
   const hurtEnemy = (enemy, damage) => { if (enemy.hp <= 0) return; enemy.hp = Math.max(0, enemy.hp - damage); if (!enemy.hp) { setAction(enemy, 'death', 720); enemy.removeAt = sim + 720; score += enemy.mobility === 'boss' ? 1000 : 150 } else setAction(enemy, 'hit', 260) }
   const hurtPlayer = (damage) => { if (player.hp <= 0 || sim < player.invulnerable) return; player.hp = Math.max(0, player.hp - damage); player.invulnerable = sim + 850; setAction(player, player.hp ? 'hit' : 'death', player.hp ? 260 : 720) }
-  const shoot = () => { if (paused || won || player.hp <= 0 || sim < player.rangedReady || player.action === 'hit') return; player.rangedReady = sim + Math.max(240, spec.weapon.cooldownMs * 1.2); setAction(player, 'attack', 320); shots.push({ x: player.face > 0 ? player.x + player.w : player.x - 24, y: player.y + 25, w: 24, h: 14, vx: spec.weapon.projectileSpeed * player.face, damage: spec.weapon.rangedDamage, hostile: false }) }
-  const slash = () => { if (paused || won || player.hp <= 0 || sim < player.meleeReady || player.action === 'hit') return; player.meleeReady = sim + spec.weapon.cooldownMs; setAction(player, 'attack', 320); const hitbox = { x: player.face > 0 ? player.x + 44 : player.x - 76, y: player.y, w: 82, h: 70 }; enemies.forEach((enemy) => { if (enemy.hp > 0 && rect(hitbox, enemy)) hurtEnemy(enemy, spec.weapon.meleeDamage) }); effects.push({ x: hitbox.x, y: hitbox.y, expires: sim + 180 }) }
+  const shoot = () => { if (paused || won || player.hp <= 0 || sim < player.rangedReady || player.action === 'hit') return; player.rangedReady = sim + Math.max(240, spec.weapon.cooldownMs * 1.2); setAction(player, 'rangedAttack', 320); shots.push({ x: player.face > 0 ? player.x + player.w : player.x - 24, y: player.y + 25, w: 24, h: 14, vx: spec.weapon.projectileSpeed * player.face, damage: spec.weapon.rangedDamage, hostile: false }) }
+  const slash = () => { if (paused || won || player.hp <= 0 || sim < player.meleeReady || player.action === 'hit') return; player.meleeReady = sim + spec.weapon.cooldownMs; setAction(player, 'meleeAttack', 320); const hitbox = { x: player.face > 0 ? player.x + 44 : player.x - 76, y: player.y, w: 82, h: 70 }; enemies.forEach((enemy) => { if (enemy.hp > 0 && rect(hitbox, enemy)) hurtEnemy(enemy, spec.weapon.meleeDamage) }); effects.push({ x: hitbox.x, y: hitbox.y, expires: sim + 180 }) }
   const togglePause = () => { if (won) return; paused = !paused; Object.keys(keys).forEach((key) => { keys[key] = false }); pauseButton.textContent = paused ? 'Resume' : 'Pause'; pauseButton.classList.toggle('paused-label', paused) }
   addEventListener('keydown', (event) => { const key = event.key.toLowerCase(); if (['arrowleft', 'arrowright', 'arrowup', ' ', 'escape'].includes(key)) event.preventDefault(); if (key === 'escape') { togglePause(); return } if (paused || won) return; keys[key] = true; if (key === 'j') slash(); if (key === 'k' || key === 'f') shoot() })
   addEventListener('keyup', (event) => { keys[event.key.toLowerCase()] = false })
@@ -156,7 +175,7 @@ const OFFLINE_GAME_V2 = String.raw`
     const current = spec.levels[level]
     if (player.hp <= 0) { player.vx = 0; if (sim >= player.actionUntil) reset() }
     else {
-      const locked = (player.action === 'attack' || player.action === 'hit') && sim < player.actionUntil
+      const locked = (player.action === 'meleeAttack' || player.action === 'rangedAttack' || player.action === 'hit') && sim < player.actionUntil
       const left = keys.a || keys.arrowleft, right = keys.d || keys.arrowright, jump = keys.w || keys[' '] || keys.arrowup
       player.vx = locked ? 0 : ((right ? 1 : 0) - (left ? 1 : 0)) * spec.hero.moveSpeed; if (player.vx) player.face = player.vx > 0 ? 1 : -1
       if (!locked && jump && player.on) { player.vy = -spec.hero.jumpPower; player.on = false }
@@ -167,7 +186,7 @@ const OFFLINE_GAME_V2 = String.raw`
     enemies.forEach((enemy) => {
       if (enemy.hp <= 0) return
       const distance = player.x - enemy.x; enemy.face = distance >= 0 ? 1 : -1
-      const locked = (enemy.action === 'attack' || enemy.action === 'hit') && sim < enemy.actionUntil, resting = (sim + enemy.phase * 700) % (enemy.mobility === 'boss' ? 3200 : 2600) < 480
+      const locked = (enemy.action === 'meleeAttack' || enemy.action === 'rangedAttack' || enemy.action === 'hit') && sim < enemy.actionUntil, resting = (sim + enemy.phase * 700) % (enemy.mobility === 'boss' ? 3200 : 2600) < 480
       if (!locked && !resting) enemy.x = Math.max(100, Math.min(W - 120, enemy.x + enemy.face * (enemy.mobility === 'air' ? 2 : enemy.mobility === 'water' ? 1 : 1.35) * delta))
       if (!locked) {
         if (enemy.mobility === 'air') { const dive = (sim + enemy.phase * 900) % 3200 > 2380; enemy.y = enemy.baseY + Math.sin(sim / 520 + enemy.phase) * 34 + (dive ? 58 : 0); setAction(enemy, dive ? 'jump' : resting ? 'idle' : 'walk') }
@@ -175,7 +194,7 @@ const OFFLINE_GAME_V2 = String.raw`
         else { if (enemy.on && sim >= enemy.nextJump && Math.abs(distance) < 340) { enemy.vy = enemy.mobility === 'boss' ? -10.5 : -7.5; enemy.on = false; enemy.nextJump = sim + (enemy.mobility === 'boss' ? 2200 : 3000) } if (!enemy.on) { enemy.vy += .72 * delta; enemy.y += enemy.vy * delta; if (enemy.y + enemy.h >= G) { enemy.y = G - enemy.h; enemy.vy = 0; enemy.on = true } } setAction(enemy, !enemy.on ? 'jump' : resting ? 'idle' : 'walk') }
       }
       const delay = enemy.mobility === 'boss' ? 1050 : 2200
-      if (!locked && Math.abs(distance) < 500 && sim - enemy.lastAttack > delay) { enemy.lastAttack = sim; setAction(enemy, 'attack', 320); shots.push({ x: enemy.x + enemy.w / 2, y: enemy.y + enemy.h * .4, w: enemy.mobility === 'boss' ? 28 : 20, h: 16, vx: enemy.face * (enemy.mobility === 'boss' ? 7 : 5), damage: enemy.mobility === 'boss' ? 18 : 10, hostile: true }) }
+      if (!locked && Math.abs(distance) < 500 && sim - enemy.lastAttack > delay) { enemy.lastAttack = sim; setAction(enemy, 'rangedAttack', 320); shots.push({ x: enemy.x + enemy.w / 2, y: enemy.y + enemy.h * .4, w: enemy.mobility === 'boss' ? 28 : 20, h: 16, vx: enemy.face * (enemy.mobility === 'boss' ? 7 : 5), damage: enemy.mobility === 'boss' ? 18 : 10, hostile: true }) }
     })
     shots.forEach((shot) => { shot.x += shot.vx * delta; if (shot.hostile) { if (rect(shot, player)) { hurtPlayer(shot.damage); shot.x = -9999 } } else { const target = enemies.find((enemy) => enemy.hp > 0 && rect(shot, enemy)); if (target) { hurtEnemy(target, shot.damage); shot.x = -9999 } } })
     shots = shots.filter((shot) => shot.x > -100 && shot.x < W + 100); enemies = enemies.filter((enemy) => enemy.hp > 0 || sim < enemy.removeAt); effects = effects.filter((effect) => effect.expires > sim)
@@ -191,6 +210,8 @@ const OFFLINE_GAME_V2 = String.raw`
     const projectile = active('rangedProjectile'); shots.forEach((shot) => { if (projectile) sprite(projectile.id, shot.x, shot.y, shot.w, shot.h, { action: 'idle', actionStart: 0, actionUntil: 0 }, shot.vx < 0 ? -1 : 1); else { c.fillStyle = shot.hostile ? '#ff4567' : '#75e9ff'; c.fillRect(shot.x, shot.y, shot.w, shot.h) } })
     effects.forEach((effect) => { c.strokeStyle = '#8ff'; c.lineWidth = 8; c.beginPath(); c.arc(effect.x + 35, effect.y + 30, 30, -1, 1); c.stroke() })
     const hero = active('hero'); if (hero) sprite(hero.id, player.x, player.y, player.w, player.h, player, player.face)
+    const heldWeapon = player.action === 'rangedAttack' ? active('rangedWeapon') : player.action === 'meleeAttack' ? active('meleeWeapon') : null
+    if (heldWeapon && images[heldWeapon.id]) { c.save(); if (player.face < 0) { c.translate(player.x + player.w, player.y); c.scale(-1, 1); c.drawImage(images[heldWeapon.id], -16, 22, 52, 26) } else c.drawImage(images[heldWeapon.id], player.x + 34, player.y + 22, 52, 26); c.restore() }
     c.fillStyle = enemies.length ? '#677084' : '#6fffc2'; c.fillRect(W - 68, G - 90, 48, 90)
     if (paused) { c.fillStyle = '#030610aa'; c.fillRect(0, 0, W, H); c.fillStyle = '#fff'; c.font = '700 54px system-ui'; c.textAlign = 'center'; c.fillText('Paused', W / 2, H / 2) }
     document.querySelector('#level').textContent = 'Level ' + (level + 1) + '/' + spec.levels.length; document.querySelector('#score').textContent = 'Score ' + score
@@ -201,18 +222,38 @@ const OFFLINE_GAME_V2 = String.raw`
 `
 
 export async function exportGameZip(spec: GameSpec): Promise<void> {
-  const missing = spec.assets.filter((asset) => asset.enabled && (asset.kind === 'image' || asset.kind === 'spriteSheet') && !asset.url).map((asset) => asset.title)
+  const missing = spec.assets.flatMap((asset) => {
+    if (!asset.enabled || (asset.kind !== 'image' && asset.kind !== 'spriteSheet')) return []
+    if (asset.kind !== 'spriteSheet') return asset.url ? [] : [asset.title]
+    const animation = normalizeAnimationSpec(asset.animation)
+    if (animation.layoutVersion !== 3 || !animation.clips) return asset.url ? [] : [asset.title]
+    return animationClipPoses(asset).filter((pose) => !animation.clips?.[pose]?.url).map((pose) => `${asset.title} · ${pose}`)
+  })
   if (missing.length) throw new ExportValidationError(missing)
   const exported: GameSpec = JSON.parse(JSON.stringify(spec)) as GameSpec
   const entries: Array<{ name: string; bytes: Uint8Array }> = []
   for (const asset of exported.assets) {
-    if (!asset.url) continue
-    const source = spec.assets.find((item) => item.id === asset.id)?.url
-    if (!source) continue
-    const downloaded = await readAsset(source)
-    const filename = `assets/${safeName(asset.id)}.${extensionFor(downloaded.contentType, source)}`
-    entries.push({ name: filename, bytes: downloaded.bytes })
-    asset.url = filename
+    const sourceAsset = spec.assets.find((item) => item.id === asset.id)
+    if (sourceAsset?.url) {
+      const downloaded = await readAsset(sourceAsset.url)
+      const filename = `assets/${safeName(asset.id)}.${extensionFor(downloaded.contentType, sourceAsset.url)}`
+      entries.push({ name: filename, bytes: downloaded.bytes })
+      asset.url = filename
+    }
+    const sourceAnimation = sourceAsset?.kind === 'spriteSheet' ? normalizeAnimationSpec(sourceAsset.animation) : undefined
+    const exportedAnimation = asset.kind === 'spriteSheet' ? normalizeAnimationSpec(asset.animation) : undefined
+    if (sourceAnimation?.layoutVersion === 3 && sourceAnimation.clips && exportedAnimation?.layoutVersion === 3 && exportedAnimation.clips) {
+      for (const pose of animationClipPoses(sourceAsset!)) {
+        const source = sourceAnimation.clips[pose]?.url
+        if (!source) continue
+        const downloaded = await readAsset(source)
+        const filename = `assets/${safeName(asset.id)}-${safeName(pose)}.${extensionFor(downloaded.contentType, source)}`
+        entries.push({ name: filename, bytes: downloaded.bytes })
+        exportedAnimation.clips[pose] = { ...exportedAnimation.clips[pose]!, url: filename }
+      }
+      asset.animation = exportedAnimation
+      asset.url = exportedAnimation.clips.idle?.url
+    }
   }
   const json = JSON.stringify(exported, null, 2)
   const safeJson = json.replace(/<\//g, '<\\/')

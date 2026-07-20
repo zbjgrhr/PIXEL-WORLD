@@ -14,7 +14,8 @@ interface ProcessImageRequest {
   type: AssetType
   cutoutMode?: CutoutMode
   preserveCanvas?: boolean
-  gridSize?: number
+  gridColumns?: number
+  gridRows?: number
 }
 
 async function downloadImage(url: string): Promise<Buffer> {
@@ -44,7 +45,7 @@ async function applyCutout(imageBuffer: Buffer, cutoutMode: CutoutMode, preserve
 export async function POST(request: NextRequest) {
   try {
     const body: ProcessImageRequest = await request.json()
-    const { imageUrl, type, cutoutMode = 'checkerboard', preserveCanvas = false, gridSize } = body
+    const { imageUrl, type, cutoutMode = 'checkerboard', preserveCanvas = false, gridColumns, gridRows = 1 } = body
 
     if (!imageUrl || !type) {
       return NextResponse.json(
@@ -70,8 +71,8 @@ export async function POST(request: NextRequest) {
     } else {
       processedImageBuffer = await sharp(originalImageBuffer).png().toBuffer()
     }
-    if (preserveCanvas && gridSize && Number.isInteger(gridSize) && gridSize >= 2 && gridSize <= 12) {
-      processedImageBuffer = await padImageToGrid(processedImageBuffer, gridSize)
+    if (preserveCanvas && gridColumns && Number.isInteger(gridColumns) && gridColumns >= 1 && gridColumns <= 12 && Number.isInteger(gridRows) && gridRows >= 1 && gridRows <= 12) {
+      processedImageBuffer = await padImageToGrid(processedImageBuffer, gridColumns, gridRows)
     }
 
     const base64Image = processedImageBuffer.toString('base64')
@@ -85,7 +86,8 @@ export async function POST(request: NextRequest) {
         type,
         cutoutMode,
         preserveCanvas,
-        gridSize,
+        gridColumns,
+        gridRows,
       },
       timestamp: new Date().toISOString(),
     })

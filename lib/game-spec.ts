@@ -1,4 +1,4 @@
-import { ASSET_CATALOG, createAssetPlan, normalizeAnimationSpec } from '@/lib/asset-catalog'
+import { ANIMATION_CLIP_POSES, ASSET_CATALOG, createAssetPlan, normalizeAnimationSpec } from '@/lib/asset-catalog'
 import type {
   AssetCategory,
   AssetDefinition,
@@ -422,8 +422,13 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
     const base = defaultAssets.find((item) => item.category === asset.category) || defaultAssets[index % defaultAssets.length]
     const validLevelIds = Array.isArray(asset.levelIds) ? asset.levelIds.filter((id): id is string => typeof id === 'string' && knownLevels.has(id)) : base.levelIds
     const url = text(asset.url, '')
+    const kind = ['image', 'spriteSheet', 'audio', 'runtime'].includes(String(asset.kind)) ? asset.kind as AssetDefinition['kind'] : base.kind
+    const animation = kind === 'spriteSheet' ? normalizeAnimationSpec(asset.animation || base.animation) : undefined
+    const animationComplete = animation?.layoutVersion === 3 && animation.clips
+      ? ANIMATION_CLIP_POSES.filter((pose) => animation.clips?.[pose]?.enabled !== false).every((pose) => Boolean(animation.clips?.[pose]?.url))
+      : Boolean(url)
     const requestedStatus = String(asset.status)
-    const status: AssetDefinition['status'] = url
+    const status: AssetDefinition['status'] = animationComplete
       ? 'success'
       : base.kind === 'audio' || base.kind === 'runtime'
         ? 'success'
@@ -437,11 +442,11 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
       prompt: text(asset.prompt, base.prompt),
       enabled: typeof asset.enabled === 'boolean' ? asset.enabled : base.enabled,
       levelIds: validLevelIds.length ? validLevelIds : base.levelIds,
-      kind: ['image', 'spriteSheet', 'audio', 'runtime'].includes(String(asset.kind)) ? asset.kind as AssetDefinition['kind'] : base.kind,
+      kind,
       status,
       url: url || undefined,
       error: text(asset.error, '') || undefined,
-      animation: base.kind === 'spriteSheet' ? normalizeAnimationSpec(asset.animation || base.animation) : undefined,
+      animation,
       sound: asset.sound || base.sound,
       motion: asset.motion || base.motion,
     }

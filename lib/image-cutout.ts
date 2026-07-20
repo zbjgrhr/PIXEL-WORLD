@@ -137,11 +137,11 @@ export async function removeChromaGreenBackground(imageBuffer: Buffer, preserveC
   return cutoutWithMask(imageBuffer, isChromaGreenPixel, preserveCanvas)
 }
 
-export async function padImageToGrid(imageBuffer: Buffer, gridSize: number): Promise<Buffer> {
+export async function padImageToGrid(imageBuffer: Buffer, columns: number, rows = columns): Promise<Buffer> {
   const metadata = await sharp(imageBuffer).metadata()
-  if (!metadata.width || !metadata.height || gridSize < 2) return imageBuffer
-  const targetWidth = Math.ceil(metadata.width / gridSize) * gridSize
-  const targetHeight = Math.ceil(metadata.height / gridSize) * gridSize
+  if (!metadata.width || !metadata.height || columns < 1 || rows < 1) return imageBuffer
+  const targetWidth = Math.ceil(metadata.width / columns) * columns
+  const targetHeight = Math.ceil(metadata.height / rows) * rows
   const extraX = targetWidth - metadata.width
   const extraY = targetHeight - metadata.height
   if (!extraX && !extraY) return imageBuffer

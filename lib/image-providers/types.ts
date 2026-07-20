@@ -7,11 +7,13 @@ export type EndpointKind = 'dashscope' | 'images' | 'openrouter-images'
 export interface GenerateImageParams {
   prompt: string
   negativePrompt?: string
+  referenceImages?: string[]
   assetType: AssetType
   apiKey: string
   model: string
   size?: string
-  layout?: 'single' | 'sprite-sheet'
+  layout?: 'single' | 'sprite-sheet' | 'animation-strip'
+  frameCount?: number
 }
 
 export interface ImageProvider {

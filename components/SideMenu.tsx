@@ -8,10 +8,19 @@ import { ActionButtons, AssetPlanner, ModelSelector, ProjectHeader, ThemeCustomi
 import { PRESET_THEMES } from '@/configs'
 import { buildGameDataFromSpec, syncPlayableLevels } from '@/lib/virtual-levels'
 import { formatGenerationError } from '@/lib/format-generation-error'
-import { buildStructuredPrompt, DEFAULT_ANIMATION, isStructuredPromptBlank } from '@/lib/asset-catalog'
+import {
+  animationClipPoses,
+  animationIsComplete,
+  buildStructuredPrompt,
+  createActionStripAnimation,
+  isStructuredPromptBlank,
+  normalizeAnimationSpec,
+} from '@/lib/asset-catalog'
 import { cacheAssetUrl, cacheSpecAssets, hydrateSpecAssets, stripLargeAssetUrls } from '@/lib/asset-db'
+import { prepareAnimationReferenceImages } from '@/lib/animation-references'
 import { ASSET_TYPES } from '@/types'
 import type {
+  AnimationClipPose,
   AssetDefinition,
   GameData,
   GameSpec,
@@ -158,19 +167,50 @@ const SideMenu: React.FC<SideMenuProps> = ({
     }
   }
 
-  const requestAsset = async (spec: GameSpec, asset: AssetDefinition, signal?: AbortSignal): Promise<AssetDefinition> => {
+  const requestAsset = async (spec: GameSpec, asset: AssetDefinition, signal?: AbortSignal, animationPose?: AnimationClipPose): Promise<AssetDefinition> => {
     const firstLevelId = asset.levelIds[0]
     const levelIndex = Math.max(0, spec.levels.findIndex((level) => level.id === firstLevelId))
+    const referenceImages = animationPose
+      ? await prepareAnimationReferenceImages(spec, asset, animationPose)
+      : []
     const response = await fetch('/api/generate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-      body: JSON.stringify({ theme: spec.title, prompt: asset.prompt, provider: selectedProvider, model: selectedModel, apiKey: apiKey.trim(), levelCount: spec.levels.length, spec: stripLargeAssetUrls(spec), asset: { ...asset, url: undefined }, levelIndex }),
+      body: JSON.stringify({
+        theme: spec.title,
+        prompt: asset.prompt,
+        provider: selectedProvider,
+        model: selectedModel,
+        apiKey: apiKey.trim(),
+        levelCount: spec.levels.length,
+        spec: stripLargeAssetUrls(spec),
+        asset: stripLargeAssetUrls({ ...spec, assets: [asset] }).assets[0],
+        levelIndex,
+        animationPose,
+        referenceImages,
+      }),
     })
     const result = await response.json().catch(() => null)
-    if (!response.ok || !result?.success || !result.data?.asset?.url) throw new Error(formatGenerationError(result?.error || `HTTP ${response.status}`))
-    const generatedAsset = result.data.asset as AssetDefinition
-    return generatedAsset.kind === 'spriteSheet'
-      ? { ...generatedAsset, animation: { ...DEFAULT_ANIMATION, states: { ...DEFAULT_ANIMATION.states } } }
-      : generatedAsset
+    const generatedAsset = result?.data?.asset as AssetDefinition | undefined
+    const generatedClip = animationPose ? normalizeAnimationSpec(generatedAsset?.animation).clips?.[animationPose] : undefined
+    if (!response.ok || !result?.success || (!animationPose && !generatedAsset?.url) || (animationPose && !generatedClip?.url)) {
+      throw new Error(formatGenerationError(result?.error || `HTTP ${response.status}`))
+    }
+    if (!generatedAsset) throw new Error('The image API returned no asset data.')
+    if (!animationPose) return generatedAsset
+    const currentAnimation = asset.animation?.layoutVersion === 3
+      ? normalizeAnimationSpec(asset.animation)
+      : createActionStripAnimation()
+    const mergedAsset: AssetDefinition = {
+      ...asset,
+      ...generatedAsset,
+      animation: {
+        ...currentAnimation,
+        clips: { ...currentAnimation.clips, [animationPose]: generatedClip },
+      },
+      url: animationPose === 'idle' ? generatedClip?.url : asset.url,
+      error: undefined,
+    }
+    return { ...mergedAsset, status: animationIsComplete(mergedAsset) ? 'success' : 'pending' }
   }
 
   const testApi = async () => {
@@ -196,8 +236,23 @@ const SideMenu: React.FC<SideMenuProps> = ({
     let baseSpec = optimizedSpec
     if (!baseSpec || baseSpec.levels.length !== levelCount) baseSpec = await optimizePrompt(true)
     if (!baseSpec) return void message.error('请先点击“一键优化提示词”建立 V3 素材规划。')
-    const tasks = baseSpec.assets.filter((asset) => asset.enabled && (asset.kind === 'image' || asset.kind === 'spriteSheet') && (!asset.url || asset.status === 'failed' || asset.status === 'cancelled'))
+    const tasks = baseSpec.assets.filter((asset) => asset.enabled && (asset.kind === 'image' || asset.kind === 'spriteSheet') && (
+      asset.kind === 'spriteSheet'
+        ? !animationIsComplete(asset)
+        : !asset.url || asset.status === 'failed' || asset.status === 'cancelled'
+    ))
     if (!tasks.length) return void message.info('所有已启用图片素材都已生成。')
+
+    const pendingPoses = (asset: AssetDefinition): AnimationClipPose[] => {
+      if (asset.kind !== 'spriteSheet') return []
+      const animation = normalizeAnimationSpec(asset.animation)
+      if (animation.layoutVersion !== 3 || !animation.clips) return []
+      return animationClipPoses(asset).filter((pose) => {
+        const clip = animation.clips?.[pose]
+        return !clip?.url || clip.status === 'failed' || clip.status === 'cancelled'
+      })
+    }
+    const totalJobs = tasks.reduce((sum, asset) => sum + (asset.kind === 'spriteSheet' ? pendingPoses(asset).length : 1), 0)
 
     const loadingId = `loading-${Date.now()}` as GameTheme
     const loadingTheme: Theme = { id: loadingId, name: baseSpec.title, description: customPrompt, characterImage: '', backgroundImage: '', groundImage: '', obstacleImage: '', spec: baseSpec, isLoading: true }
@@ -205,10 +260,12 @@ const SideMenu: React.FC<SideMenuProps> = ({
     const controller = new AbortController()
     abortRef.current = controller
     const results = new Map<string, AssetDefinition>()
-    let cursor = 0
+    const workingAssets = new Map(baseSpec.assets.map((asset) => [asset.id, asset]))
     let finished = 0
 
     const updateAsset = (id: string, patch: Partial<AssetDefinition>) => {
+      const working = workingAssets.get(id)
+      if (working) workingAssets.set(id, { ...working, ...patch })
       setOptimizedSpec((current) => {
         if (!current) return current
         const next = patchSpecAsset(current, id, patch)
@@ -220,38 +277,108 @@ const SideMenu: React.FC<SideMenuProps> = ({
     try {
       setLoading(true)
       setGenerationProgress(0)
-      setLoadingMessage(`正在生成 ${tasks.length} 个已选择素材；并发数 2。`)
+      setLoadingMessage(`正在生成 ${totalJobs} 个独立动作与素材；同时处理 2 个角色或素材。`)
       setGameState('loading')
       onRegeneratingImagesChange?.(ALL_GENERATING)
       setPresetThemes(themesWithLoading)
       setSelectedTheme(loadingId)
       onThemeUpdate?.(themesWithLoading)
 
-      const worker = async () => {
+      const runPhase = async (phaseTasks: AssetDefinition[]) => {
+        let cursor = 0
+        const worker = async () => {
         while (!controller.signal.aborted) {
           const taskIndex = cursor++
-          if (taskIndex >= tasks.length) return
-          const asset = tasks[taskIndex]
-          updateAsset(asset.id, { status: 'generating', error: undefined })
+          if (taskIndex >= phaseTasks.length) return
+          const asset = phaseTasks[taskIndex]
+          let currentAsset: AssetDefinition = asset.kind === 'spriteSheet' && asset.animation?.layoutVersion !== 3
+            ? { ...asset, url: undefined, animation: createActionStripAnimation(), status: 'pending' }
+            : asset
+          updateAsset(asset.id, { ...currentAsset, status: 'generating', error: undefined })
           try {
-            const generated = await requestAsset(baseSpec!, asset, controller.signal)
-            const completedAsset = { ...asset, ...generated, status: 'success' as const, error: undefined }
-            if (completedAsset.url) await cacheAssetUrl(DRAFT_PROJECT_ID, completedAsset.id, completedAsset.url)
-            results.set(asset.id, completedAsset)
-            updateAsset(asset.id, completedAsset)
+            if (currentAsset.kind === 'spriteSheet') {
+              const poses = pendingPoses(currentAsset)
+              for (const pose of poses) {
+                if (controller.signal.aborted) break
+                const animation = normalizeAnimationSpec(currentAsset.animation)
+                currentAsset = {
+                  ...currentAsset,
+                  status: 'generating',
+                  animation: {
+                    ...animation,
+                    clips: {
+                      ...animation.clips,
+                      [pose]: { ...animation.clips?.[pose]!, status: 'generating', error: undefined },
+                    },
+                  },
+                }
+                updateAsset(asset.id, currentAsset)
+                try {
+                  const liveSpec = { ...baseSpec!, assets: baseSpec!.assets.map((candidate) => workingAssets.get(candidate.id) || candidate) }
+                  currentAsset = await requestAsset(liveSpec, currentAsset, controller.signal, pose)
+                  const clip = normalizeAnimationSpec(currentAsset.animation).clips?.[pose]
+                  if (clip?.url) {
+                    await cacheAssetUrl(DRAFT_PROJECT_ID, `${asset.id}:clip:${pose}`, clip.url)
+                    if (pose === 'idle') await cacheAssetUrl(DRAFT_PROJECT_ID, asset.id, clip.url)
+                  }
+                  updateAsset(asset.id, currentAsset)
+                } catch (error) {
+                  const cancelled = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
+                  const clipError = cancelled ? 'Generation cancelled.' : error instanceof Error ? error.message : 'Generation failed.'
+                  const failedAnimation = normalizeAnimationSpec(currentAsset.animation)
+                  currentAsset = {
+                    ...currentAsset,
+                    status: cancelled ? 'cancelled' : 'failed',
+                    error: clipError,
+                    animation: {
+                      ...failedAnimation,
+                      clips: {
+                        ...failedAnimation.clips,
+                        [pose]: { ...failedAnimation.clips?.[pose]!, status: cancelled ? 'cancelled' : 'failed', error: clipError },
+                      },
+                    },
+                  }
+                  updateAsset(asset.id, currentAsset)
+                } finally {
+                  finished += 1
+                  setGenerationProgress(Math.round(finished / Math.max(1, totalJobs) * 100))
+                  setLoadingMessage(`动作与素材生成进度 ${finished}/${totalJobs}`)
+                }
+              }
+              currentAsset = { ...currentAsset, status: animationIsComplete(currentAsset) ? 'success' : currentAsset.status }
+            } else {
+              const liveSpec = { ...baseSpec!, assets: baseSpec!.assets.map((candidate) => workingAssets.get(candidate.id) || candidate) }
+              const generated = await requestAsset(liveSpec, currentAsset, controller.signal)
+              currentAsset = { ...currentAsset, ...generated, status: 'success', error: undefined }
+              if (currentAsset.url) await cacheAssetUrl(DRAFT_PROJECT_ID, currentAsset.id, currentAsset.url)
+              finished += 1
+              setGenerationProgress(Math.round(finished / Math.max(1, totalJobs) * 100))
+              setLoadingMessage(`动作与素材生成进度 ${finished}/${totalJobs}`)
+            }
+            results.set(asset.id, currentAsset)
+            workingAssets.set(asset.id, currentAsset)
+            updateAsset(asset.id, currentAsset)
           } catch (error) {
             const cancelled = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
-            const failedAsset = { ...asset, status: cancelled ? 'cancelled' as const : 'failed' as const, error: cancelled ? 'Generation cancelled.' : error instanceof Error ? error.message : 'Generation failed.' }
+            const failedAsset = { ...currentAsset, status: cancelled ? 'cancelled' as const : 'failed' as const, error: cancelled ? 'Generation cancelled.' : error instanceof Error ? error.message : 'Generation failed.' }
             results.set(asset.id, failedAsset)
+            workingAssets.set(asset.id, failedAsset)
             updateAsset(asset.id, failedAsset)
-          } finally {
-            finished += 1
-            setGenerationProgress(Math.round(finished / tasks.length * 100))
-            setLoadingMessage(`素材生成进度 ${finished}/${tasks.length}`)
+            if (currentAsset.kind !== 'spriteSheet') {
+              finished += 1
+              setGenerationProgress(Math.round(finished / Math.max(1, totalJobs) * 100))
+              setLoadingMessage(`动作与素材生成进度 ${finished}/${totalJobs}`)
+            }
           }
         }
       }
-      await Promise.all([worker(), worker()])
+        await Promise.all([worker(), worker()])
+      }
+
+      // Weapons, projectiles and effects must exist before attack strips are
+      // generated so those exact project assets can be supplied as references.
+      await runPhase(tasks.filter((asset) => asset.kind !== 'spriteSheet'))
+      await runPhase(tasks.filter((asset) => asset.kind === 'spriteSheet'))
 
       const finalAssets = baseSpec.assets.map((asset) => results.get(asset.id) || asset)
       const finalSpec = { ...baseSpec, assets: finalAssets }

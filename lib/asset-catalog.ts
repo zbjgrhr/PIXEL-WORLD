@@ -1,4 +1,6 @@
 import type {
+  AnimationClipPose,
+  AnimationClipSpec,
   AnimationSpec,
   AssetCategory,
   AssetDefinition,
@@ -73,20 +75,58 @@ export const ASSET_CATALOG_BY_CATEGORY = Object.fromEntries(
   ASSET_CATALOG.map((entry) => [entry.category, entry]),
 ) as Record<AssetCategory, AssetCatalogEntry>
 
+export const ANIMATION_CLIP_POSES: AnimationClipPose[] = [
+  'idle', 'walk', 'jump', 'meleeAttack', 'rangedAttack', 'hit', 'death',
+]
+
+const CLIP_DEFAULTS: Record<AnimationClipPose, Omit<AnimationClipSpec, 'status'>> = {
+  idle: { frameCount: 1, fps: 1, loop: false, enabled: true },
+  walk: { frameCount: 3, fps: 5, loop: true, enabled: true },
+  jump: { frameCount: 2, fps: 4, loop: false, enabled: true },
+  meleeAttack: { frameCount: 3, fps: 8, loop: false, enabled: true },
+  rangedAttack: { frameCount: 3, fps: 8, loop: false, enabled: true },
+  hit: { frameCount: 1, fps: 1, loop: false, enabled: true },
+  death: { frameCount: 2, fps: 3, loop: false, enabled: true },
+}
+
+export function animationClipDefaults(pose: AnimationClipPose): Omit<AnimationClipSpec, 'status'> {
+  return { ...CLIP_DEFAULTS[pose] }
+}
+
+export function createActionStripAnimation(): AnimationSpec {
+  return {
+    layoutVersion: 3,
+    format: 'action-strips',
+    columns: 3,
+    rows: 1,
+    fps: 5,
+    states: { idle: 0, walk: 0, jump: 0, attack: 0, meleeAttack: 0, rangedAttack: 0, hit: 0, death: 0 },
+    clips: Object.fromEntries(ANIMATION_CLIP_POSES.map((pose) => [pose, {
+      ...CLIP_DEFAULTS[pose], status: 'pending' as const,
+    }])) as Record<AnimationClipPose, AnimationClipSpec>,
+  }
+}
+
 export const DEFAULT_ANIMATION: AnimationSpec = {
-  layoutVersion: 2,
-  columns: 6,
-  rows: 6,
-  fps: 8,
-  states: { idle: 0, walk: 1, jump: 2, attack: 3, hit: 4, death: 5 },
+  ...createActionStripAnimation(),
 }
 
 export const LEGACY_ANIMATION: AnimationSpec = {
   layoutVersion: 1,
+  format: 'atlas',
   columns: 6,
   rows: 5,
   fps: 8,
-  states: { idle: 0, walk: 1, jump: 1, attack: 2, hit: 3, death: 4 },
+  states: { idle: 0, walk: 1, jump: 1, attack: 2, meleeAttack: 2, rangedAttack: 2, hit: 3, death: 4 },
+}
+
+export const ATLAS_V2_ANIMATION: AnimationSpec = {
+  layoutVersion: 2,
+  format: 'atlas',
+  columns: 6,
+  rows: 6,
+  fps: 8,
+  states: { idle: 0, walk: 1, jump: 2, attack: 3, meleeAttack: 3, rangedAttack: 3, hit: 4, death: 5 },
 }
 
 export function normalizeAnimationSpec(value: unknown): AnimationSpec {
@@ -96,10 +136,33 @@ export function normalizeAnimationSpec(value: unknown): AnimationSpec {
     rows?: unknown
     fps?: unknown
     states?: Record<string, unknown>
+    format?: unknown
+    clips?: Partial<Record<AnimationClipPose, Partial<AnimationClipSpec>>>
   } : {}
+  if (raw.layoutVersion === 3 || raw.format === 'action-strips' || raw.clips) {
+    const base = createActionStripAnimation()
+    const clips = Object.fromEntries(ANIMATION_CLIP_POSES.map((pose) => {
+      const clip = raw.clips?.[pose] || {}
+      const defaults = CLIP_DEFAULTS[pose]
+      const rawFrames = Number(clip.frameCount)
+      const frameCount = ([1, 2, 3].includes(rawFrames) ? rawFrames : defaults.frameCount) as 1 | 2 | 3
+      const rawFps = Number(clip.fps)
+      return [pose, {
+        ...defaults,
+        frameCount,
+        fps: Number.isFinite(rawFps) ? Math.max(1, Math.min(12, rawFps)) : defaults.fps,
+        loop: pose === 'walk',
+        enabled: typeof clip.enabled === 'boolean' ? clip.enabled : defaults.enabled,
+        status: clip.url ? 'success' : ['generating', 'failed', 'cancelled'].includes(String(clip.status)) ? clip.status as AnimationClipSpec['status'] : 'pending',
+        url: typeof clip.url === 'string' && clip.url ? clip.url : undefined,
+        error: typeof clip.error === 'string' && clip.error ? clip.error : undefined,
+      }]
+    })) as Record<AnimationClipPose, AnimationClipSpec>
+    return { ...base, clips }
+  }
   const rows = Number(raw.rows)
   const legacy = rows === 5 || raw.layoutVersion === 1 || !raw.states || !('jump' in raw.states)
-  const base = legacy ? LEGACY_ANIMATION : DEFAULT_ANIMATION
+  const base = legacy ? LEGACY_ANIMATION : ATLAS_V2_ANIMATION
   const fps = Number(raw.fps)
   if (legacy) {
     return {
@@ -108,24 +171,49 @@ export function normalizeAnimationSpec(value: unknown): AnimationSpec {
       states: { ...LEGACY_ANIMATION.states },
     }
   }
-  const maxRow = DEFAULT_ANIMATION.rows - 1
+  const maxRow = ATLAS_V2_ANIMATION.rows - 1
   const row = (pose: keyof AnimationSpec['states']) => {
     const rawValue = raw.states?.[pose] ?? (pose === 'walk' ? raw.states?.move : undefined)
     const numeric = Number(rawValue)
     return Number.isFinite(numeric) ? Math.max(0, Math.min(maxRow, Math.round(numeric))) : base.states[pose]
   }
   return {
-    ...DEFAULT_ANIMATION,
-    fps: Number.isFinite(fps) ? Math.max(2, Math.min(24, Math.round(fps))) : DEFAULT_ANIMATION.fps,
+    ...ATLAS_V2_ANIMATION,
+    fps: Number.isFinite(fps) ? Math.max(2, Math.min(24, Math.round(fps))) : ATLAS_V2_ANIMATION.fps,
     states: {
       idle: row('idle'),
       walk: row('walk'),
       jump: row('jump'),
       attack: row('attack'),
+      meleeAttack: row('attack'),
+      rangedAttack: row('attack'),
       hit: row('hit'),
       death: row('death'),
     },
   }
+}
+
+export function cloneAnimationSpec(value?: AnimationSpec): AnimationSpec {
+  const animation = value ? normalizeAnimationSpec(value) : createActionStripAnimation()
+  return {
+    ...animation,
+    states: { ...animation.states },
+    clips: animation.clips ? Object.fromEntries(Object.entries(animation.clips).map(([pose, clip]) => [pose, { ...clip }])) : undefined,
+  }
+}
+
+export function animationClipPoses(asset: AssetDefinition): AnimationClipPose[] {
+  if (asset.kind !== 'spriteSheet') return []
+  const animation = normalizeAnimationSpec(asset.animation)
+  if (animation.layoutVersion !== 3 || !animation.clips) return ANIMATION_CLIP_POSES
+  return ANIMATION_CLIP_POSES.filter((pose) => animation.clips?.[pose]?.enabled !== false)
+}
+
+export function animationIsComplete(asset: AssetDefinition): boolean {
+  if (asset.kind !== 'spriteSheet') return Boolean(asset.url)
+  const animation = normalizeAnimationSpec(asset.animation)
+  if (animation.layoutVersion !== 3 || !animation.clips) return Boolean(asset.url)
+  return animationClipPoses(asset).every((pose) => Boolean(animation.clips?.[pose]?.url))
 }
 
 function soundFor(category: AssetCategory): SoundSpec {
@@ -163,7 +251,7 @@ export function createAssetPlan(levelIds: string[]): AssetDefinition[] {
         levelIds: targetIds,
         kind: entry.kind,
         status: entry.kind === 'audio' || entry.kind === 'runtime' ? 'success' as const : 'pending' as const,
-        animation: entry.kind === 'spriteSheet' ? { ...DEFAULT_ANIMATION, states: { ...DEFAULT_ANIMATION.states } } : undefined,
+        animation: entry.kind === 'spriteSheet' ? createActionStripAnimation() : undefined,
         sound: entry.kind === 'audio' ? soundFor(entry.category) : undefined,
         motion: motionFor(entry),
       }))

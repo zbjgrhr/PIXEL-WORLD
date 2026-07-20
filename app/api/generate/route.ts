@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { formatGenerationError, mapUpstreamHttpStatus } from '@/lib/format-generation-error'
-import { buildGamePrompt, buildModerationSafePlannedAssetPrompt, buildPlannedAssetPrompt, getCutoutMode, getNegativeTemplate } from '@/lib/game-prompts'
-import { DEFAULT_ANIMATION, generationTypeForAsset } from '@/lib/asset-catalog'
+import { buildAnimationClipPrompt, buildGamePrompt, buildModerationSafeAnimationClipPrompt, buildModerationSafePlannedAssetPrompt, buildPlannedAssetPrompt, getCutoutMode, getNegativeTemplate } from '@/lib/game-prompts'
+import { animationClipPoses, createActionStripAnimation, generationTypeForAsset, normalizeAnimationSpec } from '@/lib/asset-catalog'
 import { createFallbackGameSpec, normalizeGameSpec } from '@/lib/game-spec'
 import {
   getImageProvider,
@@ -12,7 +12,7 @@ import {
   UpstreamApiError,
 } from '@/lib/image-providers'
 import { ASSET_TYPES } from '@/types'
-import type { AssetDefinition, AssetType, GameSpec, LevelData, ProviderId, SpawnPoint } from '@/types'
+import type { AnimationClipPose, AssetDefinition, AssetType, GameSpec, LevelData, ProviderId, SpawnPoint } from '@/types'
 
 interface GenerateRequest {
   theme: string
@@ -24,6 +24,8 @@ interface GenerateRequest {
   apiKey?: string
   spec?: GameSpec
   asset?: AssetDefinition
+  animationPose?: AnimationClipPose
+  referenceImages?: string[]
   levelIndex?: number
 }
 
@@ -39,6 +41,8 @@ async function processImageCutout(
   model: string,
   baseUrl: string,
   preserveCanvas = false,
+  gridColumns?: number,
+  gridRows = 1,
 ): Promise<string> {
   const cutoutMode = getCutoutMode(providerId, type, model)
   if (!cutoutMode) return imageUrl
@@ -49,7 +53,7 @@ async function processImageCutout(
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl, type, cutoutMode, preserveCanvas, gridSize: preserveCanvas ? 6 : undefined }),
+        body: JSON.stringify({ imageUrl, type, cutoutMode, preserveCanvas, gridColumns, gridRows }),
       },
     )
     const result = await response.json()
@@ -134,19 +138,33 @@ async function generatePlannedAsset(
   spec: GameSpec,
   levelIndex: number,
   baseUrl: string,
+  animationPose?: AnimationClipPose,
+  referenceImages: string[] = [],
 ): Promise<string> {
   const type = generationTypeForAsset(asset)
   if (!type || (asset.kind !== 'image' && asset.kind !== 'spriteSheet')) {
     throw new ProviderValidationError(`Asset ${asset.id} does not require image generation.`, providerId)
   }
   const provider = getImageProvider(providerId)
-  let prompt = buildPlannedAssetPrompt(asset, type, theme, spec, levelIndex, providerId, model)
+  const animation = asset.kind === 'spriteSheet' ? normalizeAnimationSpec(asset.animation) : undefined
+  const clip = animationPose && animation?.layoutVersion === 3 ? animation.clips?.[animationPose] : undefined
+  const frameCount = clip?.frameCount || (animationPose ? createActionStripAnimation().clips?.[animationPose]?.frameCount : undefined) || 1
+  let prompt = animationPose
+    ? buildAnimationClipPrompt(asset, animationPose, theme, spec, providerId, model)
+    : buildPlannedAssetPrompt(asset, type, theme, spec, levelIndex, providerId, model)
   const negativePrompt = asset.kind === 'spriteSheet'
     ? getNegativeTemplate(type, providerId, model).replace(
       'multiple subjects, duplicate subject',
       'unrelated second character, inconsistent identity between animation cells',
     )
     : getNegativeTemplate(type, providerId, model)
+  const safeReferenceImages = referenceImages.filter((url) => (
+    /^https?:\/\//i.test(url) || /^data:image\/(?:png|jpe?g|webp);base64,/i.test(url)
+  )).slice(0, 4)
+  const referenceGuidance = safeReferenceImages.length
+    ? ` Reference image 1 is the exact character identity and proportions. ${safeReferenceImages.length > 1 ? 'The remaining references are exact project-made weapon, projectile or effect assets; reproduce and physically align them with the character, do not redesign them.' : 'Keep this exact identity in the new action strip.'}`
+    : ''
+  prompt += referenceGuidance
   let usedModerationRewrite = false
   let lastError: unknown
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -157,16 +175,24 @@ async function generatePlannedAsset(
         assetType: type,
         apiKey,
         model,
-        layout: asset.kind === 'spriteSheet' ? 'sprite-sheet' : 'single',
+        layout: animationPose ? 'animation-strip' : asset.kind === 'spriteSheet' ? 'sprite-sheet' : 'single',
+        frameCount,
+        referenceImages: safeReferenceImages,
       })
       await validateGeneratedImage(originalUrl, providerId, model)
-      const processedUrl = await processImageCutout(originalUrl, type, providerId, model, baseUrl, asset.kind === 'spriteSheet')
+      const processedUrl = await processImageCutout(
+        originalUrl, type, providerId, model, baseUrl, asset.kind === 'spriteSheet',
+        animationPose ? frameCount : asset.kind === 'spriteSheet' ? 6 : undefined,
+        animationPose ? 1 : asset.kind === 'spriteSheet' ? 6 : 1,
+      )
       if (processedUrl !== originalUrl) await validateGeneratedImage(processedUrl, providerId, model)
       return processedUrl
     } catch (error) {
       lastError = error
       if (isModerationError(error) && !usedModerationRewrite) {
-        prompt = buildModerationSafePlannedAssetPrompt(asset, type, providerId, model)
+        prompt = animationPose
+          ? buildModerationSafeAnimationClipPrompt(asset, animationPose, providerId, model) + referenceGuidance
+          : buildModerationSafePlannedAssetPrompt(asset, type, providerId, model)
         usedModerationRewrite = true
         continue
       }
@@ -261,21 +287,37 @@ export async function POST(request: NextRequest) {
 
     if (body.asset) {
       const asset = spec.assets.find((candidate) => candidate.id === body.asset?.id) || body.asset
+      const animationPose = body.animationPose || (asset.kind === 'spriteSheet' ? 'idle' : undefined)
       const levelIndex = Math.min(levelCount - 1, Math.max(0, body.levelIndex || 0))
       const url = await generatePlannedAsset(
-        providerId, modelId, apiKey, asset, theme, spec, levelIndex, baseUrl,
+        providerId, modelId, apiKey, asset, theme, spec, levelIndex, baseUrl, animationPose, body.referenceImages,
       )
-      // Every newly generated character sheet uses the V2 6x6 contract. An old
-      // asset may arrive with legacy 6x5 metadata, so carrying `asset.animation`
-      // forward would slice the new image with the wrong row height.
+      const animation = asset.kind === 'spriteSheet' ? (
+        normalizeAnimationSpec(asset.animation).layoutVersion === 3
+          ? normalizeAnimationSpec(asset.animation)
+          : createActionStripAnimation()
+      ) : undefined
+      const completedAnimation = animationPose && animation?.clips ? {
+        ...animation,
+        clips: {
+          ...animation.clips,
+          [animationPose]: {
+            ...animation.clips[animationPose],
+            url,
+            status: 'success' as const,
+            error: undefined,
+          },
+        },
+      } : animation
+      const completedClipUrls = completedAnimation?.layoutVersion === 3 && completedAnimation.clips
+        ? animationClipPoses({ ...asset, animation: completedAnimation }).every((pose) => Boolean(completedAnimation.clips?.[pose]?.url))
+        : false
       const completedAsset: AssetDefinition = {
         ...asset,
-        url,
-        status: 'success',
+        url: completedAnimation?.clips?.idle?.url || (asset.kind === 'spriteSheet' ? undefined : url),
+        status: asset.kind === 'spriteSheet' ? completedClipUrls ? 'success' : 'pending' : 'success',
         error: undefined,
-        animation: asset.kind === 'spriteSheet'
-          ? { ...DEFAULT_ANIMATION, states: { ...DEFAULT_ANIMATION.states } }
-          : undefined,
+        animation: completedAnimation,
       }
       const completedSpec: GameSpec = {
         ...spec,

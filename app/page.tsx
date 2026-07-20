@@ -12,9 +12,11 @@ import { getDefaultModel, getDefaultProvider } from '@/configs/image-providers'
 import { formatGenerationError } from '@/lib/format-generation-error'
 import { loadImageApiPrefs, saveImageApiPrefs } from '@/lib/image-api-prefs'
 import { cacheAssetUrl, stripLargeAssetUrls } from '@/lib/asset-db'
-import { DEFAULT_ANIMATION } from '@/lib/asset-catalog'
+import { prepareAnimationReferenceImages } from '@/lib/animation-references'
+import { animationIsComplete, createActionStripAnimation, normalizeAnimationSpec } from '@/lib/asset-catalog'
 import { ASSET_TYPES } from '@/types'
 import type {
+  AnimationClipPose,
   AssetType,
   AssetDefinition,
   GameData,
@@ -229,47 +231,63 @@ export default function Home() {
     setGameData(nextData, themeId)
   }
 
-  const handleRegenerateAsset = async (themeId: string, assetId: string, key: string) => {
+  const handleRegenerateAsset = async (themeId: string, assetId: string, key: string, requestedPose?: AnimationClipPose) => {
     const theme = themes.find((item) => item.id === themeId)
     const current = getGameDataForTheme(themeId)
     const spec = current.data?.spec || theme?.spec
     const asset = spec?.assets.find((item) => item.id === assetId)
     if (!theme || !spec || !asset) return void message.error('没有找到需要重新生成的素材。')
     if (!key.trim()) return void message.error('请先填写 API Key。')
-    setRegeneratingAssetIds((items) => [...items, assetId])
+    const animationPose = asset.kind === 'spriteSheet' ? requestedPose || 'idle' : undefined
+    const regenerationKey = animationPose ? `${assetId}:${animationPose}` : assetId
+    setRegeneratingAssetIds((items) => [...items, regenerationKey])
     handleUpdateAsset(themeId, assetId, { status: 'generating', error: undefined })
     try {
       const levelIndex = Math.max(0, spec.levels.findIndex((level) => level.id === asset.levelIds[0]))
+      const referenceImages = animationPose
+        ? await prepareAnimationReferenceImages(spec, asset, animationPose)
+        : []
       const response = await fetch('/api/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ theme: spec.title, prompt: asset.prompt, provider: selectedProvider, model: selectedModel, apiKey: key.trim(), levelCount: spec.levels.length, spec: stripLargeAssetUrls(spec), asset: { ...asset, url: undefined }, levelIndex }),
+        body: JSON.stringify({ theme: spec.title, prompt: asset.prompt, provider: selectedProvider, model: selectedModel, apiKey: key.trim(), levelCount: spec.levels.length, spec: stripLargeAssetUrls(spec), asset: stripLargeAssetUrls({ ...spec, assets: [asset] }).assets[0], levelIndex, animationPose, referenceImages }),
       })
       const result = await response.json().catch(() => null)
-      if (!response.ok || !result?.success || !result.data?.asset?.url) throw new Error(formatGenerationError(result?.error || `HTTP ${response.status}`))
-      const generatedAsset = result.data.asset as AssetDefinition
-      // Be defensive if an older API response is cached by a deployment edge:
-      // regenerated sheets must always switch to the six-row animation layout.
-      const completedAsset: AssetDefinition = generatedAsset.kind === 'spriteSheet'
-        ? {
-          ...generatedAsset,
-          animation: { ...DEFAULT_ANIMATION, states: { ...DEFAULT_ANIMATION.states } },
-          status: 'success',
+      const generatedAsset = result?.data?.asset as AssetDefinition | undefined
+      const generatedClip = animationPose ? normalizeAnimationSpec(generatedAsset?.animation).clips?.[animationPose] : undefined
+      if (!response.ok || !result?.success || (!animationPose && !generatedAsset?.url) || (animationPose && !generatedClip?.url)) throw new Error(formatGenerationError(result?.error || `HTTP ${response.status}`))
+      let completedAsset: AssetDefinition
+      if (animationPose) {
+        const currentAnimation = asset.animation?.layoutVersion === 3 ? normalizeAnimationSpec(asset.animation) : createActionStripAnimation()
+        completedAsset = {
+          ...asset,
+          ...generatedAsset!,
+          animation: { ...currentAnimation, clips: { ...currentAnimation.clips, [animationPose]: generatedClip } },
+          url: animationPose === 'idle' ? generatedClip?.url : asset.url,
           error: undefined,
         }
-        : { ...generatedAsset, status: 'success', error: undefined }
+        completedAsset.status = animationIsComplete(completedAsset) ? 'success' : 'pending'
+      } else {
+        completedAsset = { ...generatedAsset!, status: 'success', error: undefined }
+      }
       try {
-        await cacheAssetUrl(themeId, assetId, completedAsset.url || '')
+        const cacheKey = animationPose ? `${assetId}:clip:${animationPose}` : assetId
+        await cacheAssetUrl(themeId, cacheKey, animationPose ? generatedClip?.url || '' : completedAsset.url || '')
+        if (animationPose === 'idle' && generatedClip?.url) await cacheAssetUrl(themeId, assetId, generatedClip.url)
       } catch (cacheError) {
         console.warn('Failed to replace cached regenerated asset:', cacheError)
         message.warning('新素材已生成并应用，但浏览器缓存保存失败；刷新前请先导出或重新保存项目。')
       }
       handleUpdateAsset(themeId, assetId, completedAsset)
-      message.success(`${asset.title} 已重新生成。`)
+      message.success(`${asset.title}${animationPose ? ` · ${animationPose}` : ''} 已重新生成。`)
     } catch (error) {
-      handleUpdateAsset(themeId, assetId, { status: 'failed', error: error instanceof Error ? error.message : 'Generation failed.' })
+      const errorMessage = error instanceof Error ? error.message : 'Generation failed.'
+      if (animationPose && asset.animation?.layoutVersion === 3) {
+        const animation = normalizeAnimationSpec(asset.animation)
+        handleUpdateAsset(themeId, assetId, { status: 'failed', error: errorMessage, animation: { ...animation, clips: { ...animation.clips, [animationPose]: { ...animation.clips?.[animationPose]!, status: 'failed', error: errorMessage } } } })
+      } else handleUpdateAsset(themeId, assetId, { status: 'failed', error: errorMessage })
       message.error(error instanceof Error ? error.message : '素材重新生成失败。')
     } finally {
-      setRegeneratingAssetIds((items) => items.filter((id) => id !== assetId))
+      setRegeneratingAssetIds((items) => items.filter((id) => id !== regenerationKey))
     }
   }
 

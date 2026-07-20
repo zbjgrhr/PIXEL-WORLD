@@ -1,4 +1,5 @@
-import type { AssetDefinition, AssetType, GameSpec, ProviderId } from '@/types'
+import { animationClipDefaults } from '@/lib/asset-catalog'
+import type { AnimationClipPose, AssetDefinition, AssetType, GameSpec, ProviderId } from '@/types'
 import { ASSET_CATALOG_BY_CATEGORY } from '@/lib/asset-catalog'
 
 export type GameAssetType = AssetType
@@ -154,10 +155,63 @@ export function buildPlannedAssetPrompt(
   const sharedStyle = style(spec)
   const requestedAsset = cleanPromptFragment(asset.prompt)
   if (asset.kind === 'spriteSheet') {
-    return `${COMMON_STYLE}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. This asset only: ${requestedAsset}. Create one exact square 6-column by 6-row animation sprite sheet on ${isolationBackground(providerId, model)}. Row 1 standing idle, row 2 walking, row 3 jumping, row 4 attacking, row 5 hit reaction, row 6 defeat. Exactly 36 equally sized cells. Keep one identical original character in every cell with the same face, head, body proportions, costume, colors, side-view direction, camera scale and ground baseline. Every cell must show the complete body from the highest point of the head to the lowest point of the feet, with generous transparent-safe margin on all four sides. No cropped head, hair, feet, wings, weapon, or limbs. No labels, letters, numbers, grid lines, scenery, separate weapon, extra character, shadows crossing cell boundaries, or content spilling into adjacent cells.`
+    return `${COMMON_STYLE}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. This asset only: ${requestedAsset}. Create exactly one neutral standing frame on ${isolationBackground(providerId, model)}. Show the complete character from head to feet at a readable side-view game scale, with generous safe margin and a stable ground baseline. No portrait crop, close-up, missing body part, panel border, text, scenery, separate prop, or extra character.`
   }
   const base = getPositiveTemplate(generationType, providerId, model)
   return `${base}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. This asset only: ${requestedAsset}. Generate only this one category and never merge it with a character, scene, weapon, creature, platform, obstacle, projectile, pickup, or effect from another category.`
+}
+
+function animationActionInstruction(pose: AnimationClipPose, asset: AssetDefinition, spec: GameSpec): string {
+  const melee = spec.assets.find((candidate) => candidate.enabled && candidate.category === 'meleeWeapon')?.prompt || spec.weapon.appearance
+  const ranged = spec.assets.find((candidate) => candidate.enabled && candidate.category === 'rangedWeapon')?.prompt || spec.weapon.appearance
+  const enemyEffectCategory = asset.category === 'groundEnemy' ? 'groundEnemyAttackEffect'
+    : asset.category === 'airEnemy' ? 'airEnemyAttackEffect'
+      : asset.category === 'waterEnemy' ? 'waterEnemyAttackEffect'
+        : asset.category === 'boss' ? 'bossAttackEffect' : undefined
+  const enemyEffect = enemyEffectCategory
+    ? spec.assets.find((candidate) => candidate.enabled && candidate.category === enemyEffectCategory)?.prompt
+    : undefined
+  switch (pose) {
+    case 'idle': return 'One neutral standing pose. The character is balanced, relaxed, completely motionless, and not attacking.'
+    case 'walk': return 'Three ordered walk-cycle poses: contact, passing, opposite contact. Feet and arms change naturally while the torso identity stays stable.'
+    case 'jump': return 'Two ordered jump poses: upward takeoff/ascent, then controlled descent with legs prepared to land.'
+    case 'meleeAttack': return asset.category === 'hero'
+      ? `Three ordered melee poses: wind-up, strike, recovery. In every frame the character visibly grips and uses the same melee weapon described as: ${melee}. The weapon must connect naturally to the hands.`
+      : `Three ordered close-attack poses: wind-up, impact, recovery. Use the character's own original body weapon or equipment. Related attack effect concept: ${enemyEffect || asset.prompt}.`
+    case 'rangedAttack': return asset.category === 'hero'
+      ? `Three ordered ranged poses: aim, fire, recoil. In every frame the character visibly grips and uses the same ranged weapon described as: ${ranged}. The muzzle and hands must align naturally.`
+      : `Three ordered ranged-attack poses: aim, release, recoil. The projectile origin must be clearly visible and anatomically connected to the character. Related effect concept: ${enemyEffect || asset.prompt}.`
+    case 'hit': return 'One readable hit-reaction pose with a brief backward recoil. No injury detail, no extra effect, and no attack.'
+    case 'death': return 'Two ordered defeat poses: losing balance, then fully collapsed or powered down. Keep the complete body visible in both frames.'
+  }
+}
+
+export function buildAnimationClipPrompt(
+  asset: AssetDefinition,
+  pose: AnimationClipPose,
+  theme: string,
+  spec: GameSpec,
+  providerId: ProviderId,
+  model?: string,
+): string {
+  const clip = animationClipDefaults(pose)
+  const requestedAsset = cleanPromptFragment(asset.prompt)
+  const frameLayout = clip.frameCount === 1
+    ? 'Create exactly one frame on one canvas.'
+    : `Create one horizontal animation strip containing exactly ${clip.frameCount} equal-width frames in one row, ordered from left to right.`
+  return `${COMMON_STYLE}. ${ORIGINALITY}. Theme label: ${theme}. Shared visual contract: ${style(spec)}. Character identity only: ${requestedAsset}. Action: ${animationActionInstruction(pose, asset, spec)} ${frameLayout} Use ${isolationBackground(providerId, model)}. Every frame must show the same complete character from the highest point of the head, hair, horns or wings to the lowest point of both feet, with generous safe margin on all four sides. Keep identical face, anatomy, costume, colors, side-view direction, camera scale, canvas alignment and ground baseline. Each frame occupies its own equal panel. No portrait crop, close-up, missing body part, panel border, text, label, scenery, ground, unrelated weapon, extra character, duplicate body, motion smear across panels, or content crossing a panel boundary.`
+}
+
+export function buildModerationSafeAnimationClipPrompt(
+  asset: AssetDefinition,
+  pose: AnimationClipPose,
+  providerId: ProviderId,
+  model?: string,
+): string {
+  const clip = animationClipDefaults(pose)
+  const subject = cleanPromptFragment(ASSET_CATALOG_BY_CATEGORY[asset.category]?.defaultPrompt || asset.prompt, 220)
+  const layout = clip.frameCount === 1 ? 'one complete full-body frame' : `${clip.frameCount} equal full-body frames in one horizontal row`
+  return `${COMMON_STYLE}. ${ORIGINALITY}. ${subject}. Create ${layout} on ${isolationBackground(providerId, model)}. Pose type: ${pose}. Same original subject, outfit, proportions, scale, side view and baseline in every frame. Entire head-to-feet body visible with empty margin. No crop, portrait close-up, text, logo, scenery, extra subject, panel border, or content crossing frames.`
 }
 
 /** A deliberately generic second attempt for provider moderation false positives. */
@@ -170,7 +224,7 @@ export function buildModerationSafePlannedAssetPrompt(
   const catalogPrompt = cleanPromptFragment(ASSET_CATALOG_BY_CATEGORY[asset.category]?.defaultPrompt || asset.prompt, 240)
   const base = getPositiveTemplate(generationType, providerId, model)
   if (asset.kind === 'spriteSheet') {
-    return `${COMMON_STYLE}. ${ORIGINALITY}. ${catalogPrompt}. One exact square 6-column by 6-row side-view animation sprite sheet on ${isolationBackground(providerId, model)}. Rows in order: standing idle, walking, jumping, attacking, hit reaction, defeat. Exactly 36 equal cells. One consistent original subject at a fixed camera scale and baseline, complete head-to-feet body visible with generous empty margin in every cell. No crop, no names, no story, no text, no logo, no scenery, no extra subject, and no content crossing cell boundaries.`
+    return `${COMMON_STYLE}. ${ORIGINALITY}. ${catalogPrompt}. One complete neutral standing frame on ${isolationBackground(providerId, model)}. Fixed side-view game scale and baseline, complete head-to-feet body visible with generous empty margin. No portrait crop, names, text, logo, scenery, extra subject, or panel border.`
   }
   return `${base}. ${ORIGINALITY}. ${catalogPrompt}. Use a simple dark-neutral and cyan-orange pixel palette. One asset only, no names, no story, no text, no logo, no mixed categories.`
 }

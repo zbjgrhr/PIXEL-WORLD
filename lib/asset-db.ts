@@ -1,4 +1,5 @@
 import type { GameSpec } from '@/types'
+import { animationClipPoses, normalizeAnimationSpec } from '@/lib/asset-catalog'
 
 const DB_NAME = 'pixel-world-assets-v3'
 const STORE_NAME = 'assets'
@@ -48,7 +49,16 @@ export async function cacheAssetUrl(projectId: string, assetId: string, url: str
 }
 
 export async function cacheSpecAssets(projectId: string, spec: GameSpec): Promise<void> {
-  await Promise.all(spec.assets.filter((asset) => asset.url).map((asset) => cacheAssetUrl(projectId, asset.id, asset.url || '')))
+  await Promise.all(spec.assets.flatMap((asset) => {
+    const jobs: Promise<void>[] = []
+    if (asset.url) jobs.push(cacheAssetUrl(projectId, asset.id, asset.url))
+    const animation = asset.kind === 'spriteSheet' ? normalizeAnimationSpec(asset.animation) : undefined
+    for (const pose of animationClipPoses(asset)) {
+      const url = animation?.clips?.[pose]?.url
+      if (url) jobs.push(cacheAssetUrl(projectId, `${asset.id}:clip:${pose}`, url))
+    }
+    return jobs
+  }))
 }
 
 export async function loadProjectAssets(projectId: string): Promise<Record<string, string>> {
@@ -69,18 +79,33 @@ export async function hydrateSpecAssets(projectId: string, spec: GameSpec): Prom
   const urls = await loadProjectAssets(projectId)
   return {
     ...spec,
-    assets: spec.assets.map((asset) => asset.url || !urls[asset.id]
-      ? asset
-      : { ...asset, url: urls[asset.id], status: 'success', error: undefined }),
+    assets: spec.assets.map((asset) => {
+      const animation = asset.kind === 'spriteSheet' ? normalizeAnimationSpec(asset.animation) : undefined
+      if (animation?.layoutVersion === 3 && animation.clips) {
+        const clips = { ...animation.clips }
+        for (const pose of animationClipPoses(asset)) {
+          const cachedUrl = urls[`${asset.id}:clip:${pose}`]
+          clips[pose] = { ...clips[pose]!, url: clips[pose]?.url || cachedUrl, status: clips[pose]?.url || cachedUrl ? 'success' : clips[pose]?.status || 'pending' }
+        }
+        const complete = animationClipPoses(asset).every((pose) => Boolean(clips[pose]?.url))
+        return { ...asset, animation: { ...animation, clips }, url: clips.idle?.url || asset.url || urls[asset.id], status: complete ? 'success' : asset.status, error: complete ? undefined : asset.error }
+      }
+      return asset.url || !urls[asset.id] ? asset : { ...asset, url: urls[asset.id], status: 'success', error: undefined }
+    }),
   }
 }
 
 export function stripLargeAssetUrls(spec: GameSpec): GameSpec {
   return {
     ...spec,
-    assets: spec.assets.map((asset) => asset.url?.startsWith('data:') || asset.url?.startsWith('blob:')
-      ? { ...asset, url: undefined }
-      : asset),
+    assets: spec.assets.map((asset) => {
+      const strip = (url?: string) => url?.startsWith('data:') || url?.startsWith('blob:') ? undefined : url
+      const animation = asset.animation?.clips ? {
+        ...asset.animation,
+        clips: Object.fromEntries(Object.entries(asset.animation.clips).map(([pose, clip]) => [pose, clip ? { ...clip, url: strip(clip.url) } : clip])),
+      } : asset.animation
+      return { ...asset, url: strip(asset.url), animation }
+    }),
   }
 }
 

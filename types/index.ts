@@ -39,14 +39,27 @@ export type AssetKind = 'image' | 'spriteSheet' | 'audio' | 'runtime'
 export type AssetStatus = 'pending' | 'generating' | 'success' | 'failed' | 'cancelled'
 export type EnemyMobility = 'ground' | 'air' | 'water' | 'boss'
 export type PlatformMode = 'ground' | 'water' | 'air'
-export type AnimationPose = 'idle' | 'walk' | 'jump' | 'attack' | 'hit' | 'death'
+export type AnimationPose = 'idle' | 'walk' | 'jump' | 'attack' | 'meleeAttack' | 'rangedAttack' | 'hit' | 'death'
+export type AnimationClipPose = Exclude<AnimationPose, 'attack'>
+
+export interface AnimationClipSpec {
+  frameCount: 1 | 2 | 3
+  fps: number
+  loop: boolean
+  enabled: boolean
+  status: AssetStatus
+  url?: string
+  error?: string
+}
 
 export interface AnimationSpec {
-  layoutVersion: 1 | 2
-  columns: 6
-  rows: 5 | 6
+  layoutVersion: 1 | 2 | 3
+  format: 'atlas' | 'action-strips'
+  columns: number
+  rows: number
   fps: number
   states: Record<AnimationPose, number>
+  clips?: Partial<Record<AnimationClipPose, AnimationClipSpec>>
 }
 
 export interface SoundSpec {
@@ -265,6 +278,7 @@ export interface GenerateImageRequest {
   apiKey: string
   spec?: GameSpec
   asset?: AssetDefinition
+  animationPose?: AnimationClipPose
   levelIndex?: number
 }
 
@@ -311,7 +325,7 @@ export interface ThemePreviewProps {
   apiKey?: string
   onRegenerateImage?: (themeId: string, imageType: AssetType, apiKey: string) => Promise<void>
   regeneratingAssetIds?: string[]
-  onRegenerateAsset?: (themeId: string, assetId: string, apiKey: string) => Promise<void>
+  onRegenerateAsset?: (themeId: string, assetId: string, apiKey: string, animationPose?: AnimationClipPose) => Promise<void>
   onUpdateAsset?: (themeId: string, assetId: string, patch: Partial<AssetDefinition>) => void
   onDeleteTheme?: (themeId: string) => void
 }
