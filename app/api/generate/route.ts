@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { formatGenerationError, mapUpstreamHttpStatus } from '@/lib/format-generation-error'
 import { buildGamePrompt, buildModerationSafePlannedAssetPrompt, buildPlannedAssetPrompt, getCutoutMode, getNegativeTemplate } from '@/lib/game-prompts'
-import { generationTypeForAsset } from '@/lib/asset-catalog'
+import { DEFAULT_ANIMATION, generationTypeForAsset } from '@/lib/asset-catalog'
 import { createFallbackGameSpec, normalizeGameSpec } from '@/lib/game-spec'
 import {
   getImageProvider,
@@ -265,9 +265,25 @@ export async function POST(request: NextRequest) {
       const url = await generatePlannedAsset(
         providerId, modelId, apiKey, asset, theme, spec, levelIndex, baseUrl,
       )
+      // Every newly generated character sheet uses the V2 6x6 contract. An old
+      // asset may arrive with legacy 6x5 metadata, so carrying `asset.animation`
+      // forward would slice the new image with the wrong row height.
+      const completedAsset: AssetDefinition = {
+        ...asset,
+        url,
+        status: 'success',
+        error: undefined,
+        animation: asset.kind === 'spriteSheet'
+          ? { ...DEFAULT_ANIMATION, states: { ...DEFAULT_ANIMATION.states } }
+          : undefined,
+      }
+      const completedSpec: GameSpec = {
+        ...spec,
+        assets: spec.assets.map((candidate) => candidate.id === completedAsset.id ? completedAsset : candidate),
+      }
       return NextResponse.json({
         success: true,
-        data: { asset: { ...asset, url, status: 'success', error: undefined }, spec },
+        data: { asset: completedAsset, spec: completedSpec },
         generationId: `asset_${asset.id}_${Date.now()}`,
         timestamp: new Date().toISOString(),
         metadata: { generationTime: (Date.now() - startedAt) / 1000, assetCount: 1, provider: providerId, model: modelId },

@@ -11,7 +11,8 @@ import { PRESET_THEMES } from '@/configs'
 import { getDefaultModel, getDefaultProvider } from '@/configs/image-providers'
 import { formatGenerationError } from '@/lib/format-generation-error'
 import { loadImageApiPrefs, saveImageApiPrefs } from '@/lib/image-api-prefs'
-import { stripLargeAssetUrls } from '@/lib/asset-db'
+import { cacheAssetUrl, stripLargeAssetUrls } from '@/lib/asset-db'
+import { DEFAULT_ANIMATION } from '@/lib/asset-catalog'
 import { ASSET_TYPES } from '@/types'
 import type {
   AssetType,
@@ -245,7 +246,24 @@ export default function Home() {
       })
       const result = await response.json().catch(() => null)
       if (!response.ok || !result?.success || !result.data?.asset?.url) throw new Error(formatGenerationError(result?.error || `HTTP ${response.status}`))
-      handleUpdateAsset(themeId, assetId, { ...result.data.asset, status: 'success', error: undefined })
+      const generatedAsset = result.data.asset as AssetDefinition
+      // Be defensive if an older API response is cached by a deployment edge:
+      // regenerated sheets must always switch to the six-row animation layout.
+      const completedAsset: AssetDefinition = generatedAsset.kind === 'spriteSheet'
+        ? {
+          ...generatedAsset,
+          animation: { ...DEFAULT_ANIMATION, states: { ...DEFAULT_ANIMATION.states } },
+          status: 'success',
+          error: undefined,
+        }
+        : { ...generatedAsset, status: 'success', error: undefined }
+      try {
+        await cacheAssetUrl(themeId, assetId, completedAsset.url || '')
+      } catch (cacheError) {
+        console.warn('Failed to replace cached regenerated asset:', cacheError)
+        message.warning('新素材已生成并应用，但浏览器缓存保存失败；刷新前请先导出或重新保存项目。')
+      }
+      handleUpdateAsset(themeId, assetId, completedAsset)
       message.success(`${asset.title} 已重新生成。`)
     } catch (error) {
       handleUpdateAsset(themeId, assetId, { status: 'failed', error: error instanceof Error ? error.message : 'Generation failed.' })

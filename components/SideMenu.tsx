@@ -8,7 +8,7 @@ import { ActionButtons, AssetPlanner, ModelSelector, ProjectHeader, ThemeCustomi
 import { PRESET_THEMES } from '@/configs'
 import { buildGameDataFromSpec, syncPlayableLevels } from '@/lib/virtual-levels'
 import { formatGenerationError } from '@/lib/format-generation-error'
-import { buildStructuredPrompt, isStructuredPromptBlank } from '@/lib/asset-catalog'
+import { buildStructuredPrompt, DEFAULT_ANIMATION, isStructuredPromptBlank } from '@/lib/asset-catalog'
 import { cacheAssetUrl, cacheSpecAssets, hydrateSpecAssets, stripLargeAssetUrls } from '@/lib/asset-db'
 import { ASSET_TYPES } from '@/types'
 import type {
@@ -167,7 +167,10 @@ const SideMenu: React.FC<SideMenuProps> = ({
     })
     const result = await response.json().catch(() => null)
     if (!response.ok || !result?.success || !result.data?.asset?.url) throw new Error(formatGenerationError(result?.error || `HTTP ${response.status}`))
-    return result.data.asset as AssetDefinition
+    const generatedAsset = result.data.asset as AssetDefinition
+    return generatedAsset.kind === 'spriteSheet'
+      ? { ...generatedAsset, animation: { ...DEFAULT_ANIMATION, states: { ...DEFAULT_ANIMATION.states } } }
+      : generatedAsset
   }
 
   const testApi = async () => {
