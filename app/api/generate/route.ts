@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { formatGenerationError, mapUpstreamHttpStatus } from '@/lib/format-generation-error'
-import { buildGamePrompt, buildPlannedAssetPrompt, getCutoutMode, getNegativeTemplate } from '@/lib/game-prompts'
+import { buildGamePrompt, buildModerationSafePlannedAssetPrompt, buildPlannedAssetPrompt, getCutoutMode, getNegativeTemplate } from '@/lib/game-prompts'
 import { generationTypeForAsset } from '@/lib/asset-catalog'
 import { createFallbackGameSpec, normalizeGameSpec } from '@/lib/game-spec'
 import {
@@ -86,6 +86,18 @@ function isRetryable(error: unknown): boolean {
   )
 }
 
+function isModerationError(error: unknown): boolean {
+  if (!(error instanceof UpstreamApiError)) return false
+  const detail = error.message.toLowerCase()
+  return error.status === 400 && (
+    detail.includes('protected content')
+    || detail.includes('request moderated')
+    || detail.includes('content policy')
+    || detail.includes('content_policy')
+    || detail.includes('moderation')
+  )
+}
+
 async function validateGeneratedImage(url: string, providerId: ProviderId, model: string): Promise<void> {
   const dataMatch = url.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\r\n]+)$/i)
   if (dataMatch) {
@@ -127,13 +139,20 @@ async function generatePlannedAsset(
     throw new ProviderValidationError(`Asset ${asset.id} does not require image generation.`, providerId)
   }
   const provider = getImageProvider(providerId)
-  const prompt = buildPlannedAssetPrompt(asset, type, theme, spec, levelIndex, providerId, model)
+  let prompt = buildPlannedAssetPrompt(asset, type, theme, spec, levelIndex, providerId, model)
+  const negativePrompt = asset.kind === 'spriteSheet'
+    ? getNegativeTemplate(type, providerId, model).replace(
+      'multiple subjects, duplicate subject',
+      'unrelated second character, inconsistent identity between animation cells',
+    )
+    : getNegativeTemplate(type, providerId, model)
+  let usedModerationRewrite = false
   let lastError: unknown
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const originalUrl = await provider.generateImage({
         prompt,
-        negativePrompt: getNegativeTemplate(type, providerId, model),
+        negativePrompt,
         assetType: type,
         apiKey,
         model,
@@ -144,6 +163,11 @@ async function generatePlannedAsset(
       return processedUrl
     } catch (error) {
       lastError = error
+      if (isModerationError(error) && !usedModerationRewrite) {
+        prompt = buildModerationSafePlannedAssetPrompt(asset, type, providerId, model)
+        usedModerationRewrite = true
+        continue
+      }
       if (!isRetryable(error) || attempt === 2) throw error
       await new Promise((resolve) => setTimeout(resolve, 700 * 2 ** attempt))
     }

@@ -11,6 +11,7 @@ import { PRESET_THEMES } from '@/configs'
 import { getDefaultModel, getDefaultProvider } from '@/configs/image-providers'
 import { formatGenerationError } from '@/lib/format-generation-error'
 import { loadImageApiPrefs, saveImageApiPrefs } from '@/lib/image-api-prefs'
+import { stripLargeAssetUrls } from '@/lib/asset-db'
 import { ASSET_TYPES } from '@/types'
 import type {
   AssetType,
@@ -240,7 +241,7 @@ export default function Home() {
       const levelIndex = Math.max(0, spec.levels.findIndex((level) => level.id === asset.levelIds[0]))
       const response = await fetch('/api/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ theme: spec.title, prompt: theme.description, provider: selectedProvider, model: selectedModel, apiKey: key.trim(), levelCount: spec.levels.length, spec, asset, levelIndex }),
+        body: JSON.stringify({ theme: spec.title, prompt: asset.prompt, provider: selectedProvider, model: selectedModel, apiKey: key.trim(), levelCount: spec.levels.length, spec: stripLargeAssetUrls(spec), asset: { ...asset, url: undefined }, levelIndex }),
       })
       const result = await response.json().catch(() => null)
       if (!response.ok || !result?.success || !result.data?.asset?.url) throw new Error(formatGenerationError(result?.error || `HTTP ${response.status}`))

@@ -135,5 +135,13 @@ export function buildStructuredPrompt(levelCount: number): string {
   const levels = Array.from({ length: levelCount }, (_, index) =>
     `关卡 ${index + 1}：\n背景：\n平台类型：\n障碍物：\n出现素材：\n背景音乐：\n天气/滤镜/闪光：`,
   ).join('\n\n')
-  return `游戏标题：\n世界观与故事：\n整体像素风格：\n\n${fields}\n\n${levels}`
+  return `游戏标题：\n世界观与故事：\n背景故事：\n整体像素风格：\n\n${fields}\n\n${levels}`
+}
+
+export function isStructuredPromptBlank(prompt: string): boolean {
+  if (!prompt.trim()) return true
+  return prompt.split(/\r?\n/).every((line) => {
+    const match = line.match(/^[^:：]+[:：](.*)$/)
+    return !match || !match[1].trim()
+  })
 }

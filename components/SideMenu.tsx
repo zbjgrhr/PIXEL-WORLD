@@ -8,7 +8,7 @@ import { ActionButtons, AssetPlanner, ModelSelector, ProjectHeader, ThemeCustomi
 import { PRESET_THEMES } from '@/configs'
 import { buildGameDataFromSpec, syncPlayableLevels } from '@/lib/virtual-levels'
 import { formatGenerationError } from '@/lib/format-generation-error'
-import { buildStructuredPrompt } from '@/lib/asset-catalog'
+import { buildStructuredPrompt, isStructuredPromptBlank } from '@/lib/asset-catalog'
 import { cacheAssetUrl, cacheSpecAssets, hydrateSpecAssets, stripLargeAssetUrls } from '@/lib/asset-db'
 import { ASSET_TYPES } from '@/types'
 import type {
@@ -44,6 +44,12 @@ const ALL_GENERATING = Object.fromEntries(ASSET_TYPES.map((type) => [type, true]
 const DRAFT_KEY = 'pixel-world-v3-generation-draft'
 const DRAFT_PROJECT_ID = 'active-draft'
 
+interface SavedDraft {
+  name?: string
+  spec: GameSpec
+  prompt?: string
+}
+
 function patchSpecAsset(spec: GameSpec, id: string, patch: Partial<AssetDefinition>): GameSpec {
   return { ...spec, assets: spec.assets.map((asset) => asset.id === id ? { ...asset, ...patch } : asset) }
 }
@@ -67,32 +73,43 @@ const SideMenu: React.FC<SideMenuProps> = ({
     selectedTheme, customPrompt, levelCount, setSelectedTheme, setCustomPrompt, setLevelCount,
     setGameState, setLoadingMessage, setGameData, isLoading, setLoading,
   } = useGameStore()
-  const [customThemeName, setCustomThemeName] = useState('Pixel World')
+  const [customThemeName, setCustomThemeName] = useState('')
   const [isThemeCreated, setIsThemeCreated] = useState(false)
   const [presetThemes, setPresetThemes] = useState<Theme[]>([...PRESET_THEMES])
   const [optimizedSpec, setOptimizedSpec] = useState<GameSpec | null>(null)
   const [isOptimizing, setIsOptimizing] = useState(false)
   const [generationProgress, setGenerationProgress] = useState(0)
   const [isTesting, setIsTesting] = useState(false)
+  const [savedDraft, setSavedDraft] = useState<SavedDraft | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    if (!customPrompt.trim()) setCustomPrompt(buildStructuredPrompt(levelCount))
+    // Opening the creator always starts from an empty field skeleton. A previous
+    // generation draft stays available, but it must never overwrite a new idea.
+    setCustomPrompt(buildStructuredPrompt(levelCount))
+    setCustomThemeName('')
+    setOptimizedSpec(null)
     try {
       const raw = localStorage.getItem(DRAFT_KEY)
       if (raw) {
-        const draft = JSON.parse(raw) as { name?: string; spec?: GameSpec; prompt?: string }
-        if (draft.spec?.version === 3) {
-          setOptimizedSpec(draft.spec)
-          setCustomThemeName(draft.name || draft.spec.title)
-          if (draft.prompt) setCustomPrompt(draft.prompt)
-          void hydrateSpecAssets(DRAFT_PROJECT_ID, draft.spec).then((hydrated) => setOptimizedSpec(hydrated))
-        }
+        const draft = JSON.parse(raw) as SavedDraft
+        if (draft.spec?.version === 3) setSavedDraft(draft)
       }
     } catch {
       // Ignore malformed drafts.
     }
   }, [])
+
+  const restoreSavedDraft = () => {
+    if (!savedDraft) return
+    setCustomThemeName(savedDraft.name || savedDraft.spec.title)
+    setCustomPrompt(savedDraft.prompt?.trim() || buildStructuredPrompt(savedDraft.spec.levels.length))
+    setLevelCount(savedDraft.spec.levels.length)
+    setOptimizedSpec(savedDraft.spec)
+    void hydrateSpecAssets(DRAFT_PROJECT_ID, savedDraft.spec).then((hydrated) => setOptimizedSpec(hydrated))
+    setSavedDraft(null)
+    message.success('已恢复上次素材规划；新建页面默认仍保持空白字段。')
+  }
 
   const persistDraft = (spec: GameSpec) => {
     try {
@@ -125,7 +142,11 @@ const SideMenu: React.FC<SideMenuProps> = ({
       updateSpec(spec)
       setCustomPrompt(result.data.optimizedPrompt)
       if (!quiet) {
-        message.success(result.data.source === 'ai' ? 'AI 已补全 V3 游戏规格。' : '本地编译器已补全 V3 游戏规格。')
+        message.success(result.data.source === 'ai'
+          ? 'AI 已补全 V3 游戏规格。'
+          : result.data.source === 'template'
+            ? '完整模板已转换为稳定的 V3 素材规划。'
+            : '本地编译器已补全 V3 游戏规格。')
         if (result.data.warning) message.info(result.data.warning, 5)
       }
       return spec
@@ -142,7 +163,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
     const levelIndex = Math.max(0, spec.levels.findIndex((level) => level.id === firstLevelId))
     const response = await fetch('/api/generate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-      body: JSON.stringify({ theme: spec.title, prompt: customPrompt, provider: selectedProvider, model: selectedModel, apiKey: apiKey.trim(), levelCount: spec.levels.length, spec, asset, levelIndex }),
+      body: JSON.stringify({ theme: spec.title, prompt: asset.prompt, provider: selectedProvider, model: selectedModel, apiKey: apiKey.trim(), levelCount: spec.levels.length, spec: stripLargeAssetUrls(spec), asset: { ...asset, url: undefined }, levelIndex }),
     })
     const result = await response.json().catch(() => null)
     if (!response.ok || !result?.success || !result.data?.asset?.url) throw new Error(formatGenerationError(result?.error || `HTTP ${response.status}`))
@@ -291,8 +312,13 @@ const SideMenu: React.FC<SideMenuProps> = ({
       <ThemeCustomizer
         customThemeName={customThemeName} onThemeNameChange={setCustomThemeName}
         customPrompt={customPrompt} onPromptChange={(value) => { setCustomPrompt(value); setOptimizedSpec(null) }}
-        levelCount={levelCount} onLevelCountChange={(count) => { setLevelCount(count); setOptimizedSpec(null); setCustomPrompt(buildStructuredPrompt(count)) }}
+        levelCount={levelCount} onLevelCountChange={(count) => {
+          setLevelCount(count)
+          setOptimizedSpec(null)
+          if (isStructuredPromptBlank(customPrompt)) setCustomPrompt(buildStructuredPrompt(count))
+        }}
         onOptimizePrompt={() => { void optimizePrompt(false) }} isOptimizing={isOptimizing} optimizedSpec={optimizedSpec}
+        hasSavedDraft={Boolean(savedDraft)} onRestoreDraft={restoreSavedDraft}
       />
       {optimizedSpec && <AssetPlanner spec={optimizedSpec} onChange={updateSpec} onGenerate={() => { void generateSelectedAssets() }} onCancel={() => abortRef.current?.abort()} onTestApi={() => { void testApi() }} isGenerating={isLoading} isTesting={isTesting} progress={generationProgress} />}
       <ActionButtons isThemeCreated={isThemeCreated} isLoading={isLoading} selectedTheme={selectedTheme} customPrompt={customPrompt} customThemeName={customThemeName} apiKey={apiKey} onCreateTheme={() => { void generateSelectedAssets() }} onStartGame={handleStartGame} />

@@ -266,7 +266,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
       gameDataByTheme: Object.fromEntries(Object.entries(state.gameDataByTheme).map(([id, value]) => [id, stripGameData(value)])),
       processedImages: sanitizedImages,
       selectedTheme: state.selectedTheme,
-      customPrompt: state.customPrompt,
     }))
   },
   loadFromLocalStorage: () => {
@@ -295,7 +294,6 @@ export const useGameStore = create<GameStore>((set, get) => ({
         gameDataByTheme,
         processedImages: data.processedImages || {},
         selectedTheme,
-        customPrompt: data.customPrompt || '',
         totalLevels: gameData.data?.levels?.length || 1,
       })
       void Promise.all(Object.entries(gameDataByTheme).map(async ([themeId, value]) => {

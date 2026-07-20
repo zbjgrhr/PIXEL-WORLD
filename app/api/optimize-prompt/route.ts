@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import {
   createFallbackGameSpec,
   normalizeGameSpec,
+  preserveExplicitPromptFields,
   serializeGameSpec,
 } from '@/lib/game-spec'
 import type { GameSpec, ProviderId } from '@/types'
+import { PROMPT_TEMPLATES } from '@/configs/prompt-templates'
 
 interface OptimizeRequest {
   prompt?: string
@@ -19,6 +21,9 @@ const SYSTEM_PROMPT = `You are a game-design prompt compiler. Convert the user's
 Rules:
 - Keep background, hero, enemy, weapon, ground, obstacle, projectile, attack effect, collectible, and boss visually separate.
 - Asset descriptions must state only what belongs to that asset; never copy a whole scene into a sprite description.
+- Match every explicit labeled field only to its corresponding asset category. A hero field can never become a weapon prompt, and a weapon field can never become a hero prompt.
+- Every image prompt must describe one original, non-branded design. Never mention or imitate an existing game, film, anime, character, franchise, artist, studio, logo, trademark, or living person.
+- Keep image prompts concise. Do not copy the world story or another level's environment into an isolated asset prompt.
 - Preserve the user's theme and important creative choices.
 - Produce coherent art direction, palette, lighting, and pixel scale shared by all assets.
 - Write backgroundStory as a vivid 120-180 word game introduction with a clear conflict, the hero's goal, the collectible's importance, and the final boss. Do not describe UI or controls.
@@ -113,13 +118,19 @@ export async function POST(request: NextRequest) {
     const apiKey = body.apiKey?.trim() || process.env[config.envKey]?.trim() || ''
 
     let spec = fallback
-    let source: 'ai' | 'local' = 'local'
+    let source: 'ai' | 'local' | 'template' = 'local'
     let warning: string | undefined
+    const knownTemplate = PROMPT_TEMPLATES.find((template) => template.prompt.trim() === prompt)
 
-    if (apiKey) {
+    if (knownTemplate) {
+      // The bundled template is already exhaustive and category-safe. Keeping it
+      // deterministic avoids a free text model swapping hero/weapon/enemy fields.
+      spec = fallback
+      source = 'template'
+    } else if (apiKey) {
       try {
         const candidate = await optimizeWithAi(provider, apiKey, prompt, fallback)
-        spec = normalizeGameSpec(candidate, fallback, levelCount)
+        spec = preserveExplicitPromptFields(normalizeGameSpec(candidate, fallback, levelCount), fallback, prompt)
         source = 'ai'
       } catch (error) {
         warning = error instanceof Error

@@ -97,13 +97,20 @@ async function callOpenRouterImageAPI(
 
 function canTryFallback(error: unknown): boolean {
   if (!(error instanceof UpstreamApiError)) return false
+  const detail = error.message.toLowerCase()
   return (
     error.status === 404 ||
     error.status === 408 ||
     error.status === 409 ||
     error.status === 425 ||
     error.status === 429 ||
-    error.status >= 500
+    error.status >= 500 ||
+    (error.status === 400 && (
+      detail.includes('protected content')
+      || detail.includes('request moderated')
+      || detail.includes('content policy')
+      || detail.includes('content_policy')
+    ))
   )
 }
 

@@ -1,4 +1,5 @@
 import type { AssetDefinition, AssetType, GameSpec, ProviderId } from '@/types'
+import { ASSET_CATALOG_BY_CATEGORY } from '@/lib/asset-catalog'
 
 export type GameAssetType = AssetType
 export type CutoutMode = 'checkerboard' | 'chroma-green'
@@ -7,6 +8,18 @@ const COMMON_STYLE = '2D side-scrolling game asset, cohesive 16-bit pixel art, c
 const ISOLATED_BASE = 'exactly one isolated subject, centered, fully visible, generous empty margin, no crop, no text, no logo, no UI, no frame, no border, no scene'
 const SCENE_NEGATIVE = 'people, characters, hero, enemies, monsters, creatures, weapons, pickups, obstacles in foreground, UI, text, logo, border, frame'
 const SPRITE_NEGATIVE = 'environment, scenery, landscape, sky, ground, floor, platform, architecture, buildings, trees, plants, furniture, multiple subjects, duplicate subject, border, frame, card, UI panel, text, logo, watermark, cast shadow extending into a scene'
+const ORIGINALITY = 'original non-branded design, no recognizable franchise character, no trademarked symbol'
+
+function cleanPromptFragment(value: string, maxLength = 700): string {
+  return value
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\b(?:in the style of|style of|inspired by|based on)\s+[^,.;\n]{1,80}/gi, 'with an original genre-appropriate design')
+    .replace(/(?:模仿|仿照|参考|致敬)\s*[^，。；;\n]{1,40}/g, '采用原创同类设计')
+    .replace(/《[^》]{1,80}》/g, '原创作品')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength)
+}
 
 function usesChromaKey(providerId: ProviderId, model?: string): boolean {
   if (providerId === 'dashscope') return false
@@ -22,7 +35,7 @@ function isolationBackground(providerId: ProviderId, model?: string): string {
 
 function style(spec: GameSpec): string {
   const visual = spec.visualStyle
-  return `${visual.artDirection}; ${visual.palette}; ${visual.lighting}; ${visual.pixelScale}`
+  return cleanPromptFragment(`${visual.artDirection}; ${visual.palette}; ${visual.lighting}; ${visual.pixelScale}`, 500)
 }
 
 export function getCutoutMode(
@@ -56,7 +69,7 @@ export function getPositiveTemplate(
     case 'projectile':
       return `${isolated}, one small horizontal projectile only, pointing right, compact silhouette, no launcher`
     case 'attackEffect':
-      return `${isolated}, one compact horizontal melee slash visual effect only, crescent-shaped, no character, no weapon`
+      return `${isolated}, one compact combat visual effect only, clear horizontal direction, no character, no weapon`
     case 'collectible':
       return `${isolated}, one small collectible pickup icon only, readable glowing silhouette, no pedestal`
     case 'obstacle':
@@ -139,11 +152,25 @@ export function buildPlannedAssetPrompt(
   model?: string,
 ): string {
   const sharedStyle = style(spec)
-  const level = spec.levels[Math.min(levelIndex, spec.levels.length - 1)] || spec.levels[0]
+  const requestedAsset = cleanPromptFragment(asset.prompt)
   if (asset.kind === 'spriteSheet') {
-    return `${COMMON_STYLE}. Theme: ${theme}. Shared visual contract: ${sharedStyle}. Character identity: ${asset.prompt}. Create one exact 6-column by 5-row animation sprite sheet on ${isolationBackground(providerId, model)}. Row 1 idle animation, row 2 movement animation, row 3 attack animation, row 4 hit reaction, row 5 death animation. Exactly 30 equally sized cells, consistent character proportions and colors in every cell, full body visible, side view, no labels, no letters, no numbers, no grid lines, no scenery, no weapons floating separately, no extra characters.`
+    return `${COMMON_STYLE}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. This asset only: ${requestedAsset}. Create one exact 6-column by 5-row animation sprite sheet on ${isolationBackground(providerId, model)}. Row 1 idle animation, row 2 movement animation, row 3 attack animation, row 4 hit reaction, row 5 defeat animation. Exactly 30 equally sized cells, consistent character proportions and colors in every cell, full body visible, side view, no labels, no letters, no numbers, no grid lines, no scenery, no separate weapon, no extra character.`
   }
   const base = getPositiveTemplate(generationType, providerId, model)
-  const levelContext = asset.levelIds.length === 1 ? `Level context: ${level?.environment || spec.world}.` : ''
-  return `${base}. Theme: ${theme}. Shared visual contract: ${sharedStyle}. Requested asset: ${asset.prompt}. ${levelContext} Generate only this asset and never merge it with another category.`
+  return `${base}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. This asset only: ${requestedAsset}. Generate only this one category and never merge it with a character, scene, weapon, creature, platform, obstacle, projectile, pickup, or effect from another category.`
+}
+
+/** A deliberately generic second attempt for provider moderation false positives. */
+export function buildModerationSafePlannedAssetPrompt(
+  asset: AssetDefinition,
+  generationType: AssetType,
+  providerId: ProviderId,
+  model?: string,
+): string {
+  const catalogPrompt = cleanPromptFragment(ASSET_CATALOG_BY_CATEGORY[asset.category]?.defaultPrompt || asset.prompt, 240)
+  const base = getPositiveTemplate(generationType, providerId, model)
+  if (asset.kind === 'spriteSheet') {
+    return `${COMMON_STYLE}. ${ORIGINALITY}. ${catalogPrompt}. One exact 6-column by 5-row side-view animation sprite sheet on ${isolationBackground(providerId, model)}. Rows: idle, movement, attack, hit reaction, defeat. Exactly 30 equal cells, one consistent original subject, full body visible, no names, no story, no text, no logo, no scenery, no extra subject.`
+  }
+  return `${base}. ${ORIGINALITY}. ${catalogPrompt}. Use a simple dark-neutral and cyan-orange pixel palette. One asset only, no names, no story, no text, no logo, no mixed categories.`
 }

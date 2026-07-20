@@ -38,6 +38,19 @@ export function formatGenerationError(raw: string): string {
     return 'API 请求频率过高，请稍后再试。'
   }
 
+  if (lower.includes('http 413') || lower.includes('payload too large') || lower.includes('request entity too large')) {
+    return '请求数据过大（HTTP 413）。程序会在重试时自动移除已生成图片数据；请刷新到最新版后再次生成该素材。'
+  }
+
+  if (
+    lower.includes('protected content')
+    || lower.includes('request moderated')
+    || lower.includes('content policy')
+    || lower.includes('content_policy')
+  ) {
+    return '图片服务认为该素材提示词可能涉及受保护内容。程序已用原创、中性、单素材提示词自动重试；如果仍失败，请删除现有作品、角色、品牌或艺术家名称后重试。'
+  }
+
   if (lower.includes('organization') && lower.includes('verify')) {
     return 'OpenAI 账户需完成 Organization Verification 才能使用 GPT Image 模型。'
   }
@@ -47,6 +60,7 @@ export function formatGenerationError(raw: string): string {
 
 export function mapUpstreamHttpStatus(upstreamStatus: number, detail: string): number {
   if (upstreamStatus === 429) return 429
+  if (upstreamStatus === 413) return 413
 
   const lower = detail.toLowerCase()
   if (

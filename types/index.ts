@@ -276,6 +276,8 @@ export interface ThemeCustomizerProps {
   onOptimizePrompt?: () => void
   isOptimizing?: boolean
   optimizedSpec?: GameSpec | null
+  hasSavedDraft?: boolean
+  onRestoreDraft?: () => void
 }
 
 export interface ActionButtonsProps {

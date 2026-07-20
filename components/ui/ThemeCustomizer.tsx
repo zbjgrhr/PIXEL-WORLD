@@ -1,7 +1,7 @@
 'use client'
 
 import { Button, Collapse, Input, InputNumber, Select, Space, Tag, Typography, message } from 'antd'
-import { ListRestart, Sparkles } from 'lucide-react'
+import { History, ListRestart, Sparkles } from 'lucide-react'
 import type { ThemeCustomizerProps } from '@/types'
 import { PROMPT_TEMPLATES } from '@/configs/prompt-templates'
 import { buildStructuredPrompt } from '@/lib/asset-catalog'
@@ -9,13 +9,15 @@ import { buildStructuredPrompt } from '@/lib/asset-catalog'
 const { Text } = Typography
 const { TextArea } = Input
 
-const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ customThemeName, onThemeNameChange, customPrompt, onPromptChange, levelCount = 3, onLevelCountChange, onOptimizePrompt, isOptimizing = false, optimizedSpec }) => {
+const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ customThemeName, onThemeNameChange, customPrompt, onPromptChange, levelCount = 3, onLevelCountChange, onOptimizePrompt, isOptimizing = false, optimizedSpec, hasSavedDraft = false, onRestoreDraft }) => {
   const handleTemplateSelect = (templateId: string) => {
     const template = PROMPT_TEMPLATES.find((item) => item.id === templateId)
     if (!template) return
+    // Resize the empty field skeleton first; the complete template prompt must
+    // be the final update and must never be overwritten by the level change.
+    onLevelCountChange?.(template.levelCount)
     onThemeNameChange(template.themeName)
     onPromptChange(template.prompt)
-    onLevelCountChange?.(template.levelCount)
     message.success(`已加载模板：${template.name}`)
   }
   return <>
@@ -31,11 +33,12 @@ const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ customThemeName, onTh
       <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }} wrap>
         <Text strong>Structured Prompt / 结构化游戏构想</Text>
         <Space>
+          {hasSavedDraft && onRestoreDraft && <Button size="small" icon={<History size={14} />} onClick={onRestoreDraft}>恢复上次草稿</Button>}
           <Button size="small" icon={<ListRestart size={14} />} onClick={() => onPromptChange(buildStructuredPrompt(levelCount))}>恢复完整字段</Button>
           <Button type="primary" ghost size="small" icon={<Sparkles size={14} />} onClick={onOptimizePrompt} loading={isOptimizing} disabled={!customPrompt.trim()}>一键优化提示词</Button>
         </Space>
       </Space>
-      <TextArea value={customPrompt} onChange={(event) => onPromptChange(event.target.value)} rows={18} style={{ width: '100%', fontSize: 12, lineHeight: 1.7 }} />
+      <TextArea value={customPrompt} onChange={(event) => onPromptChange(event.target.value)} rows={18} placeholder="请在各字段冒号后填写；不需要的项目可以留空。" style={{ width: '100%', fontSize: 12, lineHeight: 1.7 }} />
       <Text type="secondary" style={{ fontSize: 12 }}>保留需要的描述，其余字段留空；一键优化只补全空白或不足的字段。</Text>
     </div>
     {optimizedSpec && <Collapse size="small" items={[{
