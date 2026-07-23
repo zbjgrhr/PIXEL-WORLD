@@ -1,7 +1,4 @@
-import {
-  OPENROUTER_FALLBACK_IMAGE_MODEL,
-  OPENROUTER_PRIMARY_IMAGE_MODEL,
-} from '@/configs/image-providers'
+import { OPENROUTER_PRIMARY_IMAGE_MODEL } from '@/configs/image-providers'
 import {
   type GenerateImageParams,
   type ImageProvider,
@@ -66,7 +63,7 @@ function buildImageRequestBody(
     n: 1,
     provider: {
       sort: 'price',
-      allow_fallbacks: true,
+      allow_fallbacks: false,
     },
     ...(supportsReferences && params.referenceImages?.length ? {
       input_references: params.referenceImages.map((url) => ({
@@ -140,41 +137,10 @@ async function callOpenRouterImageAPI(
   return parseImageResponse(result, model)
 }
 
-function canTryFallback(error: unknown): boolean {
-  if (!(error instanceof UpstreamApiError)) return false
-  const detail = error.message.toLowerCase()
-  return (
-    error.status === 404 ||
-    error.status === 408 ||
-    error.status === 409 ||
-    error.status === 425 ||
-    error.status === 429 ||
-    error.status >= 500 ||
-    (error.status === 400 && (
-      detail.includes('protected content')
-      || detail.includes('request moderated')
-      || detail.includes('content policy')
-      || detail.includes('content_policy')
-    ))
-  )
-}
-
 export const openrouterProvider: ImageProvider = {
   id: 'openrouter',
 
   async generateImage(params: GenerateImageParams): Promise<string> {
-    try {
-      return await callOpenRouterImageAPI(params, params.model)
-    } catch (error) {
-      const shouldUseFluxFallback =
-        params.model === OPENROUTER_PRIMARY_IMAGE_MODEL && canTryFallback(error)
-
-      if (!shouldUseFluxFallback) throw error
-
-      console.warn(
-        `OpenRouter ${OPENROUTER_PRIMARY_IMAGE_MODEL} failed; retrying with ${OPENROUTER_FALLBACK_IMAGE_MODEL}.`,
-      )
-      return callOpenRouterImageAPI(params, OPENROUTER_FALLBACK_IMAGE_MODEL)
-    }
+    return callOpenRouterImageAPI(params, params.model)
   },
 }

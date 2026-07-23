@@ -4,7 +4,6 @@ import { Typography, Select, Input, message } from 'antd'
 import Image from 'next/image'
 import { useEffect } from 'react'
 import {
-  getDefaultModel,
   getProviderConfig,
   IMAGE_PROVIDERS,
   resolveModel,
@@ -49,7 +48,6 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
 
   const handleProviderChange = (provider: ProviderId) => {
     onProviderChange(provider)
-    onModelChange(getDefaultModel(provider))
   }
 
   const handleApiKeyChange = (value: string) => {
@@ -118,14 +116,17 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
             </Option>
           ))}
         </Select>
-        {selectedProvider === 'openrouter' && (
-          <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginTop: '4px' }}>
-            生图默认 Seedream 4.5，失败时回退 FLUX.2 Pro；文字优化优先使用免费路由
-          </Text>
-        )}
+        <Text style={{ color: '#1677ff', fontSize: '12px', display: 'block', marginTop: '4px' }}>
+          整套项目锁定此模型：所有图片资源统一生成，不按素材类别分流
+        </Text>
         {selectedProvider === 'openai' && (
           <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginTop: '4px' }}>
             推荐 GPT Image 1 Mini（更省额度）· 每次 Create Theme 至少生成 4 张图
+          </Text>
+        )}
+        {providerConfig?.noteZh && selectedProvider !== 'openai' && (
+          <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginTop: '4px' }}>
+            {providerConfig.noteZh}
           </Text>
         )}
       </div>
@@ -147,6 +148,9 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
         ) : (
           <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginTop: '4px' }}>
             {providerConfig?.keyHintZh}
+            {providerConfig?.setupUrl && (
+              <> · <a href={providerConfig.setupUrl} target="_blank" rel="noreferrer">获取 Key</a></>
+            )}
           </Text>
         )}
       </div>

@@ -10,7 +10,7 @@ import { GameCanvas, SideMenu, ThemesList, ThemePreview } from '@/components/ui'
 import { PRESET_THEMES } from '@/configs'
 import { getDefaultModel, getDefaultProvider } from '@/configs/image-providers'
 import { formatGenerationError } from '@/lib/format-generation-error'
-import { loadImageApiPrefs, saveImageApiPrefs } from '@/lib/image-api-prefs'
+import { loadImageApiPrefs, loadProviderApiKey, saveImageApiPrefs } from '@/lib/image-api-prefs'
 import { cacheAssetUrl, stripLargeAssetUrls } from '@/lib/asset-db'
 import { prepareAnimationReferenceImages } from '@/lib/animation-references'
 import { animationIsComplete, createActionStripAnimation, normalizeAnimationSpec } from '@/lib/asset-catalog'
@@ -55,6 +55,15 @@ export default function Home() {
   const [selectedModel, setSelectedModel] = useState(getDefaultModel(getDefaultProvider()))
 
   const persistPrefs = (provider = selectedProvider, model = selectedModel, key = apiKey) => {
+    saveImageApiPrefs({ provider, model, apiKey: key })
+  }
+
+  const handleProviderChange = (provider: ProviderId) => {
+    const model = getDefaultModel(provider)
+    const key = loadProviderApiKey(provider)
+    setSelectedProvider(provider)
+    setSelectedModel(model)
+    setApiKey(key)
     saveImageApiPrefs({ provider, model, apiKey: key })
   }
 
@@ -307,7 +316,7 @@ export default function Home() {
               apiKey={apiKey}
               onApiKeyChange={(value) => { setApiKey(value); persistPrefs(selectedProvider, selectedModel, value) }}
               selectedProvider={selectedProvider}
-              onProviderChange={(value) => { setSelectedProvider(value); persistPrefs(value, selectedModel, apiKey) }}
+              onProviderChange={handleProviderChange}
               selectedModel={selectedModel}
               onModelChange={(value) => { setSelectedModel(value); persistPrefs(selectedProvider, value, apiKey) }}
               onStartGame={() => setShowGameInterface(true)}

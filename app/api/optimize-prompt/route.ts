@@ -36,18 +36,19 @@ Rules:
 - The final level hasBoss=true; earlier levels haveBoss=false.
 - Return JSON only, without markdown.`
 
-function optimizerEndpoint(provider: ProviderId): { url: string; model: string; envKey: string } {
+function optimizerEndpoint(provider: ProviderId): { url: string; model: string; envKey: string } | undefined {
   if (provider === 'openai') {
     return { url: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini', envKey: 'OPENAI_API_KEY' }
   }
   if (provider === 'openrouter') {
     return { url: 'https://openrouter.ai/api/v1/chat/completions', model: 'openrouter/free', envKey: 'OPENROUTER_API_KEY' }
   }
-  return {
+  if (provider === 'dashscope') return {
     url: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
     model: 'qwen-plus',
     envKey: 'DASHSCOPE_API_KEY',
   }
+  return undefined
 }
 
 function extractJson(content: string): unknown {
@@ -65,6 +66,7 @@ async function optimizeWithAi(
   fallback: GameSpec,
 ): Promise<unknown> {
   const config = optimizerEndpoint(provider)
+  if (!config) throw new Error('当前图片平台不提供兼容的文字优化接口')
   const response = await fetch(config.url, {
     method: 'POST',
     headers: {
@@ -116,7 +118,9 @@ export async function POST(request: NextRequest) {
     const fallback = createFallbackGameSpec(prompt, theme, levelCount)
     const provider = body.provider || 'dashscope'
     const config = optimizerEndpoint(provider)
-    const apiKey = normalizeApiKey(body.apiKey?.trim() || process.env[config.envKey]?.trim() || '')
+    const apiKey = config
+      ? normalizeApiKey(body.apiKey?.trim() || process.env[config.envKey]?.trim() || '')
+      : ''
     if (apiKeyHasUnsupportedCharacters(apiKey)) {
       return NextResponse.json(
         { success: false, error: 'API Key contains unsupported characters. Clear the field and paste only the key from the provider dashboard.' },
@@ -134,7 +138,7 @@ export async function POST(request: NextRequest) {
       // deterministic avoids a free text model swapping hero/weapon/enemy fields.
       spec = fallback
       source = 'template'
-    } else if (apiKey) {
+    } else if (apiKey && config) {
       try {
         const candidate = await optimizeWithAi(provider, apiKey, prompt, fallback)
         spec = preserveExplicitPromptFields(normalizeGameSpec(candidate, fallback, levelCount), fallback, prompt)
@@ -145,7 +149,9 @@ export async function POST(request: NextRequest) {
           : 'AI optimization was unavailable, so the reliable local compiler was used.'
       }
     } else {
-      warning = 'No API key was supplied for text optimization; the local structured compiler was used.'
+      warning = config
+        ? 'No API key was supplied for text optimization; the local structured compiler was used.'
+        : '当前图片平台只负责生图；提示词已由本地结构化编译器补全，图片仍会全部使用当前所选模型生成。'
     }
 
     return NextResponse.json({

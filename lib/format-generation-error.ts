@@ -13,7 +13,27 @@ export function formatGenerationError(raw: string): string {
       lower.includes('insufficient balance') ||
       lower.includes('payment required'))
   ) {
-    return 'OpenRouter 余额不足。Seedream 4.5 和 FLUX.2 Pro 都是按量付费模型，请先在 openrouter.ai 充值；切换备用模型不能绕过账户余额限制。'
+    return 'OpenRouter 余额不足。当前所选图片模型按量计费，请先在 openrouter.ai 充值后重试；程序不会隐藏切换到其他模型。'
+  }
+
+  if (lower.includes('cloudflare') && lower.includes('account id|api token')) {
+    return 'Cloudflare 凭据格式不正确。请在一个输入框中粘贴“Account ID|API Token”，中间使用英文竖线 |。'
+  }
+
+  if (lower.includes('gated') || lower.includes('accept the conditions')) {
+    return '该 Hugging Face 模型需要先在模型页面接受许可条款，然后才能通过 API 调用。'
+  }
+
+  if (lower.includes('huggingface') && (lower.includes('permission') || lower.includes('403'))) {
+    return 'Hugging Face Token 没有推理权限，或当前免费额度无法使用该模型。请给 Token 勾选“Make calls to Inference Providers”。'
+  }
+
+  if (lower.includes('together') && lower.includes('model') && lower.includes('not')) {
+    return '当前 Together AI 账户无法使用这个图片模型。请换用同平台可用模型，并先运行“测试 API”。'
+  }
+
+  if (lower.includes('pollinations') && (lower.includes('paid_only') || lower.includes('permission'))) {
+    return '当前 Pollinations Key 没有该图片模型的权限或余额，请先在 Pollinations 控制台确认可用模型。'
   }
 
   if (lower.includes('billing_hard_limit') || lower.includes('billing hard limit')) {
@@ -28,7 +48,7 @@ export function formatGenerationError(raw: string): string {
     if (raw.includes('[Interve') || raw.startsWith('[')) {
       return 'API Key 格式无效：输入框里可能混入了浏览器控制台文字。请清空后只粘贴以 sk- 开头的 OpenAI Key。'
     }
-    return 'API Key 无效。请确认 Provider 与 Key 匹配（OpenAI 用 sk- 开头，DashScope 用百炼 Key），并重新粘贴。'
+    return 'API Key 无效。请确认当前选择的平台与 Key 匹配，并从该平台控制台重新复制。'
   }
 
   if (lower.includes("does not exist") && lower.includes('model')) {

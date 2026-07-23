@@ -59,6 +59,12 @@ interface SavedDraft {
   prompt?: string
 }
 
+interface GenerationTarget {
+  provider: ProviderId
+  model: string
+  apiKey: string
+}
+
 function patchSpecAsset(spec: GameSpec, id: string, patch: Partial<AssetDefinition>): GameSpec {
   return { ...spec, assets: spec.assets.map((asset) => asset.id === id ? { ...asset, ...patch } : asset) }
 }
@@ -167,7 +173,13 @@ const SideMenu: React.FC<SideMenuProps> = ({
     }
   }
 
-  const requestAsset = async (spec: GameSpec, asset: AssetDefinition, signal?: AbortSignal, animationPose?: AnimationClipPose): Promise<AssetDefinition> => {
+  const requestAsset = async (
+    spec: GameSpec,
+    asset: AssetDefinition,
+    signal?: AbortSignal,
+    animationPose?: AnimationClipPose,
+    target: GenerationTarget = { provider: selectedProvider, model: selectedModel, apiKey: apiKey.trim() },
+  ): Promise<AssetDefinition> => {
     const firstLevelId = asset.levelIds[0]
     const levelIndex = Math.max(0, spec.levels.findIndex((level) => level.id === firstLevelId))
     const referenceImages = animationPose
@@ -178,9 +190,9 @@ const SideMenu: React.FC<SideMenuProps> = ({
       body: JSON.stringify({
         theme: spec.title,
         prompt: asset.prompt,
-        provider: selectedProvider,
-        model: selectedModel,
-        apiKey: apiKey.trim(),
+        provider: target.provider,
+        model: target.model,
+        apiKey: target.apiKey,
         levelCount: spec.levels.length,
         spec: stripLargeAssetUrls(spec),
         asset: stripLargeAssetUrls({ ...spec, assets: [asset] }).assets[0],
@@ -242,6 +254,11 @@ const SideMenu: React.FC<SideMenuProps> = ({
         : !asset.url || asset.status === 'failed' || asset.status === 'cancelled'
     ))
     if (!tasks.length) return void message.info('所有已启用图片素材都已生成。')
+    const generationTarget: GenerationTarget = {
+      provider: selectedProvider,
+      model: selectedModel,
+      apiKey: apiKey.trim(),
+    }
 
     const pendingPoses = (asset: AssetDefinition): AnimationClipPose[] => {
       if (asset.kind !== 'spriteSheet') return []
@@ -277,7 +294,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
     try {
       setLoading(true)
       setGenerationProgress(0)
-      setLoadingMessage(`正在生成 ${totalJobs} 个独立动作与素材；同时处理 2 个角色或素材。`)
+      setLoadingMessage(`正在使用 ${generationTarget.model} 生成全部 ${totalJobs} 个独立动作与素材；不会切换模型。`)
       setGameState('loading')
       onRegeneratingImagesChange?.(ALL_GENERATING)
       setPresetThemes(themesWithLoading)
@@ -315,7 +332,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
                 updateAsset(asset.id, currentAsset)
                 try {
                   const liveSpec = { ...baseSpec!, assets: baseSpec!.assets.map((candidate) => workingAssets.get(candidate.id) || candidate) }
-                  currentAsset = await requestAsset(liveSpec, currentAsset, controller.signal, pose)
+                  currentAsset = await requestAsset(liveSpec, currentAsset, controller.signal, pose, generationTarget)
                   const clip = normalizeAnimationSpec(currentAsset.animation).clips?.[pose]
                   if (clip?.url) {
                     await cacheAssetUrl(DRAFT_PROJECT_ID, `${asset.id}:clip:${pose}`, clip.url)
@@ -348,7 +365,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
               currentAsset = { ...currentAsset, status: animationIsComplete(currentAsset) ? 'success' : currentAsset.status }
             } else {
               const liveSpec = { ...baseSpec!, assets: baseSpec!.assets.map((candidate) => workingAssets.get(candidate.id) || candidate) }
-              const generated = await requestAsset(liveSpec, currentAsset, controller.signal)
+              const generated = await requestAsset(liveSpec, currentAsset, controller.signal, undefined, generationTarget)
               currentAsset = { ...currentAsset, ...generated, status: 'success', error: undefined }
               if (currentAsset.url) await cacheAssetUrl(DRAFT_PROJECT_ID, currentAsset.id, currentAsset.url)
               finished += 1

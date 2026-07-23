@@ -6,8 +6,13 @@ import {
   resolveModel,
 } from '@/configs/image-providers'
 import { dashscopeProvider } from '@/lib/image-providers/dashscope'
+import { cloudflareProvider } from '@/lib/image-providers/cloudflare'
+import { huggingfaceProvider } from '@/lib/image-providers/huggingface'
 import { openaiProvider } from '@/lib/image-providers/openai'
 import { openrouterProvider } from '@/lib/image-providers/openrouter'
+import { pollinationsProvider } from '@/lib/image-providers/pollinations'
+import { tencentProvider } from '@/lib/image-providers/tencent'
+import { togetherProvider } from '@/lib/image-providers/together'
 import {
   ProviderApiKeyError,
   ProviderValidationError,
@@ -20,6 +25,11 @@ const providers: Record<ProviderId, ImageProvider> = {
   dashscope: dashscopeProvider,
   openai: openaiProvider,
   openrouter: openrouterProvider,
+  cloudflare: cloudflareProvider,
+  together: togetherProvider,
+  tencent: tencentProvider,
+  pollinations: pollinationsProvider,
+  huggingface: huggingfaceProvider,
 }
 
 export function getImageProvider(providerId: ProviderId): ImageProvider {

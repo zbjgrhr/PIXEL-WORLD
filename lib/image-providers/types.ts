@@ -1,8 +1,24 @@
-export type ProviderId = 'dashscope' | 'openai' | 'openrouter'
+export type ProviderId =
+  | 'dashscope'
+  | 'openai'
+  | 'openrouter'
+  | 'cloudflare'
+  | 'together'
+  | 'tencent'
+  | 'pollinations'
+  | 'huggingface'
 
 export type AssetType = import('@/types').AssetType
 
-export type EndpointKind = 'dashscope' | 'images' | 'openrouter-images'
+export type EndpointKind =
+  | 'dashscope'
+  | 'images'
+  | 'openrouter-images'
+  | 'cloudflare-workers-ai'
+  | 'together-images'
+  | 'tencent-tokenhub'
+  | 'pollinations-images'
+  | 'huggingface-inference'
 
 export interface GenerateImageParams {
   prompt: string

@@ -24,8 +24,7 @@ function cleanPromptFragment(value: string, maxLength = 700): string {
 
 function usesChromaKey(providerId: ProviderId, model?: string): boolean {
   if (providerId === 'dashscope') return false
-  if (providerId === 'openai') return true
-  return providerId === 'openrouter' || Boolean(model && /gpt-image/i.test(model))
+  return true
 }
 
 function isolationBackground(providerId: ProviderId, model?: string): string {
