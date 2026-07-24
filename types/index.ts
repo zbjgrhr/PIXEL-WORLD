@@ -4,6 +4,156 @@ import type { ProviderId } from '@/lib/image-providers/types'
 export type { ProviderId }
 export type { GameTheme } from '@/lib/theme-utils'
 
+export type AgentProviderId = 'openrouter' | 'openai' | 'dashscope'
+export type AgentRole =
+  | 'director'
+  | 'narrative'
+  | 'mechanics'
+  | 'artDirector'
+  | 'levelDesigner'
+  | 'integrator'
+  | 'consistencyCritic'
+  | 'engineQa'
+  | 'revision'
+  | 'assetCoordinator'
+  | 'visualQa'
+  | 'playtest'
+  | 'publisher'
+
+export type AgentRunStatus =
+  | 'draft'
+  | 'planning'
+  | 'reviewing'
+  | 'awaiting_approval'
+  | 'producing'
+  | 'quality_check'
+  | 'ready'
+  | 'paused'
+  | 'failed'
+  | 'cancelled'
+
+export type AgentTaskStatus =
+  | 'waiting'
+  | 'running'
+  | 'completed'
+  | 'needs-review'
+  | 'failed'
+  | 'cancelled'
+
+export interface AgentModelLock {
+  provider: AgentProviderId
+  model: string
+}
+
+export interface AgentIssue {
+  id: string
+  severity: 'info' | 'warning' | 'blocking'
+  source: AgentRole
+  path: string
+  message: string
+  suggestion: string
+}
+
+export interface AgentUsage {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+}
+
+export interface AgentTask {
+  id: string
+  role: AgentRole
+  phase: 'planning' | 'review' | 'production' | 'quality'
+  round: number
+  dependencies: string[]
+  status: AgentTaskStatus
+  attempts: number
+  inputDigest?: string
+  output?: Record<string, unknown>
+  summary?: string
+  issues?: AgentIssue[]
+  usage?: AgentUsage
+  error?: string
+  startedAt?: number
+  completedAt?: number
+}
+
+export interface CreativeBrief {
+  title: string
+  playerFantasy: string
+  audience: string
+  pillars: string[]
+  explicitRequirements: string[]
+  constraints: string[]
+  levelCount: number
+}
+
+export interface AgentArtifacts {
+  brief?: CreativeBrief
+  narrative?: Record<string, unknown>
+  mechanics?: Record<string, unknown>
+  artDirection?: Record<string, unknown>
+  levelPlan?: Record<string, unknown>
+  mergedSpec?: GameSpec
+  reviewIssues?: AgentIssue[]
+  revisedSpec?: GameSpec
+  productionSpec?: GameSpec
+  visualReport?: Record<string, unknown>
+  playtestReport?: Record<string, unknown>
+  releaseReport?: Record<string, unknown>
+}
+
+export interface AgentRun {
+  version: 1
+  id: string
+  projectId: string
+  sourcePrompt: string
+  projectName: string
+  levelCount: number
+  status: AgentRunStatus
+  modelLock: AgentModelLock
+  maxReviewRounds: 2
+  currentRound: number
+  approved: boolean
+  tasks: AgentTask[]
+  artifacts: AgentArtifacts
+  createdAt: number
+  updatedAt: number
+  error?: string
+}
+
+export interface AgentExecuteRequest {
+  runId: string
+  taskId: string
+  role: AgentRole
+  round: number
+  provider: AgentProviderId
+  model: string
+  apiKey: string
+  sourcePrompt: string
+  projectName: string
+  levelCount: number
+  baseSpec?: GameSpec
+  artifacts: AgentArtifacts
+  imageUrls?: string[]
+}
+
+export interface AgentExecuteResponse {
+  success: boolean
+  data?: {
+    role: AgentRole
+    artifact: Record<string, unknown>
+    summary: string
+    issues: AgentIssue[]
+    usage: AgentUsage
+    provider: AgentProviderId
+    model: string
+  }
+  error?: string
+  recoverable?: boolean
+  timestamp: string
+}
+
 export const ASSET_TYPES = [
   'character',
   'background',
@@ -283,6 +433,8 @@ export interface GenerateImageRequest {
 }
 
 export interface ThemeCustomizerProps {
+  creationMode?: 'agent' | 'classic'
+  onCreationModeChange?: (mode: 'agent' | 'classic') => void
   customThemeName: string
   onThemeNameChange: (name: string) => void
   customPrompt: string

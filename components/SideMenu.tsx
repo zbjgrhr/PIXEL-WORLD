@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { message } from 'antd'
 import { useGameStore } from '@/lib/store'
 import { isPresetTheme } from '@/lib/theme-utils'
-import { ActionButtons, AssetPlanner, ModelSelector, ProjectHeader, ThemeCustomizer } from './ui/index'
+import { ActionButtons, AgentStudio, AssetPlanner, ModelSelector, ProjectHeader, ThemeCustomizer } from './ui/index'
 import { PRESET_THEMES } from '@/configs'
 import { buildGameDataFromSpec, syncPlayableLevels } from '@/lib/virtual-levels'
 import { formatGenerationError } from '@/lib/format-generation-error'
@@ -92,6 +92,8 @@ const SideMenu: React.FC<SideMenuProps> = ({
   const [isThemeCreated, setIsThemeCreated] = useState(false)
   const [presetThemes, setPresetThemes] = useState<Theme[]>([...PRESET_THEMES])
   const [optimizedSpec, setOptimizedSpec] = useState<GameSpec | null>(null)
+  const [creationMode, setCreationMode] = useState<'agent' | 'classic'>('agent')
+  const [agentApproved, setAgentApproved] = useState(false)
   const [isOptimizing, setIsOptimizing] = useState(false)
   const [generationProgress, setGenerationProgress] = useState(0)
   const [isTesting, setIsTesting] = useState(false)
@@ -121,6 +123,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
     setCustomPrompt(savedDraft.prompt?.trim() || buildStructuredPrompt(savedDraft.spec.levels.length))
     setLevelCount(savedDraft.spec.levels.length)
     setOptimizedSpec(savedDraft.spec)
+    setAgentApproved(false)
     void hydrateSpecAssets(DRAFT_PROJECT_ID, savedDraft.spec).then((hydrated) => setOptimizedSpec(hydrated))
     setSavedDraft(null)
     message.success('已恢复上次素材规划；新建页面默认仍保持空白字段。')
@@ -244,6 +247,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
   }
 
   const generateSelectedAssets = async () => {
+    if (creationMode === 'agent' && !agentApproved) return void message.error('请先完成 Agent 集群评审，并点击“批准规格并开放生图”。')
     if (!apiKey.trim()) return void message.error('图片生成需要 API Key。')
     let baseSpec = optimizedSpec
     if (!baseSpec || baseSpec.levels.length !== levelCount) baseSpec = await optimizePrompt(true)
@@ -457,17 +461,29 @@ const SideMenu: React.FC<SideMenuProps> = ({
       <ProjectHeader />
       <ModelSelector selectedProvider={selectedProvider} onProviderChange={onProviderChange} selectedModel={selectedModel} onModelChange={onModelChange} apiKey={apiKey} onApiKeyChange={onApiKeyChange} />
       <ThemeCustomizer
+        creationMode={creationMode}
+        onCreationModeChange={(mode) => { setCreationMode(mode); setAgentApproved(false) }}
         customThemeName={customThemeName} onThemeNameChange={setCustomThemeName}
-        customPrompt={customPrompt} onPromptChange={(value) => { setCustomPrompt(value); setOptimizedSpec(null) }}
+        customPrompt={customPrompt} onPromptChange={(value) => { setCustomPrompt(value); setOptimizedSpec(null); setAgentApproved(false) }}
         levelCount={levelCount} onLevelCountChange={(count) => {
           setLevelCount(count)
           setOptimizedSpec(null)
+          setAgentApproved(false)
           if (isStructuredPromptBlank(customPrompt)) setCustomPrompt(buildStructuredPrompt(count))
         }}
         onOptimizePrompt={() => { void optimizePrompt(false) }} isOptimizing={isOptimizing} optimizedSpec={optimizedSpec}
         hasSavedDraft={Boolean(savedDraft)} onRestoreDraft={restoreSavedDraft}
       />
-      {optimizedSpec && <AssetPlanner spec={optimizedSpec} onChange={updateSpec} onGenerate={() => { void generateSelectedAssets() }} onCancel={() => abortRef.current?.abort()} onTestApi={() => { void testApi() }} isGenerating={isLoading} isTesting={isTesting} progress={generationProgress} />}
+      {creationMode === 'agent' && <AgentStudio
+        projectId={DRAFT_PROJECT_ID}
+        sourcePrompt={customPrompt}
+        projectName={customThemeName}
+        levelCount={levelCount}
+        baseSpec={optimizedSpec}
+        onSpecReady={(spec) => { updateSpec(spec); setAgentApproved(false) }}
+        onApproved={(spec) => { updateSpec(spec); setAgentApproved(true); message.success('Agent 规格已批准，现在可以检查素材卡片并开始生成。') }}
+      />}
+      {optimizedSpec && (creationMode === 'classic' || agentApproved) && <AssetPlanner spec={optimizedSpec} onChange={updateSpec} onGenerate={() => { void generateSelectedAssets() }} onCancel={() => abortRef.current?.abort()} onTestApi={() => { void testApi() }} isGenerating={isLoading} isTesting={isTesting} progress={generationProgress} />}
       <ActionButtons isThemeCreated={isThemeCreated} isLoading={isLoading} selectedTheme={selectedTheme} customPrompt={customPrompt} customThemeName={customThemeName} apiKey={apiKey} onCreateTheme={() => { void generateSelectedAssets() }} onStartGame={handleStartGame} />
     </div>
   </div>

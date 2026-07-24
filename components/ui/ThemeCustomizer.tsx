@@ -1,6 +1,6 @@
 'use client'
 
-import { Button, Collapse, Input, InputNumber, Select, Space, Tag, Typography, message } from 'antd'
+import { Alert, Button, Collapse, Input, InputNumber, Segmented, Select, Space, Tag, Typography, message } from 'antd'
 import { History, ListRestart, Sparkles } from 'lucide-react'
 import type { ThemeCustomizerProps } from '@/types'
 import { PROMPT_TEMPLATES } from '@/configs/prompt-templates'
@@ -9,7 +9,7 @@ import { buildStructuredPrompt } from '@/lib/asset-catalog'
 const { Text } = Typography
 const { TextArea } = Input
 
-const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ customThemeName, onThemeNameChange, customPrompt, onPromptChange, levelCount = 3, onLevelCountChange, onOptimizePrompt, isOptimizing = false, optimizedSpec, hasSavedDraft = false, onRestoreDraft }) => {
+const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ creationMode = 'agent', onCreationModeChange, customThemeName, onThemeNameChange, customPrompt, onPromptChange, levelCount = 3, onLevelCountChange, onOptimizePrompt, isOptimizing = false, optimizedSpec, hasSavedDraft = false, onRestoreDraft }) => {
   const handleTemplateSelect = (templateId: string) => {
     const template = PROMPT_TEMPLATES.find((item) => item.id === templateId)
     if (!template) return
@@ -21,6 +21,19 @@ const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ customThemeName, onTh
     message.success(`已加载模板：${template.name}`)
   }
   return <>
+    <div>
+      <Text strong style={{ display: 'block', marginBottom: 8 }}>Creation Mode / 创建方式</Text>
+      <Segmented
+        block
+        value={creationMode}
+        onChange={(value) => onCreationModeChange?.(value as 'agent' | 'classic')}
+        options={[
+          { value: 'agent', label: 'Agent 集群（推荐）' },
+          { value: 'classic', label: '传统单次优化' },
+        ]}
+      />
+      {creationMode === 'agent' && <Alert type="info" showIcon message="多个专业 Agent 会先策划、交叉评审并修正规格；你批准后才会开放图片生成。" style={{ marginTop: 8 }} />}
+    </div>
     <div>
       <Text strong style={{ display: 'block', marginBottom: 8 }}>Prompt Template / 提示词模板</Text>
       <Select placeholder="选择完整示例模板" style={{ width: '100%' }} allowClear onChange={(value) => value && handleTemplateSelect(value)} options={PROMPT_TEMPLATES.map((item) => ({ value: item.id, label: item.name }))} />
@@ -35,11 +48,11 @@ const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ customThemeName, onTh
         <Space>
           {hasSavedDraft && onRestoreDraft && <Button size="small" icon={<History size={14} />} onClick={onRestoreDraft}>恢复上次草稿</Button>}
           <Button size="small" icon={<ListRestart size={14} />} onClick={() => onPromptChange(buildStructuredPrompt(levelCount))}>恢复完整字段</Button>
-          <Button type="primary" ghost size="small" icon={<Sparkles size={14} />} onClick={onOptimizePrompt} loading={isOptimizing} disabled={!customPrompt.trim()}>一键优化提示词</Button>
+          {creationMode === 'classic' && <Button type="primary" ghost size="small" icon={<Sparkles size={14} />} onClick={onOptimizePrompt} loading={isOptimizing} disabled={!customPrompt.trim()}>一键优化提示词</Button>}
         </Space>
       </Space>
       <TextArea value={customPrompt} onChange={(event) => onPromptChange(event.target.value)} rows={18} placeholder="请在各字段冒号后填写；不需要的项目可以留空。" style={{ width: '100%', fontSize: 12, lineHeight: 1.7 }} />
-      <Text type="secondary" style={{ fontSize: 12 }}>保留需要的描述，其余字段留空；一键优化只补全空白或不足的字段。</Text>
+      <Text type="secondary" style={{ fontSize: 12 }}>{creationMode === 'agent' ? '保留你明确填写的要求；Agent 只补充空白、消除冲突，不会覆盖你的核心设定。' : '保留需要的描述，其余字段留空；一键优化只补全空白或不足的字段。'}</Text>
     </div>
     {optimizedSpec && <Collapse size="small" items={[{
       key: 'optimized-spec',
