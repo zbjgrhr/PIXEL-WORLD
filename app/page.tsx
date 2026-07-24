@@ -303,14 +303,16 @@ export default function Home() {
   const activeGameData = getGameDataForTheme(selectedTheme)
 
   return (
-    <main className="min-h-screen">
-      <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5' }}>
-        <Splitter style={{ height: '100vh' }}>
+    <main className="min-h-screen pixel-world-app">
+      <div className="ambient-sky" aria-hidden="true"><span /><span /><span /><span /></div>
+      <div className="pixel-world-shell" style={{ minHeight: '100vh' }}>
+        <Splitter className="world-splitter" style={{ height: '100vh' }}>
           <Splitter.Panel
             defaultSize={410}
             min={360}
             max={480}
-            style={{ backgroundColor: '#fff', borderRight: '1px solid #e8e8e8', boxShadow: '2px 0 8px rgba(0,0,0,.1)' }}
+            className="creator-panel"
+            style={{ backgroundColor: 'rgba(255,255,255,.78)', borderRight: '1px solid rgba(116,139,214,.18)', boxShadow: '8px 0 32px rgba(77,105,183,.10)', backdropFilter: 'blur(18px)' }}
           >
             <SideMenu
               apiKey={apiKey}
@@ -327,7 +329,7 @@ export default function Home() {
             />
           </Splitter.Panel>
 
-          <Splitter.Panel style={{ padding: 20, overflowY: 'auto' }}>
+          <Splitter.Panel className="workspace-panel" style={{ padding: 20, overflowY: 'auto' }}>
             {!showGameInterface ? (
               <div style={{ display: 'flex', gap: 20, width: '100%', height: '100%' }}>
                 <ThemesList

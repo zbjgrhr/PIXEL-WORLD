@@ -456,11 +456,16 @@ const SideMenu: React.FC<SideMenuProps> = ({
     onStartGame?.()
   }
 
-  return <div className={className} style={{ padding: 20, height: '100%', overflowY: 'auto', ...style }}>
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%' }}>
+  return <div className={`${className || ''} creator-sidebar`} style={{ padding: 20, height: '100%', overflowY: 'auto', ...style }}>
+    <div className="creator-stack" style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%' }}>
       <ProjectHeader />
-      <ModelSelector selectedProvider={selectedProvider} onProviderChange={onProviderChange} selectedModel={selectedModel} onModelChange={onModelChange} apiKey={apiKey} onApiKeyChange={onApiKeyChange} />
-      <ThemeCustomizer
+      <section className="studio-section api-section">
+        <div className="section-kicker">IMAGE LAB · 图片生成引擎</div>
+        <ModelSelector selectedProvider={selectedProvider} onProviderChange={onProviderChange} selectedModel={selectedModel} onModelChange={onModelChange} apiKey={apiKey} onApiKeyChange={onApiKeyChange} />
+      </section>
+      <section className="studio-section prompt-section">
+        <div className="section-kicker">WORLD BUILDER · 世界编辑器</div>
+        <ThemeCustomizer
         creationMode={creationMode}
         onCreationModeChange={(mode) => { setCreationMode(mode); setAgentApproved(false) }}
         customThemeName={customThemeName} onThemeNameChange={setCustomThemeName}
@@ -473,8 +478,9 @@ const SideMenu: React.FC<SideMenuProps> = ({
         }}
         onOptimizePrompt={() => { void optimizePrompt(false) }} isOptimizing={isOptimizing} optimizedSpec={optimizedSpec}
         hasSavedDraft={Boolean(savedDraft)} onRestoreDraft={restoreSavedDraft}
-      />
-      {creationMode === 'agent' && <AgentStudio
+        />
+      </section>
+      {creationMode === 'agent' && <div className="agent-studio-shell"><AgentStudio
         projectId={DRAFT_PROJECT_ID}
         sourcePrompt={customPrompt}
         projectName={customThemeName}
@@ -482,7 +488,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
         baseSpec={optimizedSpec}
         onSpecReady={(spec) => { updateSpec(spec); setAgentApproved(false) }}
         onApproved={(spec) => { updateSpec(spec); setAgentApproved(true); message.success('Agent 规格已批准，现在可以检查素材卡片并开始生成。') }}
-      />}
+      /></div>}
       {optimizedSpec && (creationMode === 'classic' || agentApproved) && <AssetPlanner spec={optimizedSpec} onChange={updateSpec} onGenerate={() => { void generateSelectedAssets() }} onCancel={() => abortRef.current?.abort()} onTestApi={() => { void testApi() }} isGenerating={isLoading} isTesting={isTesting} progress={generationProgress} />}
       <ActionButtons isThemeCreated={isThemeCreated} isLoading={isLoading} selectedTheme={selectedTheme} customPrompt={customPrompt} customThemeName={customThemeName} apiKey={apiKey} onCreateTheme={() => { void generateSelectedAssets() }} onStartGame={handleStartGame} />
     </div>

@@ -8,6 +8,8 @@ import { AGENT_PROVIDERS, AGENT_ROLE_LABELS, getAgentProvider, getDefaultAgentMo
 import { countBlockingIssues } from '@/lib/agents/validation'
 import { useAgentCluster } from '@/hooks/useAgentCluster'
 import type { AgentExecuteRequest, AgentExecuteResponse, AgentProviderId, AgentTaskStatus, GameSpec } from '@/types'
+import ApiPlatformGuide from './ui/ApiPlatformGuide'
+import { getApiPlatformGuide } from '@/configs/api-platform-guide'
 
 const { Paragraph, Text, Title } = Typography
 
@@ -139,7 +141,13 @@ export default function AgentStudio({ projectId, sourcePrompt, projectName, leve
           disabled={locked}
           onChange={changeProvider}
           style={{ minWidth: 160 }}
-          options={AGENT_PROVIDERS.map((item) => ({ value: item.id, label: item.label }))}
+          options={AGENT_PROVIDERS.map((item) => {
+            const guide = getApiPlatformGuide(item.id)
+            return {
+              value: item.id,
+              label: <span className="provider-select-option"><i style={{ background: guide.accent }} /><span>{item.label}</span><small style={{ color: guide.accent }}>{guide.strengths[0]}</small></span>,
+            }
+          })}
         />
         <Select
           value={model}
@@ -156,6 +164,8 @@ export default function AgentStudio({ projectId, sourcePrompt, projectName, leve
           autoComplete="new-password"
         />
       </Space>
+
+      <ApiPlatformGuide selectedId={provider} mode="agent" />
 
       <Space wrap>
         <Button icon={<FlaskConical size={14} />} loading={testing} onClick={() => { void testAgentApi() }}>测试 Agent API</Button>

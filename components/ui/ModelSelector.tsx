@@ -11,6 +11,8 @@ import {
 import type { ProviderId } from '@/lib/image-providers/types'
 import { ModelSelectorProps } from '@/types'
 import { apiKeyHasUnsupportedCharacters, normalizeApiKey } from '@/lib/api-key'
+import ApiPlatformGuide from './ApiPlatformGuide'
+import { getApiPlatformGuide } from '@/configs/api-platform-guide'
 
 const { Text } = Typography
 const { Option } = Select
@@ -37,6 +39,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
   onApiKeyChange,
 }) => {
   const providerConfig = getProviderConfig(selectedProvider)
+  const providerGuide = getApiPlatformGuide(selectedProvider)
   const models = providerConfig?.models ?? []
   const activeModel = resolveModel(selectedProvider, selectedModel)
 
@@ -85,11 +88,16 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
           style={{ width: '100%' }}
           placeholder="Select provider"
         >
-          {IMAGE_PROVIDERS.map((provider) => (
-            <Option key={provider.id} value={provider.id}>
-              {provider.labelZh} · {provider.label}
+          {IMAGE_PROVIDERS.map((provider) => {
+            const guide = getApiPlatformGuide(provider.id)
+            return <Option key={provider.id} value={provider.id}>
+              <span className="provider-select-option">
+                <i style={{ background: guide.accent }} />
+                <span>{provider.labelZh} · {provider.label}</span>
+                <small style={{ color: guide.accent }}>{guide.strengths[0]}</small>
+              </span>
             </Option>
-          ))}
+          })}
         </Select>
       </div>
 
@@ -121,7 +129,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
         </Text>
         {selectedProvider === 'openai' && (
           <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginTop: '4px' }}>
-            推荐 GPT Image 1 Mini（更省额度）· 每次 Create Theme 至少生成 4 张图
+            GPT Image 1 Mini 更适合控制成本；GPT Image 2 更适合质量优先。批量生成前建议先测试 API。
           </Text>
         )}
         {providerConfig?.noteZh && selectedProvider !== 'openai' && (
@@ -154,6 +162,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
           </Text>
         )}
       </div>
+      <ApiPlatformGuide selectedId={providerGuide.id} mode="image" />
     </>
   )
 }

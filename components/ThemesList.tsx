@@ -13,6 +13,7 @@ const ThemesList = forwardRef<HTMLDivElement, ThemesListProps>((
   const { getGameDataForTheme } = useGameStore()
   return (
     <Card
+      className="theme-list-card glass-card"
       title="Theme List"
       style={{ width: '400px', height: '100%', display: 'flex', flexDirection: 'column' }}
       styles={{
@@ -29,6 +30,7 @@ const ThemesList = forwardRef<HTMLDivElement, ThemesListProps>((
         {themes.map((theme) => (
           <div key={theme.id} style={{ width: '100%' }}>
             <Card
+              className={`theme-choice-card${selectedTheme === theme.id ? ' is-selected' : ''}`}
               hoverable={!(theme as any).isLoading}
               size="small"
               style={{
