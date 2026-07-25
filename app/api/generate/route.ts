@@ -100,6 +100,9 @@ function isModerationError(error: unknown): boolean {
     || detail.includes('content policy')
     || detail.includes('content_policy')
     || detail.includes('moderation')
+    || detail.includes('flagged')
+    || detail.includes('code":3030')
+    || detail.includes('code 3030')
   )
 }
 

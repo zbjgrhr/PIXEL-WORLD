@@ -13,8 +13,10 @@ export const PROMPT_TEMPLATES: PromptTemplate[] = [{
   levelCount: 5,
   prompt: `游戏标题：龙之城堡：余烬王冠
 世界观与故事：一个完全原创的黑暗奇幻像素王国。余烬王冠碎裂后，五片领地失去季节与光明；一名成年骑士需要回收星火结晶、重新开启五座传送门，并击败盘踞熔火圣殿的古龙守卫。
-背景故事：王国的五座传送门曾由余烬王冠维持。王冠碎裂后，城门、王座厅、地下河、法师塔与熔火圣殿彼此隔绝。成年骑士艾琳从暮色城门出发，以蓝焰符文装备对抗石甲守卫、雷翼兽和深河生物。每枚星火结晶都会恢复传送门的一部分能量，并强化她的近战与远程攻击。第五座门后，熔岩古龙正利用碎片重塑王冠；艾琳必须穿越逐渐升级的平台、陷阱和敌群，在最终竞技场终结诅咒。
+背景故事：王国的五座传送门曾由余烬王冠维持。王冠因熔岩古龙夺取核心而碎裂，城门、王座厅、地下河、法师塔与熔火圣殿从此隔绝。成年骑士艾琳从暮色城门出发，以蓝焰符文装备对抗石甲守卫、雷翼兽和深河生物。每枚星火结晶都会恢复传送门的一部分能量，并强化她的近战与远程攻击。她的明确目标是在前四关累计收集至少十二枚星火结晶、开启全部传送门，在第五关击败熔岩古龙并走入右侧出口，完成王冠重铸。
 整体像素风格：原创16-bit横版像素美术，清晰硬像素边缘，无抗锯齿；深青阴影、暖橙高光、少量蓝紫魔法点缀；统一左上方光源、统一2倍像素比例、正交侧视角和高辨识度剪影。不模仿或引用任何现有游戏、影视、动漫、艺术家、工作室、角色、标志或品牌。
+玩法硬规则：全局普通重力倍率为1.0；水域关卡只在水域碰撞范围内使用0.55重力；大气关卡使用普通重力并依靠漂浮平台移动。近战和远程共用420毫秒冷却；近战每次消耗8能量，远程每次消耗15能量，未攻击或冲刺时每秒恢复2能量。普通关敌人数不超过6，最终关普通敌人数不超过5并额外出现一个Boss。Boss震波最大半径48像素并有明显预警。主角、各类敌人和Boss动作条统一为站立1帧、走路3帧、跳跃2帧、近战攻击3帧、远程攻击3帧、受击1帧、死亡2帧，每一帧都是同一角色从头到脚的完整侧视形象。
+关卡兼容规则：暮色城门与回声王座厅只使用地面平台；遗忘地下河只使用水域低重力；星尘法师塔只使用大气漂浮；熔火圣殿只使用地面平台。地面敌人只分配到地面关，水中敌人只分配到水域关，空中敌人可分配到地面或大气关但不得进入水域关。所有Boss相关素材、近战武器、远程武器和两套攻击资源必须分配到最终关。
 
 主角 / Hero：One original adult female knight, full-body side view facing right, silver-blue plate armor with gold trim, short dark-red cape, dark hair tied back, athletic readable silhouette; character only, no weapon, no companion, no scenery, no text or emblem.
 地面敌人 / Ground Enemy：One original stone-armored sentinel, full-body side view facing left, compact heavy body, cracked charcoal plates, dim orange core, two arms and two legs; enemy only, no weapon floating separately, no scenery.
@@ -34,7 +36,7 @@ export const PROMPT_TEMPLATES: PromptTemplate[] = [{
 水中敌人行动音效：Quiet continuous bubbling with a soft flowing-water pulse.
 BOSS：One original colossal magma dragon guardian, complete side view facing left, black iron scales, restrained orange lava seams, two large wings, four limbs and one tail, strong final-arena silhouette; boss only, no rider, no minions, no scenery.
 BOSS攻击特效：One large fan-shaped orange flame wave with a clear leading edge and sparse embers, effect only, no dragon, no arena, no text.
-BOSS行动形态：Phase one ground pursuit and claw strikes; phase two airborne flame volleys; below half health, faster alternating dives and radial shockwaves with clear telegraphs.
+BOSS行动形态：Phase one ground pursuit and close-range strikes; phase two airborne flame volleys; below half health, faster alternating dives and radial shockwaves capped at a 48-pixel radius, always preceded by a clear two-step telegraph.
 BOSS攻击音效：Deep short roar layered with a controlled flame burst and low impact.
 BOSS行动音效：Heavy footfalls, broad wing beats and quiet armored-scale friction.
 近战武器：One original blue-flame rune longsword, horizontal side view pointing right, silver blade, dark grip, small gold guard, restrained cyan glow; weapon only, no hands, no character, no scenery, no letters or logo.
@@ -62,6 +64,7 @@ BOSS行动音效：Heavy footfalls, broad wing beats and quiet armored-scale fri
 出现素材：主角、地面敌人、空中敌人、近战武器、远程武器、近战攻击特效、远程弹射物、远程攻击/命中特效、收集品、地面平台、普通障碍物、触碰即死障碍物、弹跳障碍物。
 背景音乐：92 BPM，三角波主旋律、低音脉冲和克制鼓点，气氛低沉但保留冒险希望。
 天气/滤镜/闪光：薄雾、冷色滤镜、低强度、仅受击时短闪光。
+敌人数：3。收集品数：3。Boss：否。
 
 关卡 2：回声王座厅
 背景：Wide empty ruined throne hall, tall stone columns, broken stained-glass windows, faded banners and diagonal moonlight beams; open central floor and a distant stairway on the right, environment only.
@@ -70,22 +73,25 @@ BOSS行动音效：Heavy footfalls, broad wing beats and quiet armored-scale fri
 出现素材：主角、地面敌人、空中敌人、近战武器、远程武器、全部玩家攻击特效、收集品、地面平台、普通障碍物、弹跳障碍物。
 背景音乐：104 BPM，方波和弦、断续鼓点与短促回声。
 天气/滤镜/闪光：漂浮尘埃、轻微暖色高光、中低强度、受击短闪光。
+敌人数：4。收集品数：4。Boss：否。
 
 关卡 3：遗忘地下河
 背景：Wide empty underground river cavern, layered wet rock walls, distant chains, small luminous fungi and a calm teal water reflection; clear side-scrolling route, environment only.
 平台类型：水域低重力。
 障碍物：水边金属尖刺、普通湿岩路障和一个气泡弹跳台。
-出现素材：主角、地面敌人、水中敌人、远程武器、远程弹射物、远程攻击/命中特效、收集品、水域、地面平台、普通障碍物、触碰即死障碍物、弹跳障碍物。
+出现素材：主角、水中敌人、近战武器、远程武器、全部玩家攻击特效、远程弹射物、收集品、水域、地面平台、普通障碍物、触碰即死障碍物、弹跳障碍物。
 背景音乐：112 BPM，正弦波低音、低通水下脉冲和稀疏高音。
 天气/滤镜/闪光：气泡、雾气、水下滤镜、中等强度、受击短闪光。
+敌人数：5。收集品数：4。Boss：否。
 
 关卡 4：星尘法师塔
 背景：Wide empty upper tower chamber, distant bookcases, geometric magic circles on the rear wall, tall windows showing a star field and restrained violet lightning outside; open aerial traversal space, environment only.
 平台类型：大气漂浮。
 障碍物：漂浮符文平台、金属尖刺和普通石制路障。
-出现素材：主角、地面敌人、空中敌人、近战武器、远程武器、全部玩家攻击特效、收集品、大气漂浮平台、普通障碍物、触碰即死障碍物。
+出现素材：主角、空中敌人、近战武器、远程武器、全部玩家攻击特效、远程弹射物、收集品、大气漂浮平台、普通障碍物、触碰即死障碍物。
 背景音乐：128 BPM，快速三角波琶音、低频脉冲与稀疏电流音色。
 天气/滤镜/闪光：星尘、梦境滤镜、中高强度、攻击命中时短闪光。
+敌人数：6。收集品数：5。Boss：否。
 
 关卡 5：熔火圣殿
 背景：Wide empty volcanic sanctuary, distant lava river, black basalt arches, dragon-bone shapes embedded in the rear wall and dark red clouds; broad uncluttered central boss arena, environment only.
@@ -93,5 +99,6 @@ BOSS行动音效：Heavy footfalls, broad wing beats and quiet armored-scale fri
 障碍物：熔岩尖刺、普通黑岩路障和热气弹跳台。
 出现素材：主角、地面敌人、空中敌人、BOSS、全部武器、全部攻击特效、远程弹射物、收集品、地面平台、普通障碍物、触碰即死障碍物、弹跳障碍物。
 背景音乐：144 BPM，锯齿波低音、稳定战鼓节奏和清晰胜利动机。
-天气/滤镜/闪光：余烬雨、危险暖色滤镜、高强度、Boss重击时短闪光。`,
+天气/滤镜/闪光：余烬雨、危险暖色滤镜、高强度、Boss重击时短闪光。
+敌人数：5。收集品数：5。Boss：是。`,
 }]

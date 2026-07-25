@@ -35,6 +35,13 @@ export function inspectGameSpec(spec: GameSpec, source: AgentRole = 'engineQa'):
     if (!background) issues.push(issue(source, 'blocking', `levels.${index}.background`, `${level.name} 没有关卡背景。`, '为该关卡分配一个 levelBackground。'))
     if (level.enemyCount < 1 && !level.hasBoss) issues.push(issue(source, 'warning', `levels.${index}.enemyCount`, `${level.name} 没有普通敌人。`, '至少配置一个与难度相符的敌人。'))
     if (level.collectibleCount < 1) issues.push(issue(source, 'warning', `levels.${index}.collectibleCount`, `${level.name} 没有收集品。`, '至少配置一个收集品以形成探索目标。'))
+    if (level.enemyCount > (level.hasBoss ? 5 : 6)) issues.push(issue(source, 'warning', `levels.${index}.enemyCount`, `${level.name} 的敌人密度可能超出当前画面承载范围。`, `将敌人数降低到 ${level.hasBoss ? 5 : 6} 或更少。`))
+    if (level.platformMode === 'water' && !enabledAssets(spec, 'waterPlatform').some((asset) => asset.levelIds.includes(level.id))) {
+      issues.push(issue(source, 'blocking', `levels.${index}.platformMode`, `${level.name} 是水域关，但没有分配水域低重力素材。`, '为该关卡分配 waterPlatform。'))
+    }
+    if (level.platformMode === 'air' && !enabledAssets(spec, 'airPlatform').some((asset) => asset.levelIds.includes(level.id))) {
+      issues.push(issue(source, 'blocking', `levels.${index}.platformMode`, `${level.name} 是大气关，但没有分配漂浮平台素材。`, '为该关卡分配 airPlatform。'))
+    }
   })
 
   const bossLevels = spec.levels.filter((level) => level.hasBoss)
@@ -48,6 +55,19 @@ export function inspectGameSpec(spec: GameSpec, source: AgentRole = 'engineQa'):
     if (!asset.prompt.trim() && (asset.kind === 'image' || asset.kind === 'spriteSheet')) {
       issues.push(issue(source, 'blocking', `assets.${asset.id}.prompt`, `${asset.title} 没有生成描述。`, '补充只描述该素材本身的提示词。'))
     }
+    if (asset.category === 'levelBackground' && /placeholder|describe this level|等待补充|关卡背景描述/i.test(asset.prompt)) {
+      issues.push(issue(source, 'blocking', `assets.${asset.id}.prompt`, `${asset.title} 仍然使用占位描述。`, '改为只描述对应关卡环境的完整英文背景提示词。'))
+    }
+    const assignedLevels = spec.levels.filter((level) => asset.levelIds.includes(level.id))
+    if (asset.category.startsWith('waterEnemy') && assignedLevels.some((level) => level.platformMode !== 'water')) {
+      issues.push(issue(source, 'blocking', `assets.${asset.id}.levelIds`, `${asset.title} 被分配到了非水域关卡。`, '只保留 platformMode=water 的关卡。'))
+    }
+    if (asset.category.startsWith('groundEnemy') && assignedLevels.some((level) => level.platformMode !== 'ground')) {
+      issues.push(issue(source, 'blocking', `assets.${asset.id}.levelIds`, `${asset.title} 被分配到了非地面关卡。`, '只保留 platformMode=ground 的关卡。'))
+    }
+    if (asset.category.startsWith('airEnemy') && assignedLevels.some((level) => level.platformMode === 'water')) {
+      issues.push(issue(source, 'blocking', `assets.${asset.id}.levelIds`, `${asset.title} 被分配到了水域关卡。`, '空中敌人只用于地面或大气关卡。'))
+    }
   }
 
   if (spec.hero.maxHealth <= 0 || spec.hero.moveSpeed <= 0 || spec.hero.jumpPower <= 0) {
@@ -55,6 +75,9 @@ export function inspectGameSpec(spec: GameSpec, source: AgentRole = 'engineQa'):
   }
   if (spec.weapon.meleeDamage <= 0 || spec.weapon.rangedDamage <= 0 || spec.weapon.projectileSpeed <= 0) {
     issues.push(issue(source, 'blocking', 'weapon', '近战或远程战斗参数不完整。', '补齐伤害、冷却和弹射物速度。'))
+  }
+  if (spec.weapon.cooldownMs !== 420) {
+    issues.push(issue(source, 'warning', 'weapon.cooldownMs', `武器冷却为 ${spec.weapon.cooldownMs}ms，与当前引擎标准420ms不一致。`, '统一设置为420ms，避免提示词、数值和运行时反馈分裂。'))
   }
   return dedupeIssues(issues)
 }

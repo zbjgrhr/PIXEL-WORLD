@@ -197,6 +197,8 @@ export default function AgentStudio({ projectId, sourcePrompt, projectName, leve
           size="small"
           items={tasks.map((task) => {
             const label = AGENT_ROLE_LABELS[task.role]
+            const actionableIssues = (task.issues || []).filter((item) => item.severity !== 'info')
+            const advisoryIssues = (task.issues || []).filter((item) => item.severity === 'info')
             return {
               key: task.id,
               label: <Space wrap><Text strong>{label.zh} / {label.en}</Text><Tag color={STATUS_COLOR[task.status]}>{task.status}</Tag>{task.round > 1 && <Tag>第 {task.round} 轮</Tag>}</Space>,
@@ -208,7 +210,14 @@ export default function AgentStudio({ projectId, sourcePrompt, projectName, leve
                   label: '查看结构化成果',
                   children: <pre style={{ margin: 0, maxHeight: 360, overflow: 'auto', whiteSpace: 'pre-wrap', fontSize: 11 }}>{artifactPreview(task.output)}</pre>,
                 }]} />}
-                {task.issues?.map((item) => <Alert key={item.id} type={item.severity === 'blocking' ? 'error' : item.severity === 'warning' ? 'warning' : 'info'} showIcon message={item.message} description={`${item.path} · ${item.suggestion}`} />)}
+                {actionableIssues.map((item) => <Alert key={item.id} type={item.severity === 'blocking' ? 'error' : 'warning'} showIcon message={item.message} description={`${item.path} · ${item.suggestion}`} />)}
+                {advisoryIssues.length > 0 && <Collapse size="small" items={[{
+                  key: `${task.id}-advice`,
+                  label: `可选优化建议 ${advisoryIssues.length} 条（不会阻止继续）`,
+                  children: <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    {advisoryIssues.map((item) => <Alert key={item.id} type="info" showIcon message={item.message} description={`${item.path} · ${item.suggestion}`} />)}
+                  </Space>,
+                }]} />}
                 {task.error && <Alert type="error" showIcon message={task.error} />}
                 <Space>
                   {task.usage && <Text type="secondary">Token: {task.usage.totalTokens}</Text>}

@@ -5,6 +5,7 @@ import {
   preserveExplicitPromptFields,
   serializeGameSpec,
 } from '@/lib/game-spec'
+import { stabilizeGameSpec } from '@/lib/game-spec-guardrails'
 import type { GameSpec, ProviderId } from '@/types'
 import { PROMPT_TEMPLATES } from '@/configs/prompt-templates'
 import { apiKeyHasUnsupportedCharacters, normalizeApiKey } from '@/lib/api-key'
@@ -34,6 +35,10 @@ Rules:
 - Image and spriteSheet assets use pending status unless a URL already exists. Audio and runtime assets use success status because they are synthesized locally.
 - Asset levelIds must reference real level ids. Level-specific backgrounds, music, and effects must each target exactly one level.
 - The final level hasBoss=true; earlier levels haveBoss=false.
+- platformMode must match the level: ground for ordinary terrain, water only for underwater/river zones, air only for floating/aerial traversal. Ground enemies use ground levels, water enemies use water levels, and air enemies never use water levels.
+- Every level background prompt must repeat that level's concrete environment description and must never contain placeholder text.
+- Character action strips always use idle 1 frame, walk 3, jump 2, meleeAttack 3, rangedAttack 3, hit 1, death 2; every frame shows the complete same character from head to feet.
+- Keep ordinary enemyCount at 6 or below (5 or below in the final Boss level), weapon cooldownMs at 420, and ensure Boss plus melee/ranged resources are assigned to the final level.
 - Return JSON only, without markdown.`
 
 function optimizerEndpoint(provider: ProviderId): { url: string; model: string; envKey: string } | undefined {
@@ -141,7 +146,7 @@ export async function POST(request: NextRequest) {
     } else if (apiKey && config) {
       try {
         const candidate = await optimizeWithAi(provider, apiKey, prompt, fallback)
-        spec = preserveExplicitPromptFields(normalizeGameSpec(candidate, fallback, levelCount), fallback, prompt)
+        spec = preserveExplicitPromptFields(stabilizeGameSpec(normalizeGameSpec(candidate, fallback, levelCount)), fallback, prompt)
         source = 'ai'
       } catch (error) {
         warning = error instanceof Error

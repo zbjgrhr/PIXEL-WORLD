@@ -99,6 +99,21 @@ function stripArtifactAssets(artifacts: AgentArtifacts): AgentArtifacts {
   }
 }
 
+function artifactsForRole(role: AgentRole, artifacts: AgentArtifacts): AgentArtifacts {
+  const a = stripArtifactAssets(artifacts)
+  if (role === 'director') return {}
+  if (role === 'narrative' || role === 'mechanics' || role === 'artDirector') return { brief: a.brief }
+  if (role === 'levelDesigner') return { brief: a.brief, narrative: a.narrative, mechanics: a.mechanics, artDirection: a.artDirection }
+  if (role === 'integrator') return { brief: a.brief, narrative: a.narrative, mechanics: a.mechanics, artDirection: a.artDirection, levelPlan: a.levelPlan }
+  if (role === 'consistencyCritic') return { brief: a.brief, narrative: a.narrative, artDirection: a.artDirection }
+  if (role === 'engineQa') return { brief: a.brief, mechanics: a.mechanics, levelPlan: a.levelPlan }
+  if (role === 'revision') return { brief: a.brief, reviewIssues: a.reviewIssues }
+  if (role === 'assetCoordinator') return { brief: a.brief, artDirection: a.artDirection }
+  if (role === 'visualQa' || role === 'playtest') return { brief: a.brief }
+  if (role === 'publisher') return { reviewIssues: a.reviewIssues, visualReport: a.visualReport, playtestReport: a.playtestReport }
+  return {}
+}
+
 function blockingIssues(run: AgentRun): AgentIssue[] {
   const currentTasks = run.tasks.filter((task) => task.round === run.currentRound)
   const latestCompleted = currentTasks.find((task) => task.role === 'assetCoordinator' && task.status === 'completed')
@@ -182,7 +197,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
       projectName: current.projectName,
       levelCount: current.levelCount,
       modelLock: current.modelLock,
-      artifacts: stripArtifactAssets(current.artifacts),
+      artifacts: artifactsForRole(task.role, current.artifacts),
       baseSpec: baseSpec ? stripLargeAssetUrls(baseSpec) : undefined,
     }
     const digest = digestAgentInput(requestData)
@@ -190,7 +205,8 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
 
     let lastError = 'Agent execution failed.'
     let recoverable = false
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const maxAttempts = 3
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
         const body: AgentExecuteRequest = {
           runId: current.id,
@@ -204,7 +220,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
           projectName: current.projectName,
           levelCount: current.levelCount,
           baseSpec: baseSpec ? stripLargeAssetUrls(baseSpec) : undefined,
-          artifacts: stripArtifactAssets(current.artifacts),
+          artifacts: artifactsForRole(task.role, current.artifacts),
           imageUrls: task.role === 'visualQa' ? imageUrls(baseSpec) : undefined,
         }
         const response = await fetch('/api/agents/execute', {
@@ -217,8 +233,8 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
         if (!response.ok || !result?.success || !result.data) {
           lastError = result?.error || `Agent request failed (${response.status}).`
           recoverable = Boolean(result?.recoverable)
-          if (recoverable && attempt < 2) {
-            await new Promise((resolve) => setTimeout(resolve, 500 * attempt))
+          if (recoverable && attempt < maxAttempts) {
+            await new Promise((resolve) => setTimeout(resolve, 700 * (2 ** (attempt - 1))))
             continue
           }
           return { task: { ...task, inputDigest: digest, attempts: task.attempts + attempt }, error: lastError, recoverable }
@@ -230,7 +246,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
         }
         lastError = error instanceof Error ? error.message : 'Agent request failed.'
         recoverable = true
-        if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 500 * attempt))
+        if (attempt < maxAttempts) await new Promise((resolve) => setTimeout(resolve, 700 * (2 ** (attempt - 1))))
       }
     }
     return { task, error: lastError, recoverable }

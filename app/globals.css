@@ -123,21 +123,45 @@ body {
   isolation: isolate;
   min-height: 100vh;
   overflow: hidden;
+  background: #dff4ff;
+}
+
+.pixel-world-app::before,
+.pixel-world-app::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.pixel-world-app::before {
+  z-index: 0;
+  background-image: url('/visuals/pixel-kingdom-bg.png');
+  background-position: 50% 42%;
+  background-size: cover;
+  image-rendering: pixelated;
+  filter: saturate(1.08) contrast(1.02);
+  transform: scale(1.025);
+  animation: kingdomPan 28s ease-in-out infinite alternate;
+}
+
+.pixel-world-app::after {
+  z-index: 1;
   background:
-    radial-gradient(circle at 84% 10%, rgba(255, 189, 226, .38), transparent 26%),
-    radial-gradient(circle at 52% 90%, rgba(155, 232, 255, .34), transparent 34%),
-    linear-gradient(135deg, #f9fbff 0%, #eef4ff 42%, #f8f1ff 76%, #fff8fc 100%);
+    linear-gradient(180deg, rgba(247, 252, 255, .35), rgba(240, 248, 255, .7) 46%, rgba(249, 246, 255, .82)),
+    radial-gradient(circle at 50% 12%, rgba(255,255,255,.25), transparent 35%);
+  backdrop-filter: blur(1.6px);
 }
 
 .pixel-world-shell {
   position: relative;
-  z-index: 2;
+  z-index: 3;
 }
 
 .ambient-sky {
   position: absolute;
   inset: 0;
-  z-index: 0;
+  z-index: 2;
   pointer-events: none;
   overflow: hidden;
 }
@@ -198,11 +222,11 @@ body {
   flex-direction: column;
   gap: 15px;
   padding: 19px 16px 17px;
-  border: 1px solid rgba(112, 136, 211, .16);
+  border: 1px solid rgba(91, 128, 218, .28);
   border-radius: 22px;
-  background: linear-gradient(145deg, rgba(255,255,255,.88), rgba(246,249,255,.66));
-  box-shadow: 0 12px 32px rgba(70, 92, 160, .10), inset 0 1px 0 rgba(255,255,255,.9);
-  backdrop-filter: blur(14px);
+  background: linear-gradient(145deg, rgba(255,255,255,.93), rgba(239,248,255,.82));
+  box-shadow: 0 14px 38px rgba(51, 86, 157, .16), inset 0 1px 0 rgba(255,255,255,.95);
+  backdrop-filter: blur(18px) saturate(1.18);
 }
 
 .studio-section::after {
@@ -242,11 +266,12 @@ body {
   justify-content: center;
   overflow: hidden;
   border-radius: 28px;
-  border: 1px solid rgba(120, 143, 218, .15);
+  border: 1px solid rgba(93, 130, 223, .3);
   background:
-    radial-gradient(circle at 50% 38%, rgba(255,255,255,.95), transparent 23%),
-    linear-gradient(155deg, rgba(234,246,255,.9), rgba(245,238,255,.76) 60%, rgba(255,240,249,.75));
-  box-shadow: 0 18px 44px rgba(76, 99, 169, .13), inset 0 1px 0 #fff;
+    radial-gradient(circle at 50% 38%, rgba(255,255,255,.92), transparent 26%),
+    linear-gradient(155deg, rgba(225,246,255,.7), rgba(241,233,255,.64) 60%, rgba(255,232,246,.68)),
+    url('/visuals/pixel-kingdom-bg.png') 50% 39% / cover no-repeat;
+  box-shadow: 0 20px 52px rgba(55, 91, 173, .2), inset 0 1px 0 #fff;
 }
 
 .portal-header > *:not(.portal-orbit):not(.portal-star) { position: relative; z-index: 2; }
@@ -481,9 +506,9 @@ body {
 .glass-card {
   border-color: var(--glass-border) !important;
   border-radius: 23px !important;
-  background: rgba(255,255,255,.78) !important;
+  background: rgba(255,255,255,.9) !important;
   box-shadow: var(--glass-shadow) !important;
-  backdrop-filter: blur(16px);
+  backdrop-filter: blur(19px) saturate(1.15);
 }
 
 .theme-list-card .ant-card-head,
@@ -516,6 +541,11 @@ body {
   to { transform: translate3d(24px, 18px, 0) scale(1.08); }
 }
 
+@keyframes kingdomPan {
+  from { background-position: 48% 42%; transform: scale(1.025); }
+  to { background-position: 53% 46%; transform: scale(1.055); }
+}
+
 @keyframes starPulse {
   0%, 100% { opacity: .32; transform: scale(.72) rotate(0); }
   50% { opacity: 1; transform: scale(1.2) rotate(25deg); }
@@ -531,6 +561,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .pixel-world-app::before,
   .ambient-sky::before,
   .ambient-sky::after,
   .ambient-sky span,

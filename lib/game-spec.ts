@@ -1,4 +1,5 @@
 import { ANIMATION_CLIP_POSES, ASSET_CATALOG, createAssetPlan, normalizeAnimationSpec } from '@/lib/asset-catalog'
+import { stabilizeGameSpec } from '@/lib/game-spec-guardrails'
 import type {
   AssetCategory,
   AssetDefinition,
@@ -223,6 +224,9 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
     const levelObstacle = levelField(block, ['障碍物', 'obstacles']) || obstacle
     const musicText = levelField(block, ['背景音乐', 'music'])
     const effectsText = levelField(block, ['天气/滤镜/闪光', '关卡特效', 'effects'])
+    const enemyCountText = levelField(block, ['敌人数', 'enemy count'])
+    const collectibleCountText = levelField(block, ['收集品数', 'collectible count'])
+    const bossText = levelField(block, ['boss', '首领'])
     levelMentions[index] = levelField(block, ['出现素材', 'assets'])
     const defaults = levelDefaults(index, levelCount, `${environment} ${platformText}`)
     const platformMode: LevelSpec['platformMode'] = /water|underwater|river|ocean|水域|水下|海洋/i.test(platformText)
@@ -245,9 +249,9 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
       environment,
       ground,
       obstacle: levelObstacle,
-      enemyCount: Math.min(10, 3 + index * 2),
-      collectibleCount: Math.min(8, 3 + index),
-      hasBoss: index === levelCount - 1,
+      enemyCount: Math.min(6, Math.max(0, Number(enemyCountText.match(/\d+/)?.[0]) || 3 + index)),
+      collectibleCount: Math.min(8, Math.max(0, Number(collectibleCountText.match(/\d+/)?.[0]) || 3 + index)),
+      hasBoss: index === levelCount - 1 || /yes|true|是|有/i.test(bossText),
       ...defaults,
       platformMode,
       music: {
@@ -273,7 +277,7 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
 
   const visualStyle = structuredField(prompt, ['整体像素风格', '视觉风格', 'visual style'])
 
-  return {
+  return stabilizeGameSpec({
     version: 3,
     title: structuredField(prompt, ['游戏标题', 'game title']) || themeName.trim() || 'Pixel World',
     world,
@@ -285,7 +289,7 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
       pixelScale: 'Consistent 2x pixel scale and side-view orthographic camera.',
     },
     hero: { name: 'Hero', appearance: heroAppearance, maxHealth: 100, moveSpeed: 5, jumpPower: 15 },
-    weapon: { name: 'Seedblade', appearance: weaponAppearance, mode: 'hybrid', meleeDamage: 24, rangedDamage: 16, cooldownMs: 380, projectileSpeed: 10 },
+    weapon: { name: 'Seedblade', appearance: weaponAppearance, mode: 'hybrid', meleeDamage: 24, rangedDamage: 16, cooldownMs: 420, projectileSpeed: 10 },
     enemies: [{ name: 'World Stalker', appearance: enemyAppearance, health: 48, damage: 12, speed: 1.4, behavior: 'chase' }],
     boss: { name: 'World Guardian', appearance: bossAppearance, health: 280, damage: 20, speed: 1.1, attackPattern: 'Alternates between pursuit, projectiles, and an enraged final phase.' },
     collectible: { name: 'Inner Seed', appearance: collectibleAppearance, effect: 'score', value: 100 },
@@ -293,7 +297,7 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
     attackEffect,
     levels,
     assets,
-  }
+  })
 }
 
 /** Keep every user-filled structured field attached to its exact category. */

@@ -10,7 +10,7 @@ const ROLE_FIELDS: Record<AgentRole, string[]> = {
   consistencyCritic: ['issues'],
   engineQa: ['issues'],
   revision: [],
-  assetCoordinator: ['estimatedImageJobs', 'productionNotes'],
+  assetCoordinator: ['assetPromptPatches', 'estimatedImageJobs', 'productionNotes'],
   visualQa: ['verdict', 'checkedAssets', 'recommendations'],
   playtest: ['verdict', 'checks', 'recommendations'],
   publisher: ['ready', 'blockingIssues', 'warnings', 'summary'],

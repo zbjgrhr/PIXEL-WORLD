@@ -12,6 +12,7 @@ import {
   sanitizeIssues,
 } from '@/lib/agents/validation'
 import { createFallbackGameSpec, normalizeGameSpec, preserveExplicitPromptFields } from '@/lib/game-spec'
+import { stabilizeGameSpec } from '@/lib/game-spec-guardrails'
 import type {
   AgentExecuteRequest,
   AgentExecuteResponse,
@@ -30,6 +31,22 @@ const VALID_ROLES = new Set<AgentRole>([
 interface ChatPayload {
   choices?: Array<{ message?: { content?: string | Array<{ text?: string }> } }>
   usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+}
+
+const ROLE_TOKEN_BUDGET: Record<AgentRole, number> = {
+  director: 1800,
+  narrative: 2400,
+  mechanics: 3200,
+  artDirector: 2800,
+  levelDesigner: 4600,
+  integrator: 11000,
+  consistencyCritic: 2800,
+  engineQa: 2800,
+  revision: 9000,
+  assetCoordinator: 4200,
+  visualQa: 2400,
+  playtest: 2400,
+  publisher: 1800,
 }
 
 class AgentUpstreamError extends Error {
@@ -90,6 +107,7 @@ async function callModel(
     body: JSON.stringify({
       model: request.model,
       temperature: request.role === 'consistencyCritic' || request.role === 'engineQa' ? 0.1 : 0.25,
+      max_tokens: ROLE_TOKEN_BUDGET[request.role],
       ...(responseFormat ? { response_format: { type: 'json_object' } } : {}),
       messages: [
         { role: 'system', content: system },
@@ -146,7 +164,7 @@ function currentSpec(request: AgentExecuteRequest): GameSpec {
 function normalizedSpec(request: AgentExecuteRequest, candidate: unknown): GameSpec {
   const fallback = currentSpec(request)
   const normalized = normalizeGameSpec(candidate, fallback, request.levelCount)
-  return preserveExplicitPromptFields(normalized, fallback, request.sourcePrompt)
+  return preserveExplicitPromptFields(stabilizeGameSpec(normalized), fallback, request.sourcePrompt)
 }
 
 function normalizeArtifact(
@@ -160,10 +178,34 @@ function normalizeArtifact(
   let artifact = rawArtifact
   let issues = sanitizeIssues(parsed.issues, request.role)
 
-  if (request.role === 'integrator' || request.role === 'revision' || request.role === 'assetCoordinator') {
+  if (request.role === 'integrator' || request.role === 'revision') {
     const candidate = untrustedArtifact.spec || parsed.spec || untrustedArtifact
     const spec = normalizedSpec(request, candidate)
     artifact = { ...rawArtifact, spec }
+    issues = dedupeIssues([...issues, ...inspectGameSpec(spec, 'engineQa')])
+  } else if (request.role === 'assetCoordinator') {
+    const base = currentSpec(request)
+    const patches = Array.isArray(rawArtifact.assetPromptPatches) ? rawArtifact.assetPromptPatches : []
+    const promptById = new Map<string, string>()
+    for (const candidate of patches.slice(0, 100)) {
+      if (!candidate || typeof candidate !== 'object') continue
+      const item = candidate as Record<string, unknown>
+      if (typeof item.assetId === 'string' && typeof item.prompt === 'string' && item.prompt.trim()) {
+        promptById.set(item.assetId.slice(0, 160), item.prompt.trim().slice(0, 8000))
+      }
+    }
+    const candidate = {
+      ...base,
+      assets: base.assets.map((asset) => promptById.has(asset.id) ? { ...asset, prompt: promptById.get(asset.id)! } : asset),
+    }
+    const spec = normalizedSpec(request, candidate)
+    const estimatedImageJobs = spec.assets.filter((asset) => asset.enabled).reduce((total, asset) => {
+      if (asset.kind === 'spriteSheet') {
+        return total + Object.values(asset.animation?.clips || {}).filter((clip) => clip?.enabled !== false).length
+      }
+      return total + (asset.kind === 'image' ? 1 : 0)
+    }, 0)
+    artifact = { ...rawArtifact, estimatedImageJobs, spec }
     issues = dedupeIssues([...issues, ...inspectGameSpec(spec, 'engineQa')])
   } else if (request.role === 'consistencyCritic') {
     const reported = sanitizeIssues(rawArtifact.issues, 'consistencyCritic')
@@ -236,7 +278,9 @@ export async function POST(nextRequest: NextRequest) {
       timestamp: new Date().toISOString(),
     } satisfies AgentExecuteResponse)
   } catch (error) {
-    const recoverable = error instanceof AgentUpstreamError ? error.recoverable : false
+    const recoverable = error instanceof AgentUpstreamError
+      ? error.recoverable
+      : error instanceof Error && /fetch|network|socket|ECONN|ENOTFOUND|timeout/i.test(error.message)
     return NextResponse.json({
       success: false,
       error: error instanceof Error ? error.message : 'Agent execution failed.',

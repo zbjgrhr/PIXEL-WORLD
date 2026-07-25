@@ -263,6 +263,17 @@ const SideMenu: React.FC<SideMenuProps> = ({
       model: selectedModel,
       apiKey: apiKey.trim(),
     }
+    const providerConcurrency: Partial<Record<ProviderId, number>> = {
+      cloudflare: 4,
+      together: 4,
+      pollinations: 4,
+      tencent: 3,
+      huggingface: 2,
+      openrouter: 2,
+      openai: 2,
+      dashscope: 2,
+    }
+    const concurrency = providerConcurrency[generationTarget.provider] || 2
 
     const pendingPoses = (asset: AssetDefinition): AnimationClipPose[] => {
       if (asset.kind !== 'spriteSheet') return []
@@ -298,7 +309,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
     try {
       setLoading(true)
       setGenerationProgress(0)
-      setLoadingMessage(`正在使用 ${generationTarget.model} 生成全部 ${totalJobs} 个独立动作与素材；不会切换模型。`)
+      setLoadingMessage(`正在使用 ${generationTarget.model} 生成 ${totalJobs} 个任务；同一模型 ${concurrency} 路并行，不会切换模型。`)
       setGameState('loading')
       onRegeneratingImagesChange?.(ALL_GENERATING)
       setPresetThemes(themesWithLoading)
@@ -393,7 +404,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
           }
         }
       }
-        await Promise.all([worker(), worker()])
+        await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(1, phaseTasks.length)) }, () => worker()))
       }
 
       // Weapons, projectiles and effects must exist before attack strips are

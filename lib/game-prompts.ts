@@ -208,9 +208,29 @@ export function buildModerationSafeAnimationClipPrompt(
   model?: string,
 ): string {
   const clip = animationClipDefaults(pose)
-  const subject = cleanPromptFragment(ASSET_CATALOG_BY_CATEGORY[asset.category]?.defaultPrompt || asset.prompt, 220)
+  const subject = moderationNeutralFragment(ASSET_CATALOG_BY_CATEGORY[asset.category]?.defaultPrompt || asset.prompt, 220)
   const layout = clip.frameCount === 1 ? 'one complete full-body frame' : `${clip.frameCount} equal full-body frames in one horizontal row`
-  return `${COMMON_STYLE}. ${ORIGINALITY}. ${subject}. Create ${layout} on ${isolationBackground(providerId, model)}. Pose type: ${pose}. Same original subject, outfit, proportions, scale, side view and baseline in every frame. Entire head-to-feet body visible with empty margin. No crop, portrait close-up, text, logo, scenery, extra subject, panel border, or content crossing frames.`
+  const safePose: Record<AnimationClipPose, string> = {
+    idle: 'neutral standing',
+    walk: 'gentle walking cycle',
+    jump: 'upward motion followed by landing preparation',
+    meleeAttack: 'three-step close-range gameplay action using matching handheld equipment',
+    rangedAttack: 'three-step aiming and energy-release gameplay action using matching handheld equipment',
+    hit: 'brief non-graphic backward reaction',
+    death: 'two-step powered-down ending pose, peaceful and non-graphic',
+  }
+  return `${COMMON_STYLE}. ${ORIGINALITY}. Family-friendly non-graphic game art. ${subject}. Create ${layout} on ${isolationBackground(providerId, model)}. Motion type: ${safePose[pose]}. Same original subject, outfit, proportions, scale, side view and baseline in every frame. Entire head-to-feet body visible with empty margin. No injury, no blood, no crop, portrait close-up, text, logo, scenery, extra subject, panel border, or content crossing frames.`
+}
+
+function moderationNeutralFragment(value: string, maxLength: number): string {
+  return cleanPromptFragment(value, maxLength)
+    .replace(/\b(?:death|dead|defeat|killed?|lethal)\b/gi, 'powered-down')
+    .replace(/\b(?:attack|strike|hit|combat)\b/gi, 'gameplay action')
+    .replace(/\b(?:weapon|sword|gun|crossbow|projectile)\b/gi, 'game equipment')
+    .replace(/\b(?:enemy|boss|hostile)\b/gi, 'fantasy creature')
+    .replace(/\b(?:blood|gore|wound|injury)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 /** A deliberately generic second attempt for provider moderation false positives. */
@@ -220,10 +240,10 @@ export function buildModerationSafePlannedAssetPrompt(
   providerId: ProviderId,
   model?: string,
 ): string {
-  const catalogPrompt = cleanPromptFragment(ASSET_CATALOG_BY_CATEGORY[asset.category]?.defaultPrompt || asset.prompt, 240)
+  const catalogPrompt = moderationNeutralFragment(ASSET_CATALOG_BY_CATEGORY[asset.category]?.defaultPrompt || asset.prompt, 240)
   const base = getPositiveTemplate(generationType, providerId, model)
   if (asset.kind === 'spriteSheet') {
-    return `${COMMON_STYLE}. ${ORIGINALITY}. ${catalogPrompt}. One complete neutral standing frame on ${isolationBackground(providerId, model)}. Fixed side-view game scale and baseline, complete head-to-feet body visible with generous empty margin. No portrait crop, names, text, logo, scenery, extra subject, or panel border.`
+    return `${COMMON_STYLE}. ${ORIGINALITY}. Family-friendly non-graphic game art. ${catalogPrompt}. One complete neutral standing frame on ${isolationBackground(providerId, model)}. Fixed side-view game scale and baseline, complete head-to-feet body visible with generous empty margin. No injury, no blood, no portrait crop, names, text, logo, scenery, extra subject, or panel border.`
   }
-  return `${base}. ${ORIGINALITY}. ${catalogPrompt}. Use a simple dark-neutral and cyan-orange pixel palette. One asset only, no names, no story, no text, no logo, no mixed categories.`
+  return `${base}. ${ORIGINALITY}. Family-friendly non-graphic game art. ${catalogPrompt}. Use a simple dark-neutral and cyan-orange pixel palette. One asset only, no injury, no blood, no names, no story, no text, no logo, no mixed categories.`
 }
