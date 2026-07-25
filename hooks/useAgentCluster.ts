@@ -296,8 +296,9 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
     return publish(working)
   }, [callTask, publish])
 
-  const drivePlanning = useCallback(async (initial: AgentRun, apiKey: string): Promise<AgentRun> => {
+  const drivePlanning = useCallback(async (initial: AgentRun, apiKey: string, baseSpecOverride?: GameSpec): Promise<AgentRun> => {
     let working: AgentRun = { ...initial, status: 'planning', error: undefined, updatedAt: Date.now() }
+    const planningBaseSpec = baseSpecOverride || options.baseSpec || undefined
     control.current.controller = new AbortController()
     working = await publish(working)
     const stopIfNeeded = async () => {
@@ -319,13 +320,13 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
       return false
     }
 
-    working = await executeBatch(working, [taskId('director', 1)], apiKey, options.baseSpec || undefined)
+    working = await executeBatch(working, [taskId('director', 1)], apiKey, planningBaseSpec)
     if (await stopIfNeeded()) return working
-    working = await executeBatch(working, [taskId('narrative', 1), taskId('mechanics', 1), taskId('artDirector', 1)], apiKey, options.baseSpec || undefined)
+    working = await executeBatch(working, [taskId('narrative', 1), taskId('mechanics', 1), taskId('artDirector', 1)], apiKey, planningBaseSpec)
     if (await stopIfNeeded()) return working
-    working = await executeBatch(working, [taskId('levelDesigner', 1)], apiKey, options.baseSpec || undefined)
+    working = await executeBatch(working, [taskId('levelDesigner', 1)], apiKey, planningBaseSpec)
     if (await stopIfNeeded()) return working
-    working = await executeBatch(working, [taskId('integrator', 1)], apiKey, options.baseSpec || undefined)
+    working = await executeBatch(working, [taskId('integrator', 1)], apiKey, planningBaseSpec)
     if (await stopIfNeeded()) return working
     working = { ...working, status: 'reviewing' }
     working = await executeBatch(working, [taskId('consistencyCritic', 1), taskId('engineQa', 1)], apiKey, working.artifacts.mergedSpec)
@@ -373,11 +374,11 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
     return working
   }, [executeBatch, options.baseSpec, options.onSpecReady, publish])
 
-  const start = useCallback(async (modelLock: AgentModelLock, apiKey: string) => {
+  const start = useCallback(async (modelLock: AgentModelLock, apiKey: string, initialSpec?: GameSpec) => {
     control.current = { paused: false, cancelled: false }
     const next = createRun(options, modelLock)
     await publish(next)
-    return drivePlanning(next, apiKey)
+    return drivePlanning(next, apiKey, initialSpec)
   }, [drivePlanning, options, publish])
 
   const pause = useCallback(() => {

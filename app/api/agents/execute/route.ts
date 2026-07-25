@@ -13,6 +13,7 @@ import {
 } from '@/lib/agents/validation'
 import { createFallbackGameSpec, normalizeGameSpec, preserveExplicitPromptFields } from '@/lib/game-spec'
 import { stabilizeGameSpec } from '@/lib/game-spec-guardrails'
+import { isStructuredPromptBlank } from '@/lib/asset-catalog'
 import type {
   AgentExecuteRequest,
   AgentExecuteResponse,
@@ -154,11 +155,13 @@ async function callAndParse(request: AgentExecuteRequest, apiKey: string): Promi
 }
 
 function currentSpec(request: AgentExecuteRequest): GameSpec {
-  return request.artifacts.productionSpec
+  const deterministicFallback = createFallbackGameSpec(request.sourcePrompt, request.projectName, request.levelCount)
+  const candidate = request.artifacts.productionSpec
     || request.artifacts.revisedSpec
     || request.artifacts.mergedSpec
     || request.baseSpec
-    || createFallbackGameSpec(request.sourcePrompt, request.projectName, request.levelCount)
+  if (!candidate) return deterministicFallback
+  return stabilizeGameSpec(normalizeGameSpec(candidate, deterministicFallback, request.levelCount))
 }
 
 function normalizedSpec(request: AgentExecuteRequest, candidate: unknown): GameSpec {
@@ -247,12 +250,15 @@ export async function POST(nextRequest: NextRequest) {
   let body: AgentExecuteRequest | undefined
   try {
     body = await nextRequest.json() as AgentExecuteRequest
-    if (!body || !VALID_ROLES.has(body.role) || !body.runId || !body.taskId || !body.sourcePrompt?.trim()) {
+    if (!body || !VALID_ROLES.has(body.role) || !body.runId || !body.taskId) {
       return NextResponse.json({ success: false, error: 'Invalid Agent task request.', recoverable: false, timestamp: new Date().toISOString() } satisfies AgentExecuteResponse, { status: 400 })
     }
+    const submittedSourcePrompt = String(body.sourcePrompt || '').trim().slice(0, 50000)
     body = {
       ...body,
-      sourcePrompt: body.sourcePrompt.trim().slice(0, 50000),
+      sourcePrompt: isStructuredPromptBlank(submittedSourcePrompt)
+        ? 'Complete and review an original colorful pixel platform adventure using the supplied GameSpec V3. Fill all missing requirements without overriding established choices.'
+        : submittedSourcePrompt,
       projectName: String(body.projectName || 'Pixel World').trim().slice(0, 160),
       levelCount: Math.min(10, Math.max(1, Math.round(Number(body.levelCount) || 1))),
       artifacts: sanitizeSharedArtifacts(body.artifacts),

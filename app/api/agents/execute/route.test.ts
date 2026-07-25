@@ -39,4 +39,33 @@ describe('POST /api/agents/execute', () => {
     expect(data.data.usage.totalTokens).toBe(30)
     expect(upstream).toHaveBeenCalledTimes(1)
   })
+
+  it('repairs an incomplete base spec when an empty idea reaches the Integrator', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({
+        summary: 'Integrator completed the prepared specification.',
+        artifact: { spec: {} },
+        issues: [],
+      }) } }],
+      usage: { prompt_tokens: 12, completion_tokens: 8, total_tokens: 20 },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    const request = new Request('http://localhost/api/agents/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        runId: 'blank-run', taskId: 'integrator-r1', role: 'integrator', round: 1,
+        provider: 'openrouter', model: 'google/gemini-2.5-flash', apiKey: 'sk-test-only',
+        sourcePrompt: '', projectName: 'Untitled World', levelCount: 3, artifacts: {},
+        baseSpec: { version: 3, title: 'Incomplete draft' },
+      }),
+    })
+
+    const response = await POST(request as never)
+    const data = await response.json()
+    expect(response.status).toBe(200)
+    expect(data.success).toBe(true)
+    expect(data.data.artifact.spec.levels).toHaveLength(3)
+    expect(data.data.artifact.spec.assets.length).toBeGreaterThan(0)
+  })
 })

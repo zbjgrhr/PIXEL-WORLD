@@ -181,6 +181,12 @@ function customizeAssetPrompts(
 
 export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel World', requestedLevelCount = 3): GameSpec {
   const prompt = sourcePrompt.trim()
+  const hasStructuredFieldSyntax = prompt.split(/\r?\n/).some((line) =>
+    /^(?:游戏标题|世界观与故事|背景故事|整体像素风格|主角\s*\/|地面敌人\s*\/|空中敌人\s*\/|水中敌人\s*\/|BOSS|关卡\s*\d+)\s*[:：]/i.test(line.trim()),
+  )
+  // Structured forms contain many labels. Fuzzy free-text section matching
+  // must not read the tail of one label (for example “观与故事”) as content.
+  const freeformPrompt = hasStructuredFieldSyntax ? '' : prompt
   const levelCount = Math.min(10, Math.max(1, requestedLevelCount || 1))
   const explicitAssetValues = Object.fromEntries(ASSET_CATALOG.map((entry) => [
     entry.category,
@@ -192,34 +198,35 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
   ])) as Partial<Record<AssetCategory, string>>
 
   const world = structuredField(prompt, ['世界观与故事', '世界观', 'world'])
-    || section(prompt, ['world', '世界'], prompt || 'A mysterious original fantasy pixel world with readable platforming spaces.')
+    || section(freeformPrompt, ['world', '世界'], freeformPrompt || 'A mysterious original fantasy pixel world with readable platforming spaces.')
   const heroAppearance = explicitAssetValues.hero
-    || section(prompt, ['character', 'hero', '主角', '人物'], assetValues.hero || 'A brave side-view adult adventurer with a strong silhouette and practical travel armor.')
+    || section(freeformPrompt, ['character', 'hero', '主角', '人物'], assetValues.hero || 'A brave side-view adult adventurer with a strong silhouette and practical travel armor.')
   const enemyAppearance = explicitAssetValues.groundEnemy
-    || section(prompt, ['enemy', 'enemies', '敌人', '怪物'], assetValues.groundEnemy || 'A hostile original creature with a readable side-view combat silhouette.')
+    || section(freeformPrompt, ['enemy', 'enemies', '敌人', '怪物'], assetValues.groundEnemy || 'A hostile original creature with a readable side-view combat silhouette.')
   const meleeWeapon = explicitAssetValues.meleeWeapon || assetValues.meleeWeapon || 'One compact original melee weapon.'
   const rangedWeapon = explicitAssetValues.rangedWeapon || assetValues.rangedWeapon || 'One compact original ranged weapon.'
   const weaponAppearance = `${meleeWeapon} Ranged companion: ${rangedWeapon}`
   const ground = explicitAssetValues.groundPlatform
-    || section(prompt, ['ground texture', 'ground', '地面'], assetValues.groundPlatform || 'A seamless side-view stone-and-soil platform texture.')
+    || section(freeformPrompt, ['ground texture', 'ground', '地面'], assetValues.groundPlatform || 'A seamless side-view stone-and-soil platform texture.')
   const obstacle = explicitAssetValues.normalObstacle
-    || section(prompt, ['obstacle', '障碍物'], assetValues.normalObstacle || 'A solid themed blocking object with a simple collision-friendly silhouette.')
+    || section(freeformPrompt, ['obstacle', '障碍物'], assetValues.normalObstacle || 'A solid themed blocking object with a simple collision-friendly silhouette.')
   const bossAppearance = explicitAssetValues.boss
-    || section(prompt, ['boss', '首领'], assetValues.boss || `A towering original guardian evolved from the world's hostile creatures: ${enemyAppearance}`)
+    || section(freeformPrompt, ['boss', '首领'], assetValues.boss || `A towering original guardian evolved from the world's hostile creatures: ${enemyAppearance}`)
   const collectibleAppearance = explicitAssetValues.collectible
-    || section(prompt, ['collectible', 'collectibles', '收集品'], assetValues.collectible || 'A luminous crystal pickup with a compact readable silhouette.')
+    || section(freeformPrompt, ['collectible', 'collectibles', '收集品'], assetValues.collectible || 'A luminous crystal pickup with a compact readable silhouette.')
   const projectile = explicitAssetValues.rangedProjectile
-    || section(prompt, ['projectile', '弹射物'], assetValues.rangedProjectile || 'A small bright horizontal energy bolt matching the ranged weapon palette.')
+    || section(freeformPrompt, ['projectile', '弹射物'], assetValues.rangedProjectile || 'A small bright horizontal energy bolt matching the ranged weapon palette.')
   const attackEffect = explicitAssetValues.meleeAttackEffect
-    || section(prompt, ['attack effect', '攻击特效'], assetValues.meleeAttackEffect || 'A compact crescent slash effect with transparent surroundings.')
+    || section(freeformPrompt, ['attack effect', '攻击特效'], assetValues.meleeAttackEffect || 'A compact crescent slash effect with transparent surroundings.')
   const backgroundStory = structuredField(prompt, ['背景故事', 'background story', 'story'])
-    || section(prompt, ['background story', 'story', '背景故事'], `Long ago, ${themeName || 'this pixel world'} was protected by the power sealed inside the ${collectibleAppearance}. When ${bossAppearance} shattered that balance, a lone adventurer carrying original weapons set out to reconnect the lost regions, recover the scattered energy, and defeat the final guardian.`)
+    || section(freeformPrompt, ['background story', 'story', '背景故事'], `Long ago, ${themeName || 'this pixel world'} was protected by the power sealed inside the ${collectibleAppearance}. When ${bossAppearance} shattered that balance, a lone adventurer carrying original weapons set out to reconnect the lost regions, recover the scattered energy, and defeat the final guardian.`)
   const levelMentions: string[] = []
 
   const levels: LevelSpec[] = Array.from({ length: levelCount }, (_, index) => {
     const block = parsedLevelBlock(prompt, index)
+    const defaultEnvironment = `${world} — region ${index + 1}, with progressively stronger atmosphere and clear traversal lanes.`
     const environment = levelField(block, ['背景', 'background'])
-      || levelDescription(prompt, index, `${world} — region ${index + 1}, with progressively stronger atmosphere and clear traversal lanes.`)
+      || (block ? defaultEnvironment : levelDescription(freeformPrompt, index, defaultEnvironment))
     const platformText = levelField(block, ['平台类型', 'platform type'])
     const levelObstacle = levelField(block, ['障碍物', 'obstacles']) || obstacle
     const musicText = levelField(block, ['背景音乐', 'music'])

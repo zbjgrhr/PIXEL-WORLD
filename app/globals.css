@@ -665,7 +665,10 @@ body {
 
 /* Theme layout: a calm banner-led personal world, inspired by classic profile spaces. */
 .pixel-world-app {
-  height: 100vh;
+  height: auto;
+  min-height: 100vh;
+  overflow-x: hidden;
+  overflow-y: visible;
   color: var(--world-ink);
   background:
     linear-gradient(180deg, var(--world-page-bg), var(--world-page-bg-deep));
@@ -695,25 +698,51 @@ body {
 
 .pixel-world-shell {
   display: flex;
-  height: 100vh;
-  min-height: 0;
+  height: auto;
+  min-height: 100vh;
+  overflow: visible;
   flex-direction: column;
 }
 
 .world-content-frame {
   position: relative;
   z-index: 3;
-  flex: 1;
-  min-height: 0;
+  flex: none;
+  min-height: 720px;
   margin: 0 18px 18px;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid var(--world-border);
   border-radius: 0 0 15px 15px;
   background: var(--world-panel-soft);
   box-shadow: 0 14px 34px rgba(42,77,65,.14);
 }
 
-.world-content-frame .world-splitter { height: 100% !important; }
+.world-content-frame .world-splitter {
+  height: auto !important;
+  min-height: 720px;
+  align-items: stretch;
+  overflow: visible !important;
+}
+
+.world-content-frame .ant-splitter-panel {
+  height: auto !important;
+  overflow: visible !important;
+}
+
+.structured-prompt-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.prompt-optimize-button {
+  min-height: 36px;
+  height: auto !important;
+  margin-bottom: 8px;
+  padding-block: 7px !important;
+  white-space: normal;
+}
 
 .creator-panel {
   border-right: 1px solid var(--world-border);

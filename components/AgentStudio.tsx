@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Alert, Button, Card, Collapse, Input, Progress, Select, Space, Tag, Typography, message } from 'antd'
-import { Bot, CheckCircle2, CircleStop, FlaskConical, Pause, Play, RotateCcw, ShieldCheck } from 'lucide-react'
+import { Bot, CheckCircle2, CircleStop, FlaskConical, Pause, Play, RotateCcw, ShieldCheck, Sparkles } from 'lucide-react'
 import { loadAgentApiKey, loadAgentApiPrefs, saveAgentApiPrefs } from '@/lib/agent-api-prefs'
 import { AGENT_PROVIDERS, AGENT_ROLE_LABELS, getAgentProvider, getDefaultAgentModel } from '@/lib/agents/config'
 import { countBlockingIssues } from '@/lib/agents/validation'
@@ -19,6 +19,8 @@ interface AgentStudioProps {
   projectName: string
   levelCount: number
   baseSpec?: GameSpec | null
+  onOptimizePrompt?: () => Promise<GameSpec | null>
+  isOptimizing?: boolean
   onSpecReady: (spec: GameSpec) => void
   onApproved: (spec: GameSpec) => void
 }
@@ -52,7 +54,7 @@ function artifactPreview(output?: Record<string, unknown>): string {
   return json.length > 20000 ? `${json.slice(0, 20000)}\n…（内容过长，已在界面截断）` : json
 }
 
-export default function AgentStudio({ projectId, sourcePrompt, projectName, levelCount, baseSpec, onSpecReady, onApproved }: AgentStudioProps) {
+export default function AgentStudio({ projectId, sourcePrompt, projectName, levelCount, baseSpec, onOptimizePrompt, isOptimizing = false, onSpecReady, onApproved }: AgentStudioProps) {
   const [provider, setProvider] = useState<AgentProviderId>('openrouter')
   const [model, setModel] = useState(getDefaultAgentModel('openrouter'))
   const [apiKey, setApiKey] = useState('')
@@ -118,9 +120,10 @@ export default function AgentStudio({ projectId, sourcePrompt, projectName, leve
   }
 
   const start = async () => {
-    if (!sourcePrompt.trim()) return void message.error('请先填写结构化游戏构想。')
     if (!apiKey.trim()) return void message.error('请先填写文字 Agent API Key。')
-    await cluster.start({ provider, model }, apiKey.trim())
+    const preparedSpec = baseSpec || await onOptimizePrompt?.()
+    if (!preparedSpec) return void message.error('暂时无法建立游戏规格，请先点击“一键补全并优化提示词”后重试。')
+    await cluster.start({ provider, model }, apiKey.trim(), preparedSpec)
   }
 
   return <Card
@@ -168,6 +171,9 @@ export default function AgentStudio({ projectId, sourcePrompt, projectName, leve
       <ApiPlatformGuide selectedId={provider} mode="agent" />
 
       <Space wrap>
+        <Button icon={<Sparkles size={14} />} loading={isOptimizing} onClick={() => { void onOptimizePrompt?.() }}>
+          一键补全并优化提示词
+        </Button>
         <Button icon={<FlaskConical size={14} />} loading={testing} onClick={() => { void testAgentApi() }}>测试 Agent API</Button>
         {(!cluster.run || ['draft', 'failed', 'cancelled'].includes(cluster.run.status)) && <Button type="primary" icon={<Play size={14} />} onClick={() => { void start() }}>启动 Agent 集群</Button>}
         {cluster.run && ['planning', 'reviewing'].includes(cluster.run.status) && <Button icon={<Pause size={14} />} onClick={cluster.pause}>暂停</Button>}
