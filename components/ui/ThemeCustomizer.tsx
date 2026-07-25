@@ -42,15 +42,26 @@ const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ creationMode = 'agent
       <Text strong style={{ display: 'block', marginBottom: 8 }}>Game Name / 游戏名称</Text>
       <Input value={customThemeName} onChange={(event) => onThemeNameChange(event.target.value)} placeholder="例如：龙之城堡" />
     </div>
-    <div>
-      <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }} wrap>
+    <div className="structured-prompt-section">
+      <div className="structured-prompt-heading">
         <Text strong>Structured Prompt / 结构化游戏构想</Text>
-        <Space>
+        <Space wrap size={6}>
           {hasSavedDraft && onRestoreDraft && <Button size="small" icon={<History size={14} />} onClick={onRestoreDraft}>恢复上次草稿</Button>}
           <Button size="small" icon={<ListRestart size={14} />} onClick={() => onPromptChange(buildStructuredPrompt(levelCount))}>恢复完整字段</Button>
-          {creationMode === 'classic' && <Button type="primary" ghost size="small" icon={<Sparkles size={14} />} onClick={onOptimizePrompt} loading={isOptimizing} disabled={!customPrompt.trim()}>一键优化提示词</Button>}
         </Space>
-      </Space>
+      </div>
+      <Button
+        className="prompt-optimize-button"
+        type="primary"
+        ghost
+        block
+        icon={<Sparkles size={15} />}
+        onClick={onOptimizePrompt}
+        loading={isOptimizing}
+        title="补全空白字段、优化已有描述并建立可供 Agent 评审的 GameSpec V3"
+      >
+        一键补全并优化提示词
+      </Button>
       <TextArea value={customPrompt} onChange={(event) => onPromptChange(event.target.value)} rows={18} placeholder="请在各字段冒号后填写；不需要的项目可以留空。" style={{ width: '100%', fontSize: 12, lineHeight: 1.7 }} />
       <Text type="secondary" style={{ fontSize: 12 }}>{creationMode === 'agent' ? '保留你明确填写的要求；Agent 只补充空白、消除冲突，不会覆盖你的核心设定。' : '保留需要的描述，其余字段留空；一键优化只补全空白或不足的字段。'}</Text>
     </div>

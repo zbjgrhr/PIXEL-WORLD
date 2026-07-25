@@ -15,17 +15,14 @@ const ThemesList = forwardRef<HTMLDivElement, ThemesListProps>((
     <Card
       className="theme-list-card glass-card"
       title="Theme List"
-      style={{ width: '400px', height: '100%', display: 'flex', flexDirection: 'column' }}
+      style={{ width: '400px', height: 'fit-content', display: 'flex', flexDirection: 'column' }}
       styles={{
         body: {
-          overflowY: 'auto',
-          scrollbarWidth: 'none',
-          msOverflowStyle: 'none',
-          WebkitScrollbar: 'none'
+          overflow: 'visible'
         } as React.CSSProperties
       }}
     >
-      <div ref={ref} style={{ height: '100%', overflowY: 'auto' }}>
+      <div ref={ref} style={{ height: 'auto', overflow: 'visible' }}>
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
         {themes.map((theme) => (
           <div key={theme.id} style={{ width: '100%' }}>

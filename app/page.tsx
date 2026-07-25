@@ -502,8 +502,8 @@ export default function Home() {
                 />
               </Splitter.Panel>
 
-              <Splitter.Panel className="workspace-panel" style={{ padding: 20, overflowY: 'auto' }}>
-              <div style={{ display: 'flex', gap: 20, width: '100%', height: '100%' }}>
+              <Splitter.Panel className="workspace-panel" style={{ padding: 20, overflow: 'visible' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, width: '100%', height: 'auto' }}>
                 <ThemesList
                   ref={themesListRef}
                   themes={themes}

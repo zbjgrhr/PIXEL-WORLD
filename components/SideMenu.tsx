@@ -143,11 +143,8 @@ const SideMenu: React.FC<SideMenuProps> = ({
   }
 
   const optimizePrompt = async (quiet = false, promptOverride?: string, themeOverride?: string): Promise<GameSpec | null> => {
-    const prompt = (promptOverride ?? customPrompt).trim()
-    if (!prompt) {
-      if (!quiet) message.error('请先填写游戏构想。')
-      return null
-    }
+    const rawPrompt = (promptOverride ?? customPrompt).trim()
+    const prompt = rawPrompt || buildStructuredPrompt(levelCount)
     setIsOptimizing(true)
     try {
       const response = await fetch('/api/optimize-prompt', {
@@ -466,7 +463,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
     onStartGame?.()
   }
 
-  return <div className={`${className || ''} creator-sidebar`} style={{ padding: 20, height: '100%', overflowY: 'auto', ...style }}>
+  return <div className={`${className || ''} creator-sidebar`} style={{ padding: 20, height: 'auto', overflow: 'visible', ...style }}>
     <div className="creator-stack" style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%' }}>
       <section className="studio-section api-section">
         <div className="section-kicker">IMAGE LAB · 图片生成引擎</div>
@@ -495,6 +492,8 @@ const SideMenu: React.FC<SideMenuProps> = ({
         projectName={customThemeName}
         levelCount={levelCount}
         baseSpec={optimizedSpec}
+        onOptimizePrompt={() => optimizePrompt(false)}
+        isOptimizing={isOptimizing}
         onSpecReady={(spec) => { updateSpec(spec); setAgentApproved(false) }}
         onApproved={(spec) => { updateSpec(spec); setAgentApproved(true); message.success('Agent 规格已批准，现在可以检查素材卡片并开始生成。') }}
       /></div>}

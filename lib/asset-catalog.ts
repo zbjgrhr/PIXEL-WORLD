@@ -276,8 +276,19 @@ export function buildStructuredPrompt(levelCount: number): string {
 
 export function isStructuredPromptBlank(prompt: string): boolean {
   if (!prompt.trim()) return true
-  return prompt.split(/\r?\n/).every((line) => {
+  let hasStructuredField = false
+  for (const rawLine of prompt.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line) continue
     const match = line.match(/^[^:：]+[:：](.*)$/)
-    return !match || !match[1].trim()
-  })
+    if (match) {
+      hasStructuredField = true
+      if (match[1].trim()) return false
+      continue
+    }
+    // A non-label line is meaningful free text or a continuation of the
+    // preceding field. It must never be discarded as an empty skeleton.
+    return false
+  }
+  return hasStructuredField
 }

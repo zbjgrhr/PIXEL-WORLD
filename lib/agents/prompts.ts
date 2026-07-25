@@ -27,7 +27,7 @@ const ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
 }
 
 function compact(value: unknown, limit = 70000): string {
-  const json = JSON.stringify(value)
+  const json = JSON.stringify(value ?? null) ?? 'null'
   return json.length > limit ? `${json.slice(0, limit)}\n[truncated]` : json
 }
 

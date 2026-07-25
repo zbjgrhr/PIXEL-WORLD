@@ -9,6 +9,7 @@ import { stabilizeGameSpec } from '@/lib/game-spec-guardrails'
 import type { GameSpec, ProviderId } from '@/types'
 import { PROMPT_TEMPLATES } from '@/configs/prompt-templates'
 import { apiKeyHasUnsupportedCharacters, normalizeApiKey } from '@/lib/api-key'
+import { isStructuredPromptBlank } from '@/lib/asset-catalog'
 
 interface OptimizeRequest {
   prompt?: string
@@ -113,13 +114,12 @@ async function optimizeWithAi(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as OptimizeRequest
-    const prompt = body.prompt?.trim() || ''
     const theme = body.theme?.trim() || 'Pixel World'
     const levelCount = Math.min(10, Math.max(1, body.levelCount || 3))
-
-    if (!prompt) {
-      return NextResponse.json({ success: false, error: 'Please enter a game idea first.' }, { status: 400 })
-    }
+    const submittedPrompt = body.prompt?.trim() || ''
+    const prompt = isStructuredPromptBlank(submittedPrompt)
+      ? `Create an original colorful ${levelCount}-level pixel platform adventure. Fill every required GameSpec V3 field with a coherent hero, melee and ranged combat, enemies, collectibles, distinct level environments, and a final boss. Keep every visual asset isolated and game-ready.`
+      : submittedPrompt
 
     const fallback = createFallbackGameSpec(prompt, theme, levelCount)
     const provider = body.provider || 'dashscope'
