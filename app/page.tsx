@@ -41,7 +41,7 @@ interface SessionTheme {
   variables: ThemeVariables
 }
 
-const INITIAL_COVER = '/visuals/pixel-adventure-header-v3.png'
+const INITIAL_COVER = '/visuals/pixel-adventure-header-v3.webp'
 const THEME_PARTICLES = Array.from({ length: 32 }, (_, index) => ({
   left: `${(index * 37 + 7) % 100}%`,
   delay: `${-((index * 0.71) % 11).toFixed(2)}s`,
