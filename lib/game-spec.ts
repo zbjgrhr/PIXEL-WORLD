@@ -257,7 +257,27 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
       ground,
       obstacle: levelObstacle,
       enemyCount: Math.min(6, Math.max(0, Number(enemyCountText.match(/\d+/)?.[0]) || 3 + index)),
-      collectibleCount: Math.min(8, Math.max(0, Number(collectibleCountText.matÛMm¢G§²ÚîÆ­yÕro: heroAppearance, groundEnemy: enemyAppearance, boss: bossAppearance, meleeWeapon, rangedWeapon, rangedProjectile: projectile, meleeAttackEffect: attackEffect, collectible: collectibleAppearance, groundPlatform: ground, normalObstacle: obstacle },
+      collectibleCount: Math.min(8, Math.max(0, Number(collectibleCountText.match(/\d+/)?.[0]) || 3 + index)),
+      hasBoss: index === levelCount - 1 || /yes|true|æ˜¯|æœ‰/i.test(bossText),
+      ...defaults,
+      platformMode,
+      music: {
+        ...defaults.music,
+        tempo: Number.isFinite(bpm) ? Math.min(220, Math.max(50, bpm)) : defaults.music.tempo,
+      },
+      effects: {
+        ...defaults.effects,
+        weather,
+        filter,
+        flash: /é—ªå…‰|flash/i.test(effectsText) || defaults.effects.flash,
+      },
+    }
+  })
+
+  const assets = customizeAssetPrompts(
+    createAssetPlan(levels.map((level) => level.id)),
+    levels,
+    { ...assetValues, hero: heroAppearance, groundEnemy: enemyAppearance, boss: bossAppearance, meleeWeapon, rangedWeapon, rangedProjectile: projectile, meleeAttackEffect: attackEffect, collectible: collectibleAppearance, groundPlatform: ground, normalObstacle: obstacle },
     explicitAssetValues,
     levelMentions,
   )
