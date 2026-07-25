@@ -569,125 +569,519 @@ body {
 .preview-empty-message p { margin: 0; color: #426584; line-height: 1.65; }
 .preview-empty-kicker { color: #6a4bdd !important; font-size: 10px; font-weight: 900; letter-spacing: .15em; }
 .preview-empty-icon {
-  d„KhëÈÏ∂ªßq´^t⁄Ÿ‹õ›[ôà[ôX\ãY‹òYY[ù
-LÕYYÀÃŸYLôåKÕôMçYYHMIKŸôçŒòäN¬à€€‹éà⁄]N¬àõﬁ\⁄Y›ŒàLåúôÿòJÃãLÀååãåÃäN¬à[ö[X][€éàX€€êõÿàÀé»X\ŸKZ[ã[›][ôö[ö]N¬üBÇãúô]öY]ÀY[\K\\ùX€\»‹[à¬à‹⁄][€éàXú€€]N¬à⁄YàL¬àZY⁄àL¬àõ‹ô\éàú€€YŸôôé¬àòX⁄Ÿ‹õ›[ôàŸôôLÕé¬àõﬁ\⁄Y›ŒàMú›\úô[ù€€‹é¬à[ö[X][€éàô]öY]‘^[öYù\»[ôX\à[ôö[ö]N¬üBÇãúô]öY]ÀY[\K\\ùX€\»‹[éõùX⁄[
-JH»Yùà	N»‹àN	N»€€‹éàŸôôLÕé»Bãúô]öY]ÀY[\K\\ùX€\»‹[éõùX⁄[
-äH»YùàåâN»‹àÃ…N»€€‹éàŸôçŒòé»[ö[X][€ãY[^NàLúŒ»Bãúô]öY]ÀY[\K\\ùX€\»‹[éõùX⁄[
- H»Yùà	N»‹àLâN»€€‹éàÕŒçôôé»[ö[X][€ãY[^NàM\Œ»Bãúô]öY]ÀY[\K\\ùX€\»‹[éõùX⁄[
+  display: grid;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 10px;
+  place-items: center;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #3ee2f1, #6e65ee 55%, #ff78bb);
+  color: white;
+  box-shadow: 0 10px 22px rgba(72,93,222,.32);
+  animation: iconBob 3.8s ease-in-out infinite;
+}
 
-H»YùàNIN»‹àâN»€€‹éàÿéYôçYN»[ö[X][€ãY[^NàMãç\Œ»Bãúô]öY]ÀY[\K\\ùX€\»‹[éõùX⁄[
-JH»YùàÕ…N»‹àNIN»€€‹éàÿMŒôôé»[ö[X][€ãY[^NàMŒ»Bãúô]öY]ÀY[\K\\ùX€\»‹[éõùX⁄[
-äH»YùàLIN»‹àçâN»€€‹éàŸôéMM»[ö[X][€ãY[^NàMÀç\Œ»Bãúô]öY]ÀY[\K\\ùX€\»‹[éõùX⁄[
- H»YùàL…N»‹à	N»€€‹éàÕçYXYôé»[ö[X][€ãY[^NàLÀåúŒ»Bãúô]öY]ÀY[\K\\ùX€\»‹[éõùX⁄[
-
-H»Yùàé	N»‹à…N»€€‹éàŸôçŒòé»[ö[X][€ãY[^NàLKå‹Œ»Bãúô]öY]ÀY[\K\\ùX€\»‹[éõùX⁄[
-JH»YùàIN»‹à	N»€€‹éàŸôôLÕé»[ö[X][€ãY[^NàNŒ»BÇãù[YK[\›Xÿ\ôò[ùXÿ\ôZXYãù[YK\ô]öY]ÀXÿ\ôàò[ùXÿ\ôZXY¬àõ‹ô\ãXõ›€KX€€‹éàôÿòJLLKLÕKåÀåM
-N¬àòX⁄Ÿ‹õ›[ôà[ôX\ãY‹òYY[ù
-LYÀôÿòJåŒçKçMKçÃäKôÿòJçLçKçMKç
-JN¬üBÇãù[YKX⁄⁄XŸKXÿ\ô¬à›ô\ôõ›ŒàY[é¬àõ‹ô\ã\òY]\ŒàM‹Z[\‹ù[ù¬àõﬁ\⁄Y›ŒàåôÿòJçÀMÀå N¬àò[ú⁄][€éàò[úŸõ‹õHåç»X\ŸKõﬁ\⁄Y›»åç»X\ŸHZ[\‹ù[ù¬üBÇãù[YKX⁄⁄XŸKXÿ\ôö›ô\à»ò[úŸõ‹õNàò[ú€]VJL‹
-N»õﬁ\⁄Y›ŒàL‹éôÿòJçÀMÀåM
-HZ[\‹ù[ù»Bãù[YKX⁄⁄XŸKXÿ\ôö\À\Ÿ[X›Y»õﬁ\⁄Y›Œà‹ôÿòJLKLçKåŒåL
-KLúéôÿòJçÀLÀNÀåMäHZ[\‹ù[ù»BÇãú^[]€‹õX\ò[ùXùà»õ‹ô\ã\òY]\ŒàL»Bãú^[]€‹õX\ò[ùXùã\ö[X\ûH»òX⁄Ÿ‹õ›[ôà[ôX\ãY‹òYY[ù
-LÕYYÀÕMŒYYãÕÿççN
-N»õﬁ\⁄Y›Œà‹MúôÿòJÀLãåNåäN»Bãú^[]€‹õX\ò[ùZ[ú]ãú^[]€‹õX\ò[ùZ[ú]XYôö^]‹ò\\ããú^[]€‹õX\ò[ù\Ÿ[X›\Ÿ[X›‹ããú^[]€‹õX\ò[ùZ[ú][ù[Xô\ããú^[]€‹õX\ò[ù\ŸY€Y[ùY»õ‹ô\ã\òY]\ŒàL\Z[\‹ù[ù»Bãú^[]€‹õX\ò[ùX[\ù»õ‹ô\ã\òY]\ŒàL‹»BÇêŸ^Yúò[Y\»⁄ﬁQöYù¬àúõ€H»ò[úŸõ‹õNàò[ú€]LŸ
-LLM
-Hÿÿ[JéMäN»Bà»»ò[úŸõ‹õNàò[ú€]LŸ
-çN
-Hÿÿ[JKå
-N»BüBÇêŸ^Yúò[Y\»⁄[ôŸ€T[à¬àúõ€H»òX⁄Ÿ‹õ›[ô\‹⁄][€éà…H	N»ò[úŸõ‹õNàÿÿ[JKå
-N»Bà»»òX⁄Ÿ‹õ›[ô\‹⁄][€éàM	HLIN»ò[úŸõ‹õNàÿÿ[JKåçJN»BüBÇêŸ^Yúò[Y\»^[õÿ]¬à	H»ò[ú€]NàLú»BàL	H»ò[ú€]NàLN»BàL	H»ò[ú€]NàM\M»BüBÇêŸ^Yúò[Y\»ô]öY]‘^[öYù¬à	H»ò[úŸõ‹õNàò[ú€]VJÃ
-Hõ›]JY N»‹X⁄]Nà»BàN	KŒ	H»‹X⁄]NàN»BàL	H»ò[úŸõ‹õNàò[ú€]VJLLå
-Hõ›]JNY N»‹X⁄]Nà»BüBÇêŸ^Yúò[Y\»X€€êõÿà¬à	KL	H»ò[úŸõ‹õNàò[ú€]VJ
-Hõ›]JLôY N»BàL	H»ò[úŸõ‹õNàò[ú€]VJM‹
-Hõ›]JôY N»BüBÇêŸ^Yúò[Y\»›\î[ŸH¬à	KL	H»‹X⁄]NàåÃé»ò[úŸõ‹õNàÿÿ[JçÃäHõ›]J
-N»BàL	H»‹X⁄]NàN»ò[úŸõ‹õNàÿÿ[JKåäHõ›]JçYY N»BüBÇêŸ^Yúò[Y\»‹òö]úôX]¬à	KL	H»‹X⁄]NàåÕN»ö[\éàõ\ä
-N»BàL	H»‹X⁄]NàçÕN»ö[\éàõ\äåç\
-N»BüBÇã à[YH^[›]àHÿ[Hò[õô\ã[Y\ú€€ò[€‹õ[ú‹\ôYûH€\‹⁄X»õŸö[H‹XŸ\Àà
-ã¬ãú^[]€‹õX\¬àZY⁄àLö¬à€€‹éàò\äK]€‹õZ[ö N¬àòX⁄Ÿ‹õ›[ôÇà[ôX\ãY‹òYY[ù
-NYÀò\äK]€‹õ\YŸKXô Kò\äK]€‹õ\YŸKXôÀYY\
-JN¬àò[ú⁄][€éàòX⁄Ÿ‹õ›[ôX€€‹àçú»X\ŸK€€‹àçú»X\ŸN¬üBÇãú^[]€‹õX\éòôYõ‹ôH¬àòX⁄Ÿ‹õ›[ôÇàòYX[Y‹òYY[ù
-⁄\ò€H]	HN	KôÿòJçMKçMKçMKçN
-Kò[ú‹\ô[ùç	JKàòYX[Y‹òYY[ù
-⁄\ò€H]LâHLâKôÿòJçMKçMKçMKåÕ
-Kò[ú‹\ô[ùå…JKà[ôX\ãY‹òYY[ù
-NYÀôÿòJçMKçMKçMKåN
-Kò[ú‹\ô[ùMIJN¬àö[\éàõ€ôN¬àò[úŸõ‹õNàõ€ôN¬à[ö[X][€éàõ€ôN¬üBÇãú^[]€‹õX\ö\À\Ÿ\‹⁄[€ãX€›ô\ééòôYõ‹ôH¬àòX⁄Ÿ‹õ›[ôÇà[ôX\ãY‹òYY[ù
-NYÀôÿòJçŒåMJKôÿòJçããKåÕ
-JKàò\äK]€‹õXò[õô\ãZ[XYŸJHL	HL	H»€›ô\àõÀ\ô\X]¬à[XYŸK\ô[ô\ö[ôŒà^[]Y¬üBÇãú^[]€‹õX\éòYù\à¬àòX⁄Ÿ‹õ›[ôà[ôX\ãY‹òYY[ù
-NYÀôÿòJçMKçMKçMKå
-KôÿòJçMKçMKçMKåN
-JN¬üBÇãú^[]€‹õ\⁄[¬à\‹^Nàõ^¬àZY⁄àLö¬àZ[ãZZY⁄à¬àõ^Y\ôX›[€éà€€[[é¬üBÇãù€‹õX€€ù[ùYúò[YH¬à‹⁄][€éàô[]]ôN¬àãZ[ô^àŒ¬àõ^àN¬àZ[ãZZY⁄à¬àX\ô⁄[éàNN¬à›ô\ôõ›ŒàY[é¬àõ‹ô\éà\€€Yò\äK]€‹õXõ‹ô\äN¬àõ‹ô\ã\òY]\ŒàM\M\¬àòX⁄Ÿ‹õ›[ôàò\äK]€‹õ\[ô[\€Ÿù
-N¬àõﬁ\⁄Y›ŒàMÕôÿòJãÕÀçKåM
-N¬üBÇãù€‹õX€€ù[ùYúò[YHù€‹õ\‹]\à»ZY⁄àL	HZ[\‹ù[ù»BÇãò‹ôX]‹ã\[ô[¬àõ‹ô\ã\öY⁄à\€€Yò\äK]€‹õXõ‹ô\äN¬àòX⁄Ÿ‹õ›[ôàò\äK]€‹õ\[ô[
-HZ[\‹ù[ù¬àõﬁ\⁄Y›Œà‹åúôÿòJÀŒçãå
-N¬üBÇãù€‹ö‹‹XŸK\[ô[»òX⁄Ÿ‹õ›[ôàò\äK]€‹õ\[ô[\€Ÿù
-HZ[\‹ù[ù»BÇãú‹ù[ZXY\à¬à‹⁄][€éàô[]]ôN¬àãZ[ô^àŒ¬à\‹^Nàõ^¬àZ[ãZZY⁄àç¬àX\ô⁄[éàMúN¬à›ô\ôõ›ŒàY[é¬àõ^àç¬à[Y€ãZ][\Œàõ^\›\ù¬àù\›YûKX€€ù[ùàõ^Y[ô¬àõ‹ô\éà\€€YôÿòJçMKçMKçMKçŒ
-N¬àõ‹ô\ã\òY]\ŒàM\M\¬àòX⁄Ÿ‹õ›[ôÇà[ôX\ãY‹òYY[ù
-LYÀôÿòJMÀLãKååäKôÿòJçMKçMKçMKåäHM	KôÿòJçÀÃKNKåM
-JKàò\äK]€‹õXò[õô\ãZ[XYŸJHL	HL	H»€›ô\àõÀ\ô\X]¬à[XYŸK\ô[ô\ö[ôŒà^[]Y¬àõﬁ\⁄Y›ŒàLúÃúôÿòJŒãéåN
-N¬üBÇãú‹ù[ZXY\ééòYù\à¬à€€ù[ùààé¬à‹⁄][€éàXú€€]N¬à[úŸ]à]]»¬àZY⁄àú¬àòX⁄Ÿ‹õ›[ôà[ôX\ãY‹òYY[ù
-NYÀò[ú‹\ô[ùôÿòJåãéMKçåäJN¬à⁄[ù\ãY]ô[ùŒàõ€ôN¬üBÇãú‹ù[ZXY\ãX€‹H¬à‹⁄][€éàô[]]ôN¬àãZ[ô^àé¬à⁄YàZ[äååN	JN¬àX\ô⁄[éàÃ]]»ú¬à€€‹éà⁄]N¬à^\⁄Y›ŒàúLúôÿòJNKNKç
-N¬üBÇãú‹ù[Y^YXúõ›»¬à\‹^Nà[õ[ôKXõÿ⁄Œ¬àY[ôŒà\\¬àõ‹ô\éà\€€YôÿòJçMKçMKçMKçMJN¬àõ‹ô\ã\òY]\Œà¬àòX⁄Ÿ‹õ›[ôàôÿòJÕKKÃãçM
-N¬àõ€ù\⁄^ôNàL¬àõ€ù]ŸZY⁄à¬à]\ã\‹X⁄[ôŒàåLô[N¬üBÇãú‹ù[ZXY\ãX€‹HH¬àX\ô⁄[éà\¬àõ€ùYò[Z[NàŸ[‹ô⁄XKï[Y\»ô]»õ€X[àãŸ\öYé¬àõ€ù\⁄^ôNà€[\
-ÕåùùÀåú
-N¬àõ€ù]ŸZY⁄àÃ¬à]\ã\‹X⁄[ôŒàå[N¬à[ôKZZY⁄àN¬üBÇãú‹ù[ZXY\ãX€‹H¬àX\ô⁄[éàL¬àõ€ù\⁄^ôNàM\¬àõ€ù]ŸZY⁄àå¬üBÇãú‹ù[]€‹õ[õ›H¬à‹⁄][€éàô[]]ôN¬àãZ[ô^àé¬à\‹^Nàõ^¬à⁄YàçL¬àX\ô⁄[éàÃ\Õ¬àY[ôŒàLúM¬àõ^Y\ôX›[€éà€€[[é¬àÿ\à‹¬àõ‹ô\éà\€€YôÿòJçMKçMKçMKçMJN¬àõ‹ô\ã\òY]\Œà‹¬àòX⁄Ÿ‹õ›[ôàôÿòJçMKçLÀçé
-N¬à€€‹éàò\äK]€‹õZ[ö N¬àõﬁ\⁄Y›ŒàåúôÿòJÃKéMÀåN
-N¬üBÇãú‹ù[]€‹õ[õ›H›õ€ô»»€€‹éàò\äK]€‹õXXÿŸ[ùYY\
-N»õ€ù\⁄^ôNàL»]\ã\‹X⁄[ôŒàåLô[N»Bãú‹ù[]€‹õ[õ›H‹[à»€€‹éàò\äK]€‹õ[]]Y
-N»õ€ù\⁄^ôNàL\»[ôKZZY⁄àKçMN»BÇãú‹XŸK][YK[ò]à¬à‹⁄][€éàXú€€]N¬àãZ[ô^àŒ¬àöY⁄à¬àõ›€Nà¬àYùà¬à\‹^Nàõ^¬àZY⁄àú¬àY[ôŒàé¬à[Y€ãZ][\ŒàŸ[ù\é¬àÿ\àú¬à€€‹éà⁄]N¬üBÇãú‹XŸK][YK[ò]à‹[à¬àY[ôŒà‹L‹¬àõ‹ô\ã\òY]\Œà¬àõ€ù\⁄^ôNàLú¬àõ€ù]ŸZY⁄àÃ¬à^\⁄Y›Œà\\ôÿòJç
-N¬üBÇãú‹XŸK][YK[ò]à‹[ãö\ÀXX›]ôKãú‹XŸK][YK[ò]à‹[éö›ô\à»òX⁄Ÿ‹õ›[ôàôÿòJçMKçMKçMKåäN»BÇãù[YK\\ùX€\»¬à‹⁄][€éàö^Y¬àãZ[ô^àN¬à[úŸ]à¬à›ô\ôõ›ŒàY[é¬à⁄[ù\ãY]ô[ùŒàõ€ôN¬üBÇãù[YK\\ùX€\»‹[à¬à‹⁄][€éàXú€€]N¬à‹àNö¬àYùàò\äK\\ùX€K[Yù
-N¬à⁄Yàò\äK\\ùX€K\⁄^ôJN¬àZY⁄àò\äK\\ùX€K\⁄^ôJN¬àòX⁄Ÿ‹õ›[ôàò\äK\\ùX€K\ö[X\ûJN¬àõﬁ\⁄Y›Œà\ôÿòJÕãÃãåKåN
-N¬à‹X⁄]Nàéé¬à[ö[X][€éà[YT\ùX€Qò[ò\äK\\ùX€KY\ò][€äH[ôX\à[ôö[ö]N¬à[ö[X][€ãY[^Nàò\äK\\ùX€KY[^JN¬üBÇãù[YK\\ùX€\»‹[éõùX⁄[
-€à
-»äH»òX⁄Ÿ‹õ›[ôàò\äK\\ùX€K\ŸX€€ô\ûJN»Bãù[YK\\ùX€\»‹[éõùX⁄[
-€äH»òX⁄Ÿ‹õ›[ôàò\äK\\ùX€K]\ùX\ûJN»BÇãú\ùX€K[[ŸK\][»‹[à¬àõ‹ô\ã\òY]\ŒàÃ	HMIHçIHå	N¬àò[úŸõ‹õNàõ›]JÕYY N¬üBÇãú\ùX€K[[ŸK\òZ[à‹[à¬à⁄Yàú¬àZY⁄àÿ[ ò\äK\\ùX€K\⁄^ôJH
-àÀç
-N¬àõ‹ô\ã\òY]\ŒàNN\¬àòX⁄Ÿ‹õ›[ôàôÿòJNLåÕKçMKçÕJHZ[\‹ù[ù¬üBÇãú\ùX€K[[ŸK\€õ›»‹[ããú\ùX€K[[ŸKXùXòõ\»‹[à¬àõ‹ô\éà\€€YôÿòJçMKçMKçMKé
-N¬àõ‹ô\ã\òY]\ŒàL	N¬àòX⁄Ÿ‹õ›[ôàôÿòJçMKçMKçMKç
-HZ[\‹ù[ù¬üBÇãú\ùX€K[[ŸKY[Xô\ú»‹[à»õ‹ô\ã\òY]\ŒàL	N»õﬁ\⁄Y›Œàò\äK\\ùX€K\ö[X\ûJN»Bãú\ùX€K[[ŸK\›\ú»‹[à»€\\]à€Y€€äL	HåâHŒ	KL	HL	KåâHåâKL	HL	KŒ	HåâKL	KŒ	HŒ	JN»Bãú\ùX€K[[ŸK[Z\›‹[à»⁄YàÃ»ZY⁄àL»õ‹ô\ã\òY]\ŒàL	N»ö[\éàõ\ä\
-N»‹X⁄]Nàåé»BÇêŸ^Yúò[Y\»[YT\ùX€Qò[¬à	H»ò[ú€]NàLLùö»õ›]NàYŒ»‹X⁄]Nà»BàL	H»‹X⁄]Nàéé»BàL	H»ò[ú€]Nàò\äK\\ùX€KYöYù
-HLMùö»õ›]NàåYŒ»‹X⁄]NàåN»BüBÇãú›Y[À\ŸX›[€ããòYŸ[ù\›Y[À\⁄[ò[ùXÿ\ôãô€\‹ÀXÿ\ô¬àõ‹ô\ãX€€‹éàò\äK]€‹õXõ‹ô\äHZ[\‹ù[ù¬àõ‹ô\ã\òY]\ŒàLúZ[\‹ù[ù¬àòX⁄Ÿ‹õ›[ôàò\äK]€‹õ\[ô[
-HZ[\‹ù[ù¬àõﬁ\⁄Y›ŒàúM‹ôÿòJKÕÀçÀåJHZ[\‹ù[ù¬àòX⁄Ÿõ‹Yö[\éàõ€ôN¬üBÇãú›Y[À\ŸX›[€ééòYù\à»\‹^Nàõ€ôN»BãúŸX›[€ãZ⁄X⁄Ÿ\à»€€‹éàò\äK]€‹õXXÿŸ[ùYY\
-N»BÇãù[YK[\›Xÿ\ôò[ùXÿ\ôZXYãù[YK\ô]öY]ÀXÿ\ôàò[ùXÿ\ôZXYãòYŸ[ù\›Y[À\⁄[ò[ùXÿ\ôZXY¬àòX⁄Ÿ‹õ›[ôàò\äK]€‹õ\[ô[\€Ÿù
-N¬àõ‹ô\ãXõ›€KX€€‹éàò\äK]€‹õXõ‹ô\äN¬üBÇãú^[]€‹õX\ò[ùXùã\ö[X\ûH¬àòX⁄Ÿ‹õ›[ôàò\äK]€‹õXXÿŸ[ù
-N¬àõﬁ\⁄Y›Œà\LúôÿòJKMKÕÀåMäN¬üBÇãú^[]€‹õX\ò[ùXùã\ö[X\ûNö›ô\à»òX⁄Ÿ‹õ›[ôàò\äK]€‹õXXÿŸ[ùYY\
-HZ[\‹ù[ù»BÇãúô]öY]ÀY[\K]€‹õ¬àòX⁄Ÿ‹õ›[ôÇà[ôX\ãY‹òYY[ù
-NYÀôÿòJçMKçMKçMKå
-KôÿòJÃKKçÀåMäJKàò\äK]€‹õXò[õô\ãZ[XYŸJHL	HL	H»€›ô\àõÀ\ô\X]¬üBÇãúô]öY]ÀY[\K[Y\‹ÿYŸH¬àõ‹ô\ã\òY]\ŒàLú¬àòX⁄Ÿ‹õ›[ôàò\äK]€‹õ\[ô[
-N¬àõﬁ\⁄Y›ŒàLúéôÿòJŒÕãçåN
-N¬àòX⁄Ÿõ‹Yö[\éàõ€ôN¬üBÇãúô]öY]ÀY[\KZX€€à¬àõ‹ô\ã\òY]\Œà¬àòX⁄Ÿ‹õ›[ôàò\äK]€‹õXXÿŸ[ù
-N¬àõﬁ\⁄Y›Œà‹M\ôÿòJKLãÕãåç
-N¬üBÇãôÿ[YK\ù[ù[YK\⁄[¬à‹⁄][€éàô[]]ôN¬àãZ[ô^àé¬àZY⁄àLö¬àY[ôŒàM¬à›ô\ôõ›Œà]]Œ¬üBÇãôÿ[YKX€›ô\ã\ÿ‹ôY[à¬à‹⁄][€éàô[]]ôN¬àãZ[ô^àŒ¬à\‹^Nà‹öY¬àZY⁄àLö¬àZ[ãZZY⁄àé¬à›ô\ôõ›ŒàY[é¬àXŸKZ][\ŒàŸ[ù\é¬à€€‹éà⁄]N¬à\€€][€éà\€€]N¬üBÇãôÿ[YKX€›ô\ãX\ùãôÿ[YKX€›ô\ã]öY€ô]H¬à‹⁄][€éàXú€€]N¬à[úŸ]à¬àãZ[ô^àLé¬üBÇãôÿ[YKX€›ô\ãX\ù¬àòX⁄Ÿ‹õ›[ô\‹⁄][€éàŸ[ù\é¬àòX⁄Ÿ‹õ›[ô\⁄^ôNà€›ô\é¬à[XYŸK\ô[ô\ö[ôŒà^[]Y¬àò[úŸõ‹õNàÿÿ[JKåMJN¬à[ö[X][€éà€›ô\êúôX]HN»X\ŸKZ[ã[›][ôö[ö]H[\õò]N¬üBÇãôÿ[YKX€›ô\ã]öY€ô]H¬àãZ[ô^àLN¬àòX⁄Ÿ‹õ›[ôÇà[ôX\ãY‹òYY[ù
-LYÀôÿòJLÀÃãçÀçŒ
-KôÿòJLKçÀçKåäHN	KôÿòJLKéçç
-JKà[ôX\ãY‹òYY[ù
-NYÀôÿòJKçååJKôÿòJKçåçåäJN¬üBÇãôÿ[YKX€›ô\ãX€€ù[ù¬à‹⁄][€éàô[]]ôN¬àãZ[ô^àé¬à\‹^Nàõ^¬à⁄YàZ[äLLåÿ[ L	HH
-JN¬à[Y€ãZ][\Œàõ^Y[ô¬àù\›YûKX€€ù[ùà‹XŸKXô]ŸY[é¬àÿ\àå¬üBÇãôÿ[YKX€›ô\ãX€‹H»X^]⁄YàÃå»^\⁄Y›Œà‹MôÿòJçM
-N»Bãôÿ[YKX€›ô\ãX€‹HH»X\ô⁄[éàLLúZ[\‹ù[ù»€€‹éà⁄]HZ[\‹ù[ù»õ€ùYò[Z[NàŸ[‹ô⁄XKï[Y\»ô]»õ€X[àãŸ\öYé»õ€ù\⁄^ôNà€[\
-›ùÀLú
-HZ[\‹ù[ù»[ôKZZY⁄àéNZ[\‹ù[ù»Bãôÿ[YKX€›ô\ãX€‹Hà]ãò[ù]\Ÿ‹ò\H»X^]⁄YàçL»€€‹éàôÿòJçMKçMKçMKéLäHZ[\‹ù[ù»õ€ù\⁄^ôNàMú»[ôKZZY⁄àKçÕN»Bãôÿ[YKX€›ô\ãY^YXúõ›»»€€‹éàŸôôçÿÕ»Z[\‹ù[ù»õ€ù\⁄^ôNàL\»õ€ù]ŸZY⁄àL»]\ã\‹X⁄[ôŒàåô[N»Bãôÿ[YKX€›ô\ã]Y‹»ò[ù]Y»»õ‹ô\ãX€€‹éàôÿòJçMKçMKçMKåŒ
-N»òX⁄Ÿ‹õ›[ôàôÿòJLãKÕãçM
-N»€€‹éà⁄]N»BÇãôÿ[YKX€›ô\ã[Y[ùH¬à\‹^Nàõ^¬à⁄YàåÃ¬àY[ôŒàN¬àõ^àåÃ¬àõ^Y\ôX›[€éà€€[[é¬àÿ\àL¬àõ‹ô\éà\€€YôÿòJçMKçMKçMKç
-N¬àõ‹ô\ã\òY]\ŒàL¬àòX⁄Ÿ‹õ›[ôàôÿòJçMKçLÀçÀéJN¬àõﬁ\⁄Y›ŒàNúôÿòJÀçãåKåé
-N¬üBÇãôÿ[YKX€›ô\ã[Y[ùHò[ùXùà»ZY⁄àú»ù\›YûKX€€ù[ùàõ^\›\ù»õ‹ô\ã\òY]\Œàú»€€‹éàò\äK]€‹õZ[ö N»õ€ù]ŸZY⁄àÃ»Bãôÿ[YKX€›ô\ã[Y[ùHò[ùXùã\ö[X\ûH»€€‹éà⁄]N»BÇãôÿ[YKX€›ô\ã\›‹ûH¬à‹⁄][€éàXú€€]N¬àãZ[ô^àé¬àõ›€Nàç¬àYùàÕ¬àX^]⁄YàZ[äÃåÿ[ L	HHé
-JN¬àY[ôŒà\L‹¬àõ‹ô\ã[Yùà‹€€YŸôôåN¬àòX⁄Ÿ‹õ›[ôàôÿòJKÃççM
-N¬à^\⁄Y›Œà\ôÿòJç
-N¬üBÇãôÿ[YKX€›ô\ã\›‹ûH‹[à»€€‹éàŸôôåN»õ€ù\⁄^ôNà\»õ€ù]ŸZY⁄àL»]\ã\‹X⁄[ôŒàåMY[N»Bãôÿ[YKX€›ô\ã\›‹ûH»X\ô⁄[éà‹»›ô\ôõ›ŒàY[é»€€‹éàôÿòJçMKçMKçMKéäN»õ€ù\⁄^ôNàL\»[ôKZZY⁄àKçMN»^[›ô\ôõ›Œà[\⁄\Œ»⁄]K\‹XŸNàõ›‹ò\»Bãò€›ô\ãX€€ùõ€ÀY›ZYH»X\ô⁄[éà»€€‹éàò\äK]€‹õ[]]Y
-N»[ôKZZY⁄àKççN»BÇêŸ^Yúò[Y\»€›ô\êúôX]H¬àúõ€H»ò[úŸõ‹õNàÿÿ[JKåMJHò[ú€]V
-M
-N»Bà»»ò[úŸõ‹õNàÿÿ[JKåÕJHò[ú€]V
-\
-N»BüBÇêYYXH
-X^]⁄YàLL
-H¬àù[YK[\›Xÿ\ô»⁄YàÃÃZ[\‹ù[ù»Bàú‹ù[]€‹õ[õ›H»\‹^Nàõ€ôN»Bàú‹ù[ZXY\ãX€‹H»⁄Yàÿ[ L	HHÃ
-N»BüBÇêYYXH
-X^]⁄YàÕå
-H¬àú‹ù[ZXY\à»Z[ãZZY⁄àåL»X\ô⁄[éà»õ^Xò\⁄\ŒàåL»Bàú‹ù[ZXY\ãX€‹H»⁄Yàÿ[ L	HH
-N»X\ô⁄[éàçå»Bàú‹XŸK][YK[ò]à»ÿ\à»Y[ôŒàL»›ô\ôõ›À^à]]Œ»Bàú‹XŸK][YK[ò]à‹[à»⁄]K\‹XŸNàõ›‹ò\»Bàù€‹õX€€ù[ùYúò[YH»X\ô⁄[éà»Bàôÿ[YKX€›ô\ãX€€ù[ù»⁄Yàÿ[ L	HHÕú
-N»[Y€ãZ][\Œà›ô]⁄»õ^Y\ôX›[€éà€€[[é»ÿ\àåú»Bàôÿ[YKX€›ô\ã[Y[ùH»⁄YàL	N»õ^àõ€ôN»Bàôÿ[YKX€›ô\ã\›‹ûH»\‹^Nàõ€ôN»BüBÇêYYXH
-ôYô\úÀ\ôYXŸY[[›[€éàôYXŸJH¬àú^[]€‹õX\éòôYõ‹ôKàò[XöY[ù\⁄ﬁNéòôYõ‹ôKàò[XöY[ù\⁄ﬁNéòYù\ãàò[XöY[ù\⁄ﬁH‹[ãàú‹ù[[‹òö]àú‹ù[\›\ãàù[YK\\ùX€\»‹[ãàúô]öY]ÀY[\K\\ùX€\»‹[ãàúô]öY]ÀY[\KZX€€ãàôÿ[YKX€›ô\ãX\ù»[ö[X][€éàõ€ôHZ[\‹ù[ù»BüBÉBã à9Æ.9¢#˘a°z+ØπÔkàò]Ÿ\à9¶•˙"lπ..˙h¶
-ã√Bãôÿ[YK\Ÿ][ô‹ÀYò]Ÿ\àò[ùYò]Ÿ\ãX€‹ŸH√Bà€€‹éàôÿòJçMKçMKçMKçÕJN√BüCBÉBãôÿ[YK\Ÿ][ô‹ÀYò]Ÿ\àò[ù]XúÀ]Xà√Bà€€‹éàôÿòJçMKçMKçMKçMJHZ[\‹ù[ù√BüCBÉBãôÿ[YK\Ÿ][ô‹ÀYò]Ÿ\àò[ù]XúÀ]XãXX›]ôHò[ù]XúÀ]XãXùà√Bà€€‹éàŸôôàZ[\‹ù[ù√BüCBÉBãôÿ[YK\Ÿ][ô‹ÀYò]Ÿ\àò[ù]XúÀZ[öÀXò\à√BàòX⁄Ÿ‹õ›[ôàÃNLôé√BüCBÉBãôÿ[YK\Ÿ][ô‹ÀYò]Ÿ\àò[ù\Ÿ[X›\Ÿ[X›‹ãBãôÿ[YK\Ÿ][ô‹ÀYò]Ÿ\àò[ù\€Y\ã\òZ[¬àòX⁄Ÿ‹õ›[ôàôÿòJçMKçMKçMKåLäHZ[\‹ù[ù¬üBÇêŸ^Yúò[Y\»ŸX]\ëò[¬àúõ€H»ò[úŸõ‹õNàò[ú€]LŸ
-M
-Hõ›]JY N»Bà»»ò[úŸõ‹õNàò[ú€]LŸ
-MÃúÕå
-Hõ›]JY N»BüBÇêŸ^Yúò[Y\»ÿ]\ëöYù¬àúõ€H»òX⁄Ÿ‹õ›[ô\‹⁄][€éà»Bà»»òX⁄Ÿ‹õ›[ô\‹⁄][€éàN»BüB
+.preview-empty-particles span {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #fff;
+  background: #ffe34f;
+  box-shadow: 0 0 16px currentColor;
+  animation: previewPixelDrift 9s linear infinite;
+}
+
+.preview-empty-particles span:nth-child(1) { left: 8%; top: 18%; color: #ffe34f; }
+.preview-empty-particles span:nth-child(2) { left: 22%; top: 73%; color: #ff78bb; animation-delay: -2s; }
+.preview-empty-particles span:nth-child(3) { left: 40%; top: 12%; color: #78f6ff; animation-delay: -5s; }
+.preview-empty-particles span:nth-child(4) { left: 59%; top: 82%; color: #b9ff5e; animation-delay: -6.5s; }
+.preview-empty-particles span:nth-child(5) { left: 77%; top: 19%; color: #a78bff; animation-delay: -4s; }
+.preview-empty-particles span:nth-child(6) { left: 91%; top: 66%; color: #ff8a54; animation-delay: -7.5s; }
+.preview-empty-particles span:nth-child(7) { left: 13%; top: 48%; color: #65eaff; animation-delay: -3.2s; }
+.preview-empty-particles span:nth-child(8) { left: 68%; top: 43%; color: #ff78bb; animation-delay: -1.3s; }
+.preview-empty-particles span:nth-child(9) { left: 85%; top: 88%; color: #ffe34f; animation-delay: -8s; }
+
+.theme-list-card .ant-card-head,
+.theme-preview-card > .ant-card-head {
+  border-bottom-color: rgba(111, 135, 207, .14);
+  background: linear-gradient(90deg, rgba(238,245,255,.72), rgba(250,241,255,.48));
+}
+
+.theme-choice-card {
+  overflow: hidden;
+  border-radius: 17px !important;
+  box-shadow: 0 8px 20px rgba(64,83,143,.07);
+  transition: transform .24s ease, box-shadow .24s ease !important;
+}
+
+.theme-choice-card:hover { transform: translateY(-3px); box-shadow: 0 13px 28px rgba(64,83,143,.14) !important; }
+.theme-choice-card.is-selected { box-shadow: 0 0 0 3px rgba(91,125,238,.10), 0 12px 28px rgba(67,93,183,.16) !important; }
+
+.pixel-world-app .ant-btn { border-radius: 10px; }
+.pixel-world-app .ant-btn-primary { background: linear-gradient(135deg, #4e79ef, #7b64e8); box-shadow: 0 7px 16px rgba(83,102,218,.2); }
+.pixel-world-app .ant-input,
+.pixel-world-app .ant-input-affix-wrapper,
+.pixel-world-app .ant-select-selector,
+.pixel-world-app .ant-input-number,
+.pixel-world-app .ant-segmented { border-radius: 11px !important; }
+.pixel-world-app .ant-alert { border-radius: 13px; }
+
+@keyframes skyDrift {
+  from { transform: translate3d(-10px, -4px, 0) scale(.96); }
+  to { transform: translate3d(24px, 18px, 0) scale(1.08); }
+}
+
+@keyframes kingdomPan {
+  from { background-position: 47% 48%; transform: scale(1.008); }
+  to { background-position: 54% 51%; transform: scale(1.025); }
+}
+
+@keyframes pixelFloat {
+  0% { translate: 0 12px; }
+  50% { translate: 8px -18px; }
+  100% { translate: -5px -48px; }
+}
+
+@keyframes previewPixelDrift {
+  0% { transform: translateY(30px) rotate(0deg); opacity: 0; }
+  18%, 78% { opacity: 1; }
+  100% { transform: translateY(-120px) rotate(180deg); opacity: 0; }
+}
+
+@keyframes iconBob {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50% { transform: translateY(-7px) rotate(2deg); }
+}
+
+@keyframes starPulse {
+  0%, 100% { opacity: .32; transform: scale(.72) rotate(0); }
+  50% { opacity: 1; transform: scale(1.2) rotate(25deg); }
+}
+
+@keyframes orbitBreath {
+  0%, 100% { opacity: .35; filter: blur(0); }
+  50% { opacity: .75; filter: blur(.25px); }
+}
+
+/* Theme layout: a calm banner-led personal world, inspired by classic profile spaces. */
+.pixel-world-app {
+  height: 100vh;
+  color: var(--world-ink);
+  background:
+    linear-gradient(180deg, var(--world-page-bg), var(--world-page-bg-deep));
+  transition: background-color .6s ease, color .6s ease;
+}
+
+.pixel-world-app::before {
+  background:
+    radial-gradient(circle at 8% 18%, rgba(255,255,255,.58), transparent 24%),
+    radial-gradient(circle at 92% 12%, rgba(255,255,255,.34), transparent 23%),
+    linear-gradient(180deg, rgba(255,255,255,.18), transparent 55%);
+  filter: none;
+  transform: none;
+  animation: none;
+}
+
+.pixel-world-app.has-session-cover::before {
+  background:
+    linear-gradient(180deg, rgba(24,40,38,.15), rgba(26,46,41,.34)),
+    var(--world-banner-image) 50% 50% / cover no-repeat;
+  image-rendering: pixelated;
+}
+
+.pixel-world-app::after {
+  background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.18));
+}
+
+.pixel-world-shell {
+  display: flex;
+  height: 100vh;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.world-content-frame {
+  position: relative;
+  z-index: 3;
+  flex: 1;
+  min-height: 0;
+  margin: 0 18px 18px;
+  overflow: hidden;
+  border: 1px solid var(--world-border);
+  border-radius: 0 0 15px 15px;
+  background: var(--world-panel-soft);
+  box-shadow: 0 14px 34px rgba(42,77,65,.14);
+}
+
+.world-content-frame .world-splitter { height: 100% !important; }
+
+.creator-panel {
+  border-right: 1px solid var(--world-border);
+  background: var(--world-panel) !important;
+  box-shadow: 7px 0 22px rgba(43,78,66,.08);
+}
+
+.workspace-panel { background: var(--world-panel-soft) !important; }
+
+.portal-header {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  min-height: 244px;
+  margin: 16px 18px 0;
+  overflow: hidden;
+  flex: 0 0 244px;
+  align-items: flex-start;
+  justify-content: flex-end;
+  border: 1px solid rgba(255,255,255,.78);
+  border-radius: 15px 15px 0 0;
+  background:
+    linear-gradient(90deg, rgba(17,52,45,.22), rgba(255,255,255,.02) 54%, rgba(27,71,59,.14)),
+    var(--world-banner-image) 50% 50% / cover no-repeat;
+  image-rendering: pixelated;
+  box-shadow: 0 12px 32px rgba(38,82,68,.18);
+}
+
+.portal-header::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 82px;
+  background: linear-gradient(180deg, transparent, rgba(22,68,55,.62));
+  pointer-events: none;
+}
+
+.portal-header-copy {
+  position: relative;
+  z-index: 2;
+  width: min(620px, 58%);
+  margin: 30px auto 0 42px;
+  color: white;
+  text-shadow: 0 2px 12px rgba(19,58,49,.48);
+}
+
+.portal-eyebrow {
+  display: inline-block;
+  padding: 5px 9px;
+  border: 1px solid rgba(255,255,255,.55);
+  border-radius: 4px;
+  background: rgba(35,89,72,.54);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.portal-header-copy h1 {
+  margin: 9px 0 4px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(34px, 4.2vw, 62px);
+  font-weight: 700;
+  letter-spacing: .04em;
+  line-height: 1;
+}
+
+.portal-header-copy p {
+  margin: 10px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.portal-world-note {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  width: 250px;
+  margin: 31px 34px 0 0;
+  padding: 12px 14px;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid rgba(255,255,255,.55);
+  border-radius: 7px;
+  background: rgba(255,253,244,.88);
+  color: var(--world-ink);
+  box-shadow: 0 8px 22px rgba(31,68,57,.18);
+}
+
+.portal-world-note strong { color: var(--world-accent-deep); font-size: 10px; letter-spacing: .12em; }
+.portal-world-note span { color: var(--world-muted); font-size: 11px; line-height: 1.55; }
+
+.space-theme-nav {
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  height: 46px;
+  padding: 0 28px;
+  align-items: center;
+  gap: 6px;
+  color: white;
+}
+
+.space-theme-nav span {
+  padding: 7px 13px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  text-shadow: 0 1px 5px rgba(0,0,0,.4);
+}
+
+.space-theme-nav span.is-active,
+.space-theme-nav span:hover { background: rgba(255,255,255,.2); }
+
+.theme-particles {
+  position: fixed;
+  z-index: 5;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.theme-particles span {
+  position: absolute;
+  top: -8vh;
+  left: var(--particle-left);
+  width: var(--particle-size);
+  height: var(--particle-size);
+  background: var(--particle-primary);
+  box-shadow: 0 1px 4px rgba(36,72,61,.18);
+  opacity: .82;
+  animation: themeParticleFall var(--particle-duration) linear infinite;
+  animation-delay: var(--particle-delay);
+}
+
+.theme-particles span:nth-child(3n + 2) { background: var(--particle-secondary); }
+.theme-particles span:nth-child(3n) { background: var(--particle-tertiary); }
+
+.particle-mode-petals span {
+  border-radius: 70% 15% 65% 20%;
+  transform: rotate(35deg);
+}
+
+.particle-mode-rain span {
+  width: 2px;
+  height: calc(var(--particle-size) * 3.4);
+  border-radius: 999px;
+  background: rgba(190,235,255,.75) !important;
+}
+
+.particle-mode-snow span,
+.particle-mode-bubbles span {
+  border: 1px solid rgba(255,255,255,.84);
+  border-radius: 50%;
+  background: rgba(255,255,255,.48) !important;
+}
+
+.particle-mode-embers span { border-radius: 50%; box-shadow: 0 0 8px var(--particle-primary); }
+.particle-mode-stars span { clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%); }
+.particle-mode-mist span { width: 70px; height: 10px; border-radius: 50%; filter: blur(5px); opacity: .2; }
+
+@keyframes themeParticleFall {
+  0% { translate: 0 -12vh; rotate: 0deg; opacity: 0; }
+  10% { opacity: .82; }
+  100% { translate: var(--particle-drift) 116vh; rotate: 420deg; opacity: .18; }
+}
+
+.studio-section,
+.agent-studio-shell .ant-card,
+.glass-card {
+  border-color: var(--world-border) !important;
+  border-radius: 12px !important;
+  background: var(--world-panel) !important;
+  box-shadow: 0 6px 17px rgba(45,77,67,.09) !important;
+  backdrop-filter: none;
+}
+
+.studio-section::after { display: none; }
+.section-kicker { color: var(--world-accent-deep); }
+
+.theme-list-card .ant-card-head,
+.theme-preview-card > .ant-card-head,
+.agent-studio-shell .ant-card-head {
+  background: var(--world-panel-soft);
+  border-bottom-color: var(--world-border);
+}
+
+.pixel-world-app .ant-btn-primary {
+  background: var(--world-accent);
+  box-shadow: 0 5px 12px rgba(45,95,77,.16);
+}
+
+.pixel-world-app .ant-btn-primary:hover { background: var(--world-accent-deep) !important; }
+
+.preview-empty-world {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.04), rgba(31,81,67,.16)),
+    var(--world-banner-image) 50% 50% / cover no-repeat;
+}
+
+.preview-empty-message {
+  border-radius: 12px;
+  background: var(--world-panel);
+  box-shadow: 0 12px 28px rgba(38,76,64,.18);
+  backdrop-filter: none;
+}
+
+.preview-empty-icon {
+  border-radius: 8px;
+  background: var(--world-accent);
+  box-shadow: 0 7px 15px rgba(45,92,76,.24);
+}
+
+.game-runtime-shell {
+  position: relative;
+  z-index: 6;
+  height: 100vh;
+  padding: 14px;
+  overflow: auto;
+}
+
+.game-cover-screen {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  height: 100vh;
+  min-height: 680px;
+  overflow: hidden;
+  place-items: center;
+  color: white;
+  isolation: isolate;
+}
+
+.game-cover-art,
+.game-cover-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+}
+
+.game-cover-art {
+  background-position: center;
+  background-size: cover;
+  image-rendering: pixelated;
+  transform: scale(1.015);
+  animation: coverBreathe 18s ease-in-out infinite alternate;
+}
+
+.game-cover-vignette {
+  z-index: -1;
+  background:
+    linear-gradient(90deg, rgba(13,32,27,.78), rgba(11,27,25,.2) 58%, rgba(11,28,24,.48)),
+    linear-gradient(180deg, rgba(9,24,20,.1), rgba(9,24,20,.62));
+}
+
+.game-cover-content {
+  position: relative;
+  z-index: 6;
+  display: flex;
+  width: min(1120px, calc(100% - 80px));
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 60px;
+}
+
+.game-cover-copy { max-width: 720px; text-shadow: 0 3px 14px rgba(0,0,0,.54); }
+.game-cover-copy h1 { margin: 10px 0 12px !important; color: white !important; font-family: Georgia, "Times New Roman", serif; font-size: clamp(48px, 7vw, 92px) !important; line-height: .98 !important; }
+.game-cover-copy > div.ant-typography { max-width: 650px; color: rgba(255,255,255,.92) !important; font-size: 16px; line-height: 1.75; }
+.game-cover-eyebrow { color: #fff7c7 !important; font-size: 11px; font-weight: 900; letter-spacing: .2em; }
+.game-cover-tags .ant-tag { border-color: rgba(255,255,255,.38); background: rgba(12,45,36,.54); color: white; }
+
+.game-cover-menu {
+  display: flex;
+  width: 230px;
+  padding: 18px;
+  flex: 0 0 230px;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid rgba(255,255,255,.48);
+  border-radius: 10px;
+  background: rgba(255,253,243,.9);
+  box-shadow: 0 18px 42px rgba(7,26,21,.28);
+}
+
+.game-cover-menu .ant-btn { height: 46px; justify-content: flex-start; border-radius: 6px; color: var(--world-ink); font-weight: 700; }
+.game-cover-menu .ant-btn-primary { color: white; }
+
+.game-cover-story {
+  position: absolute;
+  z-index: 6;
+  bottom: 24px;
+  left: 34px;
+  max-width: min(720px, calc(100% - 68px));
+  padding: 9px 13px;
+  border-left: 3px solid #fff0a8;
+  background: rgba(9,30,24,.54);
+  text-shadow: 0 1px 4px rgba(0,0,0,.4);
+}
+
+.game-cover-story span { color: #fff0a8; font-size: 9px; font-weight: 900; letter-spacing: .15em; }
+.game-cover-story p { margin: 3px 0 0; overflow: hidden; color: rgba(255,255,255,.86); font-size: 11px; line-height: 1.55; text-overflow: ellipsis; white-space: nowrap; }
+.cover-controls-guide p { margin: 8px 0 0; color: var(--world-muted); line-height: 1.65; }
+
+@keyframes coverBreathe {
+  from { transform: scale(1.015) translateX(-4px); }
+  to { transform: scale(1.035) translateX(5px); }
+}
+
+@media (max-width: 1100px) {
+  .theme-list-card { width: 330px !important; }
+  .portal-world-note { display: none; }
+  .portal-header-copy { width: calc(100% - 70px); }
+}
+
+@media (max-width: 760px) {
+  .portal-header { min-height: 210px; margin: 8px 8px 0; flex-basis: 210px; }
+  .portal-header-copy { width: calc(100% - 40px); margin: 24px 20px 0; }
+  .space-theme-nav { gap: 0; padding: 0 10px; overflow-x: auto; }
+  .space-theme-nav span { white-space: nowrap; }
+  .world-content-frame { margin: 0 8px 8px; }
+  .game-cover-content { width: calc(100% - 36px); align-items: stretch; flex-direction: column; gap: 22px; }
+  .game-cover-menu { width: 100%; flex: none; }
+  .game-cover-story { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pixel-world-app::before,
+  .ambient-sky::before,
+  .ambient-sky::after,
+  .ambient-sky span,
+  .portal-orbit,
+  .portal-star,
+  .theme-particles span,
+  .preview-empty-particles span,
+  .preview-empty-icon,
+  .game-cover-art { animation: none !important; }
+}
+
+/* Ê∏∏ÊàèÂÜÖËÆæÁΩÆ Drawer ÊöóËâ≤‰∏ªÈ¢ò */
+.game-settings-drawer .ant-drawer-close {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.game-settings-drawer .ant-tabs-tab {
+  color: rgba(255, 255, 255, 0.55) !important;
+}
+
+.game-settings-drawer .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #fff !important;
+}
+
+.game-settings-drawer .ant-tabs-ink-bar {
+  background: #1890ff;
+}
+
+.game-settings-drawer .ant-select-selector,
+.game-settings-drawer .ant-slider-rail {
+  background: rgba(255, 255, 255, 0.12) !important;
+}
+
+@keyframes weatherFall {
+  from { transform: translate3d(0, -40px, 0) rotate(8deg); }
+  to { transform: translate3d(-72px, 760px, 0) rotate(8deg); }
+}
+
+@keyframes waterDrift {
+  from { background-position: 0 0; }
+  to { background-position: 180px 0; }
+}
