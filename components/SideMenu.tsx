@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { message } from 'antd'
 import { useGameStore } from '@/lib/store'
 import { isPresetTheme } from '@/lib/theme-utils'
-import { ActionButtons, AgentStudio, AssetPlanner, ModelSelector, ProjectHeader, ThemeCustomizer } from './ui/index'
+import { ActionButtons, AgentStudio, AssetPlanner, ModelSelector, ThemeCustomizer } from './ui/index'
 import { PRESET_THEMES } from '@/configs'
 import { buildGameDataFromSpec, syncPlayableLevels } from '@/lib/virtual-levels'
 import { formatGenerationError } from '@/lib/format-generation-error'
@@ -461,15 +461,13 @@ const SideMenu: React.FC<SideMenuProps> = ({
     const synced = syncPlayableLevels(activeTheme, Math.max(2, state.levelCount), activeData)
     state.setGameData(synced.gameData, activeTheme)
     state.setTotalLevels(synced.totalLevels)
-    state.setCurrentLevelIndex(0)
-    state.setGameState('playing')
+    state.setGameState('menu')
     state.saveToLocalStorage()
     onStartGame?.()
   }
 
   return <div className={`${className || ''} creator-sidebar`} style={{ padding: 20, height: '100%', overflowY: 'auto', ...style }}>
     <div className="creator-stack" style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%' }}>
-      <ProjectHeader />
       <section className="studio-section api-section">
         <div className="section-kicker">IMAGE LAB · 图片生成引擎</div>
         <ModelSelector selectedProvider={selectedProvider} onProviderChange={onProviderChange} selectedModel={selectedModel} onModelChange={onModelChange} apiKey={apiKey} onApiKeyChange={onApiKeyChange} />
