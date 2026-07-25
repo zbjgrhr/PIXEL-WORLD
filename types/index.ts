@@ -437,6 +437,8 @@ export interface ThemeCustomizerProps {
   onCreationModeChange?: (mode: 'agent' | 'classic') => void
   customThemeName: string
   onThemeNameChange: (name: string) => void
+  customStory: string
+  onStoryChange: (story: string) => void
   customPrompt: string
   onPromptChange: (prompt: string) => void
   levelCount?: number

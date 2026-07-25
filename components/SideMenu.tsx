@@ -55,6 +55,7 @@ const DRAFT_PROJECT_ID = 'active-draft'
 
 interface SavedDraft {
   name?: string
+  story?: string
   spec: GameSpec
   prompt?: string
 }
@@ -63,6 +64,19 @@ interface GenerationTarget {
   provider: ProviderId
   model: string
   apiKey: string
+}
+
+function composeProjectPrompt(name: string, story: string, prompt: string, levels: number): string {
+  const base = prompt.trim() || buildStructuredPrompt(levels)
+  const lockedStory = story.trim()
+  if (!lockedStory) return base
+  return [
+    `游戏标题：${name.trim() || 'Pixel World'}`,
+    `世界观与故事：${lockedStory}`,
+    `背景故事：${lockedStory}`,
+    '',
+    base,
+  ].join('\n')
 }
 
 function patchSpecAsset(spec: GameSpec, id: string, patch: Partial<AssetDefinition>): GameSpec {
@@ -89,6 +103,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
     setGameState, setLoadingMessage, setGameData, isLoading, setLoading,
   } = useGameStore()
   const [customThemeName, setCustomThemeName] = useState('')
+  const [customStory, setCustomStory] = useState('')
   const [isThemeCreated, setIsThemeCreated] = useState(false)
   const [presetThemes, setPresetThemes] = useState<Theme[]>([...PRESET_THEMES])
   const [optimizedSpec, setOptimizedSpec] = useState<GameSpec | null>(null)
@@ -105,6 +120,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
     // generation draft stays available, but it must never overwrite a new idea.
     setCustomPrompt(buildStructuredPrompt(levelCount))
     setCustomThemeName('')
+    setCustomStory('')
     setOptimizedSpec(null)
     try {
       const raw = localStorage.getItem(DRAFT_KEY)
@@ -120,6 +136,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
   const restoreSavedDraft = () => {
     if (!savedDraft) return
     setCustomThemeName(savedDraft.name || savedDraft.spec.title)
+    setCustomStory(savedDraft.story || savedDraft.spec.backgroundStory || '')
     setCustomPrompt(savedDraft.prompt?.trim() || buildStructuredPrompt(savedDraft.spec.levels.length))
     setLevelCount(savedDraft.spec.levels.length)
     setOptimizedSpec(savedDraft.spec)
@@ -131,7 +148,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
 
   const persistDraft = (spec: GameSpec) => {
     try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ name: customThemeName, prompt: customPrompt, spec: stripLargeAssetUrls(spec) }))
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({ name: customThemeName, story: customStory, prompt: customPrompt, spec: stripLargeAssetUrls(spec) }))
     } catch {
       // Large image URLs are also cached by IndexedDB; draft failure must not interrupt generation.
     }
@@ -149,7 +166,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
     try {
       const response = await fetch('/api/optimize-prompt', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, theme: themeOverride?.trim() || customThemeName.trim() || 'Pixel World', levelCount, provider: selectedProvider, apiKey: apiKey.trim() }),
+        body: JSON.stringify({ prompt, story: customStory.trim(), theme: themeOverride?.trim() || customThemeName.trim() || 'Pixel World', levelCount, provider: selectedProvider, apiKey: apiKey.trim() }),
       })
       const result = await response.json()
       if (!response.ok || !result.success) throw new Error(result.error || '提示词优化失败。')
@@ -469,12 +486,13 @@ const SideMenu: React.FC<SideMenuProps> = ({
         <div className="section-kicker">IMAGE LAB · 图片生成引擎</div>
         <ModelSelector selectedProvider={selectedProvider} onProviderChange={onProviderChange} selectedModel={selectedModel} onModelChange={onModelChange} apiKey={apiKey} onApiKeyChange={onApiKeyChange} />
       </section>
-      <section className="studio-section prompt-section">
+      <section id="game-idea" className="studio-section prompt-section section-anchor">
         <div className="section-kicker">WORLD BUILDER · 世界编辑器</div>
         <ThemeCustomizer
         creationMode={creationMode}
         onCreationModeChange={(mode) => { setCreationMode(mode); setAgentApproved(false) }}
-        customThemeName={customThemeName} onThemeNameChange={setCustomThemeName}
+        customThemeName={customThemeName} onThemeNameChange={(value) => { setCustomThemeName(value); setOptimizedSpec(null); setAgentApproved(false) }}
+        customStory={customStory} onStoryChange={(value) => { setCustomStory(value); setOptimizedSpec(null); setAgentApproved(false) }}
         customPrompt={customPrompt} onPromptChange={(value) => { setCustomPrompt(value); setOptimizedSpec(null); setAgentApproved(false) }}
         levelCount={levelCount} onLevelCountChange={(count) => {
           setLevelCount(count)
@@ -486,18 +504,30 @@ const SideMenu: React.FC<SideMenuProps> = ({
         hasSavedDraft={Boolean(savedDraft)} onRestoreDraft={restoreSavedDraft}
         />
       </section>
-      {creationMode === 'agent' && <div className="agent-studio-shell"><AgentStudio
-        projectId={DRAFT_PROJECT_ID}
-        sourcePrompt={customPrompt}
-        projectName={customThemeName}
-        levelCount={levelCount}
-        baseSpec={optimizedSpec}
-        onOptimizePrompt={() => optimizePrompt(false)}
-        isOptimizing={isOptimizing}
-        onSpecReady={(spec) => { updateSpec(spec); setAgentApproved(false) }}
-        onApproved={(spec) => { updateSpec(spec); setAgentApproved(true); message.success('Agent 规格已批准，现在可以检查素材卡片并开始生成。') }}
-      /></div>}
-      {optimizedSpec && (creationMode === 'classic' || agentApproved) && <AssetPlanner spec={optimizedSpec} onChange={updateSpec} onGenerate={() => { void generateSelectedAssets() }} onCancel={() => abortRef.current?.abort()} onTestApi={() => { void testApi() }} isGenerating={isLoading} isTesting={isTesting} progress={generationProgress} />}
+      <section id="agent-studio" className="section-anchor">
+        {creationMode === 'agent' ? <div className="agent-studio-shell"><AgentStudio
+          projectId={DRAFT_PROJECT_ID}
+          sourcePrompt={composeProjectPrompt(customThemeName, customStory, customPrompt, levelCount)}
+          projectName={customThemeName}
+          levelCount={levelCount}
+          baseSpec={optimizedSpec}
+          onOptimizePrompt={() => optimizePrompt(false)}
+          isOptimizing={isOptimizing}
+          onSpecReady={(spec) => { updateSpec(spec); setAgentApproved(false) }}
+          onApproved={(spec) => { updateSpec(spec); setAgentApproved(true); message.success('Agent 规格已批准，现在可以检查素材卡片并开始生成。') }}
+        /></div> : <div className="studio-section nav-section-placeholder">
+          <div className="section-kicker">AGENT STUDIO · 多 AGENT 工作室</div>
+          <p>当前为传统模式。切换到“Agent 集群”即可让策划、叙事、玩法、美术和关卡 Agent 共同评审你的题目与故事。</p>
+        </div>}
+      </section>
+      <section id="asset-workshop" className="section-anchor">
+        {optimizedSpec && (creationMode === 'classic' || agentApproved)
+          ? <AssetPlanner spec={optimizedSpec} onChange={updateSpec} onGenerate={() => { void generateSelectedAssets() }} onCancel={() => abortRef.current?.abort()} onTestApi={() => { void testApi() }} isGenerating={isLoading} isTesting={isTesting} progress={generationProgress} />
+          : <div className="studio-section nav-section-placeholder">
+            <div className="section-kicker">ASSET WORKSHOP · 素材工坊</div>
+            <p>{creationMode === 'agent' ? '完成 Agent 评审并批准规格后，素材卡片、关卡分配和生成队列会显示在这里。' : '先完成一次提示词优化，素材卡片、关卡分配和生成队列会显示在这里。'}</p>
+          </div>}
+      </section>
       <ActionButtons isThemeCreated={isThemeCreated} isLoading={isLoading} selectedTheme={selectedTheme} customPrompt={customPrompt} customThemeName={customThemeName} apiKey={apiKey} onCreateTheme={() => { void generateSelectedAssets() }} onStartGame={handleStartGame} />
     </div>
   </div>

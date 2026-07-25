@@ -477,7 +477,7 @@ export default function Home() {
           <GameCanvas loadingMessage={loadingMessage} onBackToMenu={returnToCover} />
         </div>
       ) : (
-        <div className="pixel-world-shell">
+        <div id="world-home" className="pixel-world-shell">
           <ProjectHeader />
           <div className="world-content-frame">
             <Splitter className="world-splitter">
@@ -503,7 +503,7 @@ export default function Home() {
               </Splitter.Panel>
 
               <Splitter.Panel className="workspace-panel" style={{ padding: 20, overflow: 'visible' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, width: '100%', height: 'auto' }}>
+              <div id="preview-publish" className="section-anchor" style={{ display: 'flex', alignItems: 'flex-start', gap: 20, width: '100%', height: 'auto' }}>
                 <ThemesList
                   ref={themesListRef}
                   themes={themes}

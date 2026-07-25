@@ -3,7 +3,13 @@
 import React from 'react'
 import type { ProjectHeaderProps } from '@/types'
 
-const NAV_ITEMS = ['世界主页', '游戏构想', '素材工坊', 'Agent Studio', '预览与发布']
+const NAV_ITEMS = [
+  { label: '世界主页', href: '#world-home' },
+  { label: '游戏构想', href: '#game-idea' },
+  { label: '素材工坊', href: '#asset-workshop' },
+  { label: 'Agent Studio', href: '#agent-studio' },
+  { label: '预览与发布', href: '#preview-publish' },
+]
 
 const ProjectHeader: React.FC<ProjectHeaderProps> = ({ className }) => (
   <header className={`${className || ''} portal-header`}>
@@ -20,7 +26,7 @@ const ProjectHeader: React.FC<ProjectHeaderProps> = ({ className }) => (
 
     <nav className="space-theme-nav" aria-label="Pixel World sections">
       {NAV_ITEMS.map((item, index) => (
-        <span className={index === 0 ? 'is-active' : ''} key={item}>{item}</span>
+        <a className={index === 0 ? 'is-active' : ''} href={item.href} key={item.href}>{item.label}</a>
       ))}
     </nav>
   </header>

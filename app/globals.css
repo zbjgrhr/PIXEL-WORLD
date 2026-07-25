@@ -848,16 +848,33 @@ body {
   color: white;
 }
 
-.space-theme-nav span {
+.space-theme-nav a {
   padding: 7px 13px;
   border-radius: 4px;
+  color: inherit;
   font-size: 12px;
   font-weight: 700;
+  text-decoration: none;
   text-shadow: 0 1px 5px rgba(0,0,0,.4);
 }
 
-.space-theme-nav span.is-active,
-.space-theme-nav span:hover { background: rgba(255,255,255,.2); }
+.space-theme-nav a.is-active,
+.space-theme-nav a:hover,
+.space-theme-nav a:focus-visible { background: rgba(255,255,255,.2); }
+
+.section-anchor,
+#world-home,
+#game-idea,
+#agent-studio,
+#asset-workshop,
+#preview-publish { scroll-margin-top: 18px; }
+
+.nav-section-placeholder {
+  color: var(--world-muted);
+  line-height: 1.7;
+}
+
+.nav-section-placeholder p { margin: 8px 0 0; }
 
 .theme-particles {
   position: fixed;
@@ -1063,7 +1080,7 @@ body {
   .portal-header { min-height: 210px; margin: 8px 8px 0; flex-basis: 210px; }
   .portal-header-copy { width: calc(100% - 40px); margin: 24px 20px 0; }
   .space-theme-nav { gap: 0; padding: 0 10px; overflow-x: auto; }
-  .space-theme-nav span { white-space: nowrap; }
+  .space-theme-nav a { white-space: nowrap; }
   .world-content-frame { margin: 0 8px 8px; }
   .game-cover-content { width: calc(100% - 36px); align-items: stretch; flex-direction: column; gap: 22px; }
   .game-cover-menu { width: 100%; flex: none; }

@@ -16,10 +16,10 @@ const ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
   mechanics: `Create artifact {combatMode,hero,weapon,enemies,boss,collectible,difficultyCurve,rules}. Include viable melee and ranged combat and bounded numeric recommendations.`,
   artDirector: `Create artifact {artDirection,palette,lighting,pixelScale,characterRules,backgroundRules,assetIsolationRules,animationRules}. Require coherent original non-branded art. Prefer bright high-saturation color harmony, luminous midtones, colorful shadows and crisp pixel detail; even dark biomes need vivid colored lighting and readable depth rather than a gray veil.`,
   levelDesigner: `Create artifact {levels:[{name,environment,platformMode,enemyCount,collectibleCount,hasBoss,enemyTypes,obstacles,music,effects}],progressionNotes}. The last level is the only mandatory Boss arena.`,
-  integrator: `Create artifact {spec}. spec must be one complete GameSpec version 3 using the provided fallback/base spec as the exact schema. Merge specialist outputs, preserve explicit user content, and keep every asset category isolated.`,
+  integrator: `Create artifact {spec}. Return a compact partial GameSpec V3 patch containing only fields that the specialist plans genuinely improve. Omit assets and unchanged fields; the server deterministically merges this patch into the prepared complete base spec. Preserve explicit user content and keep every asset category isolated.`,
   consistencyCritic: `Review the merged spec. Create artifact {issues}. Check contradictions, repeated scene descriptions inside isolated sprites, style drift, missing level assignments and story/mechanics mismatches. Do not rewrite the spec.`,
   engineQa: `Review the merged spec against the fixed engine. Create artifact {issues}. Check required assets, ranged combat, final Boss, valid levelIds, animation action strips, numeric bounds and export readiness. Do not generate code.`,
-  revision: `Create artifact {spec}. Apply only fixes justified by reviewIssues to the current merged/revised spec, preserving explicit user choices. Return a complete GameSpec V3.`,
+  revision: `Create artifact {spec}. Return a compact partial GameSpec V3 patch containing only fixes justified by reviewIssues. Omit unchanged fields and preserve explicit user choices; the server deterministically merges the patch into the complete current spec.`,
   assetCoordinator: `Create artifact {assetPromptPatches:[{assetId,prompt}],estimatedImageJobs,productionNotes}. Return only prompts that truly need refinement; each prompt must describe one isolated asset and preserve its identity and intended level. Do not repeat the complete GameSpec and do not call image tools.`,
   visualQa: `Create artifact {verdict,checkedAssets,recommendations}. Review supplied asset metadata and optional images for full-body framing, consistent identity, action-strip layout, transparent/isolated background and style consistency. Never request automatic regeneration.`,
   playtest: `Create artifact {verdict,checks,recommendations}. Check whether each level can contain enemies, collectibles, combat, a reachable exit and a final Boss using the fixed engine.`,
@@ -29,6 +29,31 @@ const ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
 function compact(value: unknown, limit = 70000): string {
   const json = JSON.stringify(value ?? null) ?? 'null'
   return json.length > limit ? `${json.slice(0, limit)}\n[truncated]` : json
+}
+
+function compactText(value: string, limit = 10000): string {
+  if (value.length <= limit) return value
+  const head = Math.ceil(limit * 0.7)
+  const tail = limit - head
+  return `${value.slice(0, head)}\n[long middle section omitted]\n${value.slice(-tail)}`
+}
+
+function compactPlanningSpec(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  const spec = value as Record<string, unknown>
+  const assets = Array.isArray(spec.assets) ? spec.assets.map((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return candidate
+    const asset = candidate as Record<string, unknown>
+    return {
+      id: asset.id,
+      category: asset.category,
+      title: asset.title,
+      kind: asset.kind,
+      enabled: asset.enabled,
+      levelIds: asset.levelIds,
+    }
+  }) : []
+  return { ...spec, assets }
 }
 
 function currentSpec(request: AgentExecuteRequest) {
@@ -41,7 +66,7 @@ function currentSpec(request: AgentExecuteRequest) {
 function roleContext(request: AgentExecuteRequest): string[] {
   const a = request.artifacts
   const spec = currentSpec(request)
-  const source = `Original structured request:\n${request.sourcePrompt}`
+  const source = `Original structured request:\n${compactText(request.sourcePrompt)}`
   switch (request.role) {
     case 'director':
       return [source]
@@ -59,9 +84,9 @@ function roleContext(request: AgentExecuteRequest): string[] {
     case 'integrator':
       return [
         source,
-        `Fallback schema/spec:\n${compact(request.baseSpec, 60000)}`,
-        `CreativeBrief:\n${compact(a.brief, 12000)}`,
-        `Specialist plans:\n${compact({ narrative: a.narrative, mechanics: a.mechanics, artDirection: a.artDirection, levelPlan: a.levelPlan }, 52000)}`,
+        `Prepared complete base spec (use as schema; do not repeat unchanged fields):\n${compact(compactPlanningSpec(request.baseSpec), 24000)}`,
+        `CreativeBrief:\n${compact(a.brief, 5000)}`,
+        `Specialist plans:\n${compact({ narrative: a.narrative, mechanics: a.mechanics, artDirection: a.artDirection, levelPlan: a.levelPlan }, 20000)}`,
       ]
     case 'consistencyCritic':
       return [
@@ -75,9 +100,9 @@ function roleContext(request: AgentExecuteRequest): string[] {
       ]
     case 'revision':
       return [
-        `Current GameSpec to repair:\n${compact(spec, 65000)}`,
-        `Only approved review issues:\n${compact(a.reviewIssues, 26000)}`,
-        `Locked explicit intent:\n${compact(a.brief, 14000)}`,
+        `Current GameSpec to repair (do not repeat unchanged fields):\n${compact(compactPlanningSpec(spec), 32000)}`,
+        `Only approved review issues:\n${compact(a.reviewIssues, 20000)}`,
+        `Locked explicit intent:\n${compact(a.brief, 7000)}`,
       ]
     case 'assetCoordinator':
       return [
