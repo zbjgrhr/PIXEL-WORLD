@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Button, Card, Checkbox, Empty, Image, Progress, Skeleton, Space, Switch, Tag, Typography, message } from 'antd'
-import { Download, RotateCcw, Trash2, Volume2 } from 'lucide-react'
+import { Download, RotateCcw, Sparkles, Trash2, Volume2 } from 'lucide-react'
 import { animationClipPoses, normalizeAnimationSpec } from '@/lib/asset-catalog'
 import type { AnimationClipPose, AnimationPose, AssetDefinition, ThemePreviewProps } from '@/types'
 import { ExportValidationError, exportGameZip } from '@/lib/export-game'
@@ -123,7 +123,19 @@ const ThemePreview: React.FC<ThemePreviewProps> = ({ isLoading, loadingMessage, 
   }
 
   if (isLoading) return <Card style={{ flex: 1 }}><Title level={3}>Generating selected assets</Title><Paragraph>{loadingMessage}</Paragraph><Progress percent={Math.round((spec?.assets.filter((asset) => asset.status === 'success').length || 0) / Math.max(1, spec?.assets.length || 1) * 100)} status="active" /><Skeleton active paragraph={{ rows: 8 }} /></Card>
-  if (!selected) return <Card style={{ flex: 1 }}><Empty description="Select a theme" /></Card>
+  if (!selected) return <Card className="theme-preview-empty-card glass-card" style={{ flex: 1 }}>
+    <div className="preview-empty-world">
+      <div className="preview-empty-particles" aria-hidden="true">
+        {Array.from({ length: 9 }, (_, index) => <span key={index} />)}
+      </div>
+      <div className="preview-empty-message">
+        <span className="preview-empty-icon"><Sparkles size={24} /></span>
+        <Text className="preview-empty-kicker">YOUR NEXT PIXEL ADVENTURE</Text>
+        <Title level={2}>Select a theme</Title>
+        <Paragraph>Choose a world on the left, or describe your own colorful adventure to begin.</Paragraph>
+      </div>
+    </div>
+  </Card>
 
   return <Card className="theme-preview-card glass-card" style={{ flex: 1, overflowY: 'auto' }} title={<div><Title level={3} style={{ margin: 0 }}>{selected.name}</Title><Text type="secondary">Theme Preview, Asset Assignment & Game Data</Text></div>} extra={<Space><Button type="primary" icon={<Download size={15} />} loading={isExporting} disabled={!spec} onClick={() => { void exportGame() }}>Export ZIP</Button>{selectedTheme.startsWith('custom-') && onDeleteTheme ? <Button danger icon={<Trash2 size={15} />} onClick={() => onDeleteTheme(selectedTheme)}>Delete</Button> : null}</Space>}>
     {spec ? <>

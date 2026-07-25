@@ -304,7 +304,9 @@ export default function Home() {
 
   return (
     <main className="min-h-screen pixel-world-app">
-      <div className="ambient-sky" aria-hidden="true"><span /><span /><span /><span /></div>
+      <div className="ambient-sky" aria-hidden="true">
+        {Array.from({ length: 12 }, (_, index) => <span key={index} />)}
+      </div>
       <div className="pixel-world-shell" style={{ minHeight: '100vh' }}>
         <Splitter className="world-splitter" style={{ height: '100vh' }}>
           <Splitter.Panel
@@ -312,7 +314,7 @@ export default function Home() {
             min={360}
             max={480}
             className="creator-panel"
-            style={{ backgroundColor: 'rgba(255,255,255,.78)', borderRight: '1px solid rgba(116,139,214,.18)', boxShadow: '8px 0 32px rgba(77,105,183,.10)', backdropFilter: 'blur(18px)' }}
+            style={{ backgroundColor: 'rgba(255,255,255,.64)', borderRight: '1px solid rgba(43,115,189,.22)', boxShadow: '8px 0 32px rgba(20,92,158,.13)', backdropFilter: 'blur(7px) saturate(1.12)' }}
           >
             <SideMenu
               apiKey={apiKey}

@@ -284,8 +284,8 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
     backgroundStory,
     visualStyle: {
       artDirection: visualStyle || 'Original cohesive 16-bit side-scrolling pixel art, crisp hard pixel edges, no antialiasing.',
-      palette: 'One unified high-contrast palette with dark atmospheric shadows and vivid gameplay accents.',
-      lighting: 'Consistent light from the upper left with readable silhouettes.',
+      palette: 'One unified bright high-saturation palette with luminous midtones, colorful shadows, vivid biome colors and no gray or muddy wash.',
+      lighting: 'Clear luminous light from the upper left with crisp silhouettes, sparkling highlights and readable depth in every scene.',
       pixelScale: 'Consistent 2x pixel scale and side-view orthographic camera.',
     },
     hero: { name: 'Hero', appearance: heroAppearance, maxHealth: 100, moveSpeed: 5, jumpPower: 15 },

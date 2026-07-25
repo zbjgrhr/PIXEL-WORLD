@@ -23,6 +23,7 @@ describe('GameSpec deterministic guardrails', () => {
     const backgrounds = spec.assets.filter((asset) => asset.category === 'levelBackground')
     expect(backgrounds).toHaveLength(5)
     expect(backgrounds.every((asset) => !/placeholder/i.test(asset.prompt))).toBe(true)
+    expect(backgrounds.every((asset) => /no gray haze|no muddy wash/i.test(asset.prompt))).toBe(true)
     expect(inspectGameSpec(spec).filter((item) => item.severity === 'blocking')).toEqual([])
   })
 })

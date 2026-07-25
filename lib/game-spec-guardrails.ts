@@ -62,9 +62,11 @@ function concreteBackgroundPrompt(asset: AssetDefinition, levels: LevelSpec[]): 
   if (asset.category !== 'levelBackground') return asset
   const level = levels.find((item) => asset.levelIds.includes(item.id))
   if (!level) return asset
-  const prompt = `Environment-only 16-bit side-scrolling pixel-art background for “${level.name}”. ${level.environment} Wide readable traversal lane, layered parallax depth, no hero, no enemy, no boss, no weapon, no pickup, no foreground obstacle, no words, no logo, no UI.`
+  const prompt = `Environment-only 16-bit side-scrolling pixel-art background for “${level.name}”. ${level.environment} Wide readable traversal lane, layered parallax depth, vivid high-saturation biome colors, luminous clean midtones, colorful shadows, crisp pixel detail, no gray haze or muddy wash, no hero, no enemy, no boss, no weapon, no pickup, no foreground obstacle, no words, no logo, no UI.`
   const isGeneric = /placeholder|region\s*\d|generated from|describe this level|关卡背景描述|等待补充/i.test(asset.prompt)
-  return { ...asset, prompt: isGeneric || !asset.prompt.includes(level.environment) ? prompt : asset.prompt }
+  const basePrompt = isGeneric || !asset.prompt.includes(level.environment) ? prompt : asset.prompt
+  const vividContract = 'Vivid high-saturation biome colors, luminous clean midtones, colorful readable shadows, crisp layer separation, no gray haze, no muddy wash, no faded color grade.'
+  return { ...asset, prompt: /no gray haze|no muddy wash/i.test(basePrompt) ? basePrompt : `${basePrompt} ${vividContract}` }
 }
 
 /**

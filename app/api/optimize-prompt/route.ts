@@ -28,6 +28,7 @@ Rules:
 - Keep image prompts concise. Do not copy the world story or another level's environment into an isolated asset prompt.
 - Preserve the user's theme and important creative choices.
 - Produce coherent art direction, palette, lighting, and pixel scale shared by all assets.
+- Unless the user explicitly requests monochrome or muted art, use bright high-saturation color harmony, luminous clean midtones, colorful readable shadows and crisp depth separation. Even night, castle and dungeon levels must avoid gray haze, muddy grading and washed-out highlights.
 - Write backgroundStory as a vivid 120-180 word game introduction with a clear conflict, the hero's goal, the collectible's importance, and the final boss. Do not describe UI or controls.
 - Preserve every non-empty user field verbatim in meaning. Only enrich fields that are blank or underspecified.
 - Keep the exact V3 keys from the schema example, including assets, levelIds, animation, sound, motion, music, effects, and platformMode.

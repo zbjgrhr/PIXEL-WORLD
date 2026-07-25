@@ -58,7 +58,7 @@ BOSS行动音效：Heavy footfalls, broad wing beats and quiet armored-scale fri
 关卡特效：Per-level weather particles, color filter and restrained impact flash described separately below; effects are rendered locally and do not call the image API.
 
 关卡 1：暮色城门
-背景：Wide empty twilight castle approach, broken outer wall in the distance, dry trees at the far edges, layered deep-blue hills and one small glowing gateway at the far right; clear empty traversal corridor, environment only.
+背景：Wide empty sunset castle approach with a saturated turquoise-to-coral sky, emerald grass ledges, golden stone highlights, violet distant hills, colorful banners and one jewel-bright gateway at the far right; sharp readable layers, clear empty traversal corridor, no gray fog, environment only.
 平台类型：地面。
 障碍物：普通石墙障碍、少量金属尖刺和一个符文弹跳台。
 出现素材：主角、地面敌人、空中敌人、近战武器、远程武器、近战攻击特效、远程弹射物、远程攻击/命中特效、收集品、地面平台、普通障碍物、触碰即死障碍物、弹跳障碍物。
@@ -67,7 +67,7 @@ BOSS行动音效：Heavy footfalls, broad wing beats and quiet armored-scale fri
 敌人数：3。收集品数：3。Boss：否。
 
 关卡 2：回声王座厅
-背景：Wide empty ruined throne hall, tall stone columns, broken stained-glass windows, faded banners and diagonal moonlight beams; open central floor and a distant stairway on the right, environment only.
+背景：Wide empty ruined throne hall with cobalt stone columns, luminous ruby-and-cyan stained glass, bright gold trim, saturated violet banners and crisp diagonal sunbeams; colorful readable shadows, open central floor and a distant stairway on the right, environment only.
 平台类型：地面。
 障碍物：普通石制路障、铁栏和两个符文弹跳台。
 出现素材：主角、地面敌人、空中敌人、近战武器、远程武器、全部玩家攻击特效、收集品、地面平台、普通障碍物、弹跳障碍物。
@@ -76,7 +76,7 @@ BOSS行动音效：Heavy footfalls, broad wing beats and quiet armored-scale fri
 敌人数：4。收集品数：4。Boss：否。
 
 关卡 3：遗忘地下河
-背景：Wide empty underground river cavern, layered wet rock walls, distant chains, small luminous fungi and a calm teal water reflection; clear side-scrolling route, environment only.
+背景：Wide empty underground river cavern with layered indigo and magenta rock walls, bright turquoise water, golden chains, lime-and-coral luminous fungi and sparkling reflections; vivid colored lighting, crisp side-scrolling route, no muddy gray wash, environment only.
 平台类型：水域低重力。
 障碍物：水边金属尖刺、普通湿岩路障和一个气泡弹跳台。
 出现素材：主角、水中敌人、近战武器、远程武器、全部玩家攻击特效、远程弹射物、收集品、水域、地面平台、普通障碍物、触碰即死障碍物、弹跳障碍物。
@@ -85,7 +85,7 @@ BOSS行动音效：Heavy footfalls, broad wing beats and quiet armored-scale fri
 敌人数：5。收集品数：4。Boss：否。
 
 关卡 4：星尘法师塔
-背景：Wide empty upper tower chamber, distant bookcases, geometric magic circles on the rear wall, tall windows showing a star field and restrained violet lightning outside; open aerial traversal space, environment only.
+背景：Wide empty upper tower chamber with rich cobalt bookcases, glowing cyan-and-gold magic circles, coral crystal accents and tall windows showing a deep sapphire star field with vivid violet lightning; sharp colorful layers and open aerial traversal space, environment only.
 平台类型：大气漂浮。
 障碍物：漂浮符文平台、金属尖刺和普通石制路障。
 出现素材：主角、空中敌人、近战武器、远程武器、全部玩家攻击特效、远程弹射物、收集品、大气漂浮平台、普通障碍物、触碰即死障碍物。
@@ -94,7 +94,7 @@ BOSS行动音效：Heavy footfalls, broad wing beats and quiet armored-scale fri
 敌人数：6。收集品数：5。Boss：否。
 
 关卡 5：熔火圣殿
-背景：Wide empty volcanic sanctuary, distant lava river, black basalt arches, dragon-bone shapes embedded in the rear wall and dark red clouds; broad uncluttered central boss arena, environment only.
+背景：Wide empty volcanic sanctuary with brilliant orange lava, deep cobalt basalt arches, magenta mineral highlights, golden dragon-bone shapes and saturated crimson-violet clouds; luminous colored rim light, crisp silhouettes and a broad uncluttered central boss arena, environment only.
 平台类型：地面。
 障碍物：熔岩尖刺、普通黑岩路障和热气弹跳台。
 出现素材：主角、地面敌人、空中敌人、BOSS、全部武器、全部攻击特效、远程弹射物、收集品、地面平台、普通障碍物、触碰即死障碍物、弹跳障碍物。

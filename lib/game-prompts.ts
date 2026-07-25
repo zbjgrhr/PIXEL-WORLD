@@ -6,6 +6,7 @@ export type GameAssetType = AssetType
 export type CutoutMode = 'checkerboard' | 'chroma-green'
 
 const COMMON_STYLE = '2D side-scrolling game asset, cohesive 16-bit pixel art, crisp hard pixel edges, no antialiasing, orthographic side view, game-ready readability'
+const COLOR_CONTRACT = 'bright high-saturation color harmony, luminous clean midtones, strong warm-cool separation, colorful readable shadows, crisp contrast, no gray veil, no muddy brown wash, no faded pastel fog; even night and dungeon scenes use vivid colored lighting and clearly separated layers unless the user explicitly requests monochrome art'
 const ISOLATED_BASE = 'exactly one isolated subject, centered, fully visible, generous empty margin, no crop, no text, no logo, no UI, no frame, no border, no scene'
 const SCENE_NEGATIVE = 'people, characters, hero, enemies, monsters, creatures, weapons, pickups, obstacles in foreground, UI, text, logo, border, frame'
 const SPRITE_NEGATIVE = 'environment, scenery, landscape, sky, ground, floor, platform, architecture, buildings, trees, plants, furniture, multiple subjects, duplicate subject, border, frame, card, UI panel, text, logo, watermark, cast shadow extending into a scene'
@@ -55,7 +56,7 @@ export function getPositiveTemplate(
   const isolated = `${COMMON_STYLE}, ${ISOLATED_BASE}, ${isolationBackground(providerId, model)}`
   switch (type) {
     case 'background':
-      return `${COMMON_STYLE}, wide 16:9 parallax-ready environment background, clear traversal corridor, atmospheric depth, environment only`
+      return `${COMMON_STYLE}, ${COLOR_CONTRACT}, wide 16:9 parallax-ready environment background, sharp pixel detail from foreground to horizon, clear traversal corridor, colorful layered parallax depth, environment only`
     case 'ground':
       return `${COMMON_STYLE}, seamless tileable side-view ground material texture, texture fills the entire canvas edge-to-edge, one material family only, no empty area`
     case 'character':
@@ -82,7 +83,7 @@ export function getNegativeTemplate(
   providerId: ProviderId,
   model?: string,
 ): string {
-  const rendering = '3D render, photorealistic, vector art, smooth gradients, blurry, low resolution, antialiasing'
+  const rendering = '3D render, photorealistic, vector art, smooth gradients, blurry, low resolution, antialiasing, desaturated gray wash, muddy palette, low contrast, fog veil, washed-out highlights'
   if (type === 'background') return `${rendering}, ${SCENE_NEGATIVE}`
   if (type === 'ground') {
     return `${rendering}, ${SCENE_NEGATIVE}, sky, horizon, buildings, plants, decorations, transparent area, checkerboard, isolated object, perspective scene, top-down map`
@@ -108,7 +109,7 @@ export function buildGamePrompt(
 
   switch (type) {
     case 'background':
-      subject = `World identity: ${spec.world}. This level environment only: ${level.environment}. Do not depict the hero, enemies, boss, weapons, collectibles, ground tiles, or isolated obstacles.`
+      subject = `World identity: ${spec.world}. This level environment only: ${level.environment}. Use vivid biome colors, luminous atmosphere and crisp depth separation without a gray or white haze. Do not depict the hero, enemies, boss, weapons, collectibles, ground tiles, or isolated obstacles.`
       break
     case 'ground':
       subject = `Ground material only: ${level.ground}. Do not depict scenery, horizon, architecture, characters, creatures, weapons, plants, props, or obstacles.`
@@ -154,10 +155,10 @@ export function buildPlannedAssetPrompt(
   const sharedStyle = style(spec)
   const requestedAsset = cleanPromptFragment(asset.prompt)
   if (asset.kind === 'spriteSheet') {
-    return `${COMMON_STYLE}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. This asset only: ${requestedAsset}. Create exactly one neutral standing frame on ${isolationBackground(providerId, model)}. Show the complete character from head to feet at a readable side-view game scale, with generous safe margin and a stable ground baseline. No portrait crop, close-up, missing body part, panel border, text, scenery, separate prop, or extra character.`
+    return `${COMMON_STYLE}. ${COLOR_CONTRACT}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. This asset only: ${requestedAsset}. Create exactly one neutral standing frame on ${isolationBackground(providerId, model)}. Show the complete character from head to feet at a readable side-view game scale, with generous safe margin and a stable ground baseline. No portrait crop, close-up, missing body part, panel border, text, scenery, separate prop, or extra character.`
   }
   const base = getPositiveTemplate(generationType, providerId, model)
-  return `${base}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. This asset only: ${requestedAsset}. Generate only this one category and never merge it with a character, scene, weapon, creature, platform, obstacle, projectile, pickup, or effect from another category.`
+  return `${base}. ${COLOR_CONTRACT}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. This asset only: ${requestedAsset}. Generate only this one category and never merge it with a character, scene, weapon, creature, platform, obstacle, projectile, pickup, or effect from another category.`
 }
 
 function animationActionInstruction(pose: AnimationClipPose, asset: AssetDefinition, spec: GameSpec): string {
@@ -198,7 +199,7 @@ export function buildAnimationClipPrompt(
   const frameLayout = clip.frameCount === 1
     ? 'Create exactly one frame on one canvas.'
     : `Create one horizontal animation strip containing exactly ${clip.frameCount} equal-width frames in one row, ordered from left to right.`
-  return `${COMMON_STYLE}. ${ORIGINALITY}. Theme label: ${theme}. Shared visual contract: ${style(spec)}. Character identity only: ${requestedAsset}. Action: ${animationActionInstruction(pose, asset, spec)} ${frameLayout} Use ${isolationBackground(providerId, model)}. Every frame must show the same complete character from the highest point of the head, hair, horns or wings to the lowest point of both feet, with generous safe margin on all four sides. Keep identical face, anatomy, costume, colors, side-view direction, camera scale, canvas alignment and ground baseline. Each frame occupies its own equal panel. No portrait crop, close-up, missing body part, panel border, text, label, scenery, ground, unrelated weapon, extra character, duplicate body, motion smear across panels, or content crossing a panel boundary.`
+  return `${COMMON_STYLE}. ${COLOR_CONTRACT}. ${ORIGINALITY}. Theme label: ${theme}. Shared visual contract: ${style(spec)}. Character identity only: ${requestedAsset}. Action: ${animationActionInstruction(pose, asset, spec)} ${frameLayout} Use ${isolationBackground(providerId, model)}. Every frame must show the same complete character from the highest point of the head, hair, horns or wings to the lowest point of both feet, with generous safe margin on all four sides. Keep identical face, anatomy, costume, colors, side-view direction, camera scale, canvas alignment and ground baseline. Each frame occupies its own equal panel. No portrait crop, close-up, missing body part, panel border, text, label, scenery, ground, unrelated weapon, extra character, duplicate body, motion smear across panels, or content crossing a panel boundary.`
 }
 
 export function buildModerationSafeAnimationClipPrompt(
@@ -245,5 +246,5 @@ export function buildModerationSafePlannedAssetPrompt(
   if (asset.kind === 'spriteSheet') {
     return `${COMMON_STYLE}. ${ORIGINALITY}. Family-friendly non-graphic game art. ${catalogPrompt}. One complete neutral standing frame on ${isolationBackground(providerId, model)}. Fixed side-view game scale and baseline, complete head-to-feet body visible with generous empty margin. No injury, no blood, no portrait crop, names, text, logo, scenery, extra subject, or panel border.`
   }
-  return `${base}. ${ORIGINALITY}. Family-friendly non-graphic game art. ${catalogPrompt}. Use a simple dark-neutral and cyan-orange pixel palette. One asset only, no injury, no blood, no names, no story, no text, no logo, no mixed categories.`
+  return `${base}. ${ORIGINALITY}. Family-friendly non-graphic game art. ${catalogPrompt}. Use a clear colorful jewel-tone pixel palette with luminous midtones and strong silhouette contrast; avoid gray or muddy color grading. One asset only, no injury, no blood, no names, no story, no text, no logo, no mixed categories.`
 }
