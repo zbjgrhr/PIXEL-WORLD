@@ -14,6 +14,7 @@ import { isStructuredPromptBlank } from '@/lib/asset-catalog'
 interface OptimizeRequest {
   prompt?: string
   theme?: string
+  story?: string
   levelCount?: number
   provider?: ProviderId
   apiKey?: string
@@ -28,6 +29,7 @@ Rules:
 - Every image prompt must describe one original, non-branded design. Never mention or imitate an existing game, film, anime, character, franchise, artist, studio, logo, trademark, or living person.
 - Keep image prompts concise. Do not copy the world story or another level's environment into an isolated asset prompt.
 - Preserve the user's theme and important creative choices.
+- The separately supplied game title and story are locked, highest-priority user intent. Every generated world, backgroundStory, hero goal and level must support them without changing their meaning.
 - Produce coherent art direction, palette, lighting, and pixel scale shared by all assets.
 - Unless the user explicitly requests monochrome or muted art, use bright high-saturation color harmony, luminous clean midtones, colorful readable shadows and crisp depth separation. Even night, castle and dungeon levels must avoid gray haze, muddy grading and washed-out highlights.
 - Write backgroundStory as a vivid 120-180 word game introduction with a clear conflict, the hero's goal, the collectible's importance, and the final boss. Do not describe UI or controls.
@@ -115,11 +117,15 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as OptimizeRequest
     const theme = body.theme?.trim() || 'Pixel World'
+    const story = body.story?.trim().slice(0, 12000) || ''
     const levelCount = Math.min(10, Math.max(1, body.levelCount || 3))
     const submittedPrompt = body.prompt?.trim() || ''
-    const prompt = isStructuredPromptBlank(submittedPrompt)
+    const basePrompt = isStructuredPromptBlank(submittedPrompt)
       ? `Create an original colorful ${levelCount}-level pixel platform adventure. Fill every required GameSpec V3 field with a coherent hero, melee and ranged combat, enemies, collectibles, distinct level environments, and a final boss. Keep every visual asset isolated and game-ready.`
       : submittedPrompt
+    const prompt = story
+      ? `游戏标题：${theme}\n世界观与故事：${story}\n背景故事：${story}\n\n${basePrompt}`
+      : basePrompt
 
     const fallback = createFallbackGameSpec(prompt, theme, levelCount)
     const provider = body.provider || 'dashscope'
@@ -137,7 +143,7 @@ export async function POST(request: NextRequest) {
     let spec = fallback
     let source: 'ai' | 'local' | 'template' = 'local'
     let warning: string | undefined
-    const knownTemplate = PROMPT_TEMPLATES.find((template) => template.prompt.trim() === prompt)
+    const knownTemplate = PROMPT_TEMPLATES.find((template) => template.prompt.trim() === submittedPrompt)
 
     if (knownTemplate) {
       // The bundled template is already exhaustive and category-safe. Keeping it

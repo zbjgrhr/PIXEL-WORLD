@@ -569,33 +569,7 @@ body {
 .preview-empty-message p { margin: 0; color: #426584; line-height: 1.65; }
 .preview-empty-kicker { color: #6a4bdd !important; font-size: 10px; font-weight: 900; letter-spacing: .15em; }
 .preview-empty-icon {
-  display: grid;
-  width: 52px;
-  height: 52px;
-  margin: 0 auto 10px;
-  place-items: center;
-  border-radius: 16px;
-  background: linear-gradient(135deg, #3ee2f1, #6e65ee 55%, #ff78bb);
-  color: white;
-  box-shadow: 0 10px 22px rgba(72,93,222,.32);
-  animation: iconBob 3.8s ease-in-out infinite;
-}
-
-.preview-empty-particles span {
-  position: absolute;
-  width: 10px;
-  height: 10px;
-  border: 2px solid #fff;
-  background: #ffe34f;
-  box-shadow: 0 0 16px currentColor;
-  animation: previewPixelDrift 9s linear infinite;
-}
-
-.preview-empty-particles span:nth-child(1) { left: 8%; top: 18%; color: #ffe34f; }
-.preview-empty-particles span:nth-child(2) { left: 22%; top: 73%; color: #ff78bb; animation-delay: -2s; }
-.preview-empty-particles span:nth-child(3) { left: 40%; top: 12%; color: #78f6ff; animation-delay: -5s; }
-.preview-empty-particles span:nth-child(4) { left: 59%; top: 82%; color: #b9ff5e; animation-delay: -6.5s; }
-.preview-empty-particles span:nth-child(5) { left: 77%; top: 19%; color: #a78bff; animation-delay: -4s; }
+  dﬂn≠¢Gß≤⁄Óù∆≠y–77%; top: 19%; color: #a78bff; animation-delay: -4s; }
 .preview-empty-particles span:nth-child(6) { left: 91%; top: 66%; color: #ff8a54; animation-delay: -7.5s; }
 .preview-empty-particles span:nth-child(7) { left: 13%; top: 48%; color: #65eaff; animation-delay: -3.2s; }
 .preview-empty-particles span:nth-child(8) { left: 68%; top: 43%; color: #ff78bb; animation-delay: -1.3s; }
@@ -848,16 +822,33 @@ body {
   color: white;
 }
 
-.space-theme-nav span {
+.space-theme-nav a {
   padding: 7px 13px;
   border-radius: 4px;
+  color: inherit;
   font-size: 12px;
   font-weight: 700;
+  text-decoration: none;
   text-shadow: 0 1px 5px rgba(0,0,0,.4);
 }
 
-.space-theme-nav span.is-active,
-.space-theme-nav span:hover { background: rgba(255,255,255,.2); }
+.space-theme-nav a.is-active,
+.space-theme-nav a:hover,
+.space-theme-nav a:focus-visible { background: rgba(255,255,255,.2); }
+
+.section-anchor,
+#world-home,
+#game-idea,
+#agent-studio,
+#asset-workshop,
+#preview-publish { scroll-margin-top: 18px; }
+
+.nav-section-placeholder {
+  color: var(--world-muted);
+  line-height: 1.7;
+}
+
+.nav-section-placeholder p { margin: 8px 0 0; }
 
 .theme-particles {
   position: fixed;
@@ -1063,7 +1054,7 @@ body {
   .portal-header { min-height: 210px; margin: 8px 8px 0; flex-basis: 210px; }
   .portal-header-copy { width: calc(100% - 40px); margin: 24px 20px 0; }
   .space-theme-nav { gap: 0; padding: 0 10px; overflow-x: auto; }
-  .space-theme-nav span { white-space: nowrap; }
+  .space-theme-nav a { white-space: nowrap; }
   .world-content-frame { margin: 0 8px 8px; }
   .game-cover-content { width: calc(100% - 36px); align-items: stretch; flex-direction: column; gap: 22px; }
   .game-cover-menu { width: 100%; flex: none; }

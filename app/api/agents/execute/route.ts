@@ -40,15 +40,17 @@ const ROLE_TOKEN_BUDGET: Record<AgentRole, number> = {
   mechanics: 3200,
   artDirector: 2800,
   levelDesigner: 4600,
-  integrator: 11000,
+  integrator: 4200,
   consistencyCritic: 2800,
   engineQa: 2800,
-  revision: 9000,
-  assetCoordinator: 4200,
+  revision: 4600,
+  assetCoordinator: 3200,
   visualQa: 2400,
   playtest: 2400,
   publisher: 1800,
 }
+
+const MODEL_TIMEOUT_MS = 32_000
 
 class AgentUpstreamError extends Error {
   constructor(readonly status: number, message: string, readonly recoverable: boolean) {
@@ -95,30 +97,43 @@ async function callModel(
   user: string,
   responseFormat = true,
 ): Promise<ChatPayload> {
-  const response = await fetch(endpoint(request.provider), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-      ...(request.provider === 'openrouter' ? {
-        'HTTP-Referer': process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000',
-        'X-Title': 'Pixel World Agent Studio',
-      } : {}),
-    },
-    body: JSON.stringify({
-      model: request.model,
-      temperature: request.role === 'consistencyCritic' || request.role === 'engineQa' ? 0.1 : 0.25,
-      max_tokens: ROLE_TOKEN_BUDGET[request.role],
-      ...(responseFormat ? { response_format: { type: 'json_object' } } : {}),
-      messages: [
-        { role: 'system', content: system },
-        {
-          role: 'user',
-          content: request.role === 'visualQa' && agentModelSupportsVision(request.provider, request.model) ? imageContent(user, request.imageUrls || []) : user,
-        },
-      ],
-    }),
-  })
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS)
+  let response: Response
+  try {
+    response = await fetch(endpoint(request.provider), {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        ...(request.provider === 'openrouter' ? {
+          'HTTP-Referer': process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000',
+          'X-Title': 'Pixel World Agent Studio',
+        } : {}),
+      },
+      body: JSON.stringify({
+        model: request.model,
+        temperature: request.role === 'consistencyCritic' || request.role === 'engineQa' ? 0.1 : 0.25,
+        max_tokens: ROLE_TOKEN_BUDGET[request.role],
+        ...(responseFormat ? { response_format: { type: 'json_object' } } : {}),
+        messages: [
+          { role: 'system', content: system },
+          {
+            role: 'user',
+            content: request.role === 'visualQa' && agentModelSupportsVision(request.provider, request.model) ? imageContent(user, request.imageUrls || []) : user,
+          },
+        ],
+      }),
+    })
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new AgentUpstreamError(504, `Agent model timed out after ${MODEL_TIMEOUT_MS / 1000} seconds.`, true)
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
   if (!response.ok) {
     const detail = (await response.text()).slice(0, 1000)
     if (response.status === 400 && responseFormat && /response.format|response_format|json.object/i.test(detail)) {
@@ -168,6 +183,67 @@ function normalizedSpec(request: AgentExecuteRequest, candidate: unknown): GameS
   const fallback = currentSpec(request)
   const normalized = normalizeGameSpec(candidate, fallback, request.levelCount)
   return preserveExplicitPromptFields(stabilizeGameSpec(normalized), fallback, request.sourcePrompt)
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function nonEmptyText(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback
+}
+
+function deterministicIntegratedSpec(request: AgentExecuteRequest): GameSpec {
+  const base = currentSpec(request)
+  const brief = objectValue(request.artifacts.brief)
+  const narrative = objectValue(request.artifacts.narrative)
+  const mechanics = objectValue(request.artifacts.mechanics)
+  const art = objectValue(request.artifacts.artDirection)
+  const levelPlan = objectValue(request.artifacts.levelPlan)
+  const plannedLevels = Array.isArray(levelPlan.levels) && levelPlan.levels.length === request.levelCount
+    ? levelPlan.levels
+    : base.levels
+  const candidate = {
+    ...base,
+    title: nonEmptyText(brief.title, base.title),
+    world: nonEmptyText(narrative.world, base.world),
+    backgroundStory: nonEmptyText(narrative.backgroundStory, base.backgroundStory),
+    visualStyle: {
+      ...base.visualStyle,
+      artDirection: nonEmptyText(art.artDirection, base.visualStyle.artDirection),
+      palette: nonEmptyText(art.palette, base.visualStyle.palette),
+      lighting: nonEmptyText(art.lighting, base.visualStyle.lighting),
+      pixelScale: nonEmptyText(art.pixelScale, base.visualStyle.pixelScale),
+    },
+    hero: objectValue(mechanics.hero),
+    weapon: objectValue(mechanics.weapon),
+    enemies: Array.isArray(mechanics.enemies) && mechanics.enemies.length ? mechanics.enemies : base.enemies,
+    boss: objectValue(mechanics.boss),
+    collectible: objectValue(mechanics.collectible),
+    levels: plannedLevels,
+  }
+  return normalizedSpec(request, candidate)
+}
+
+function localIntegratorResponse(request: AgentExecuteRequest, error: unknown): AgentExecuteResponse {
+  const spec = request.role === 'integrator' ? deterministicIntegratedSpec(request) : currentSpec(request)
+  const issues = inspectGameSpec(spec, 'engineQa')
+  const reason = error instanceof Error ? error.message : 'upstream Agent unavailable'
+  return {
+    success: true,
+    data: {
+      role: request.role,
+      artifact: { spec, localFallback: true },
+      summary: request.role === 'integrator'
+        ? `云端整合请求未能及时返回，已由本地可靠整合器完成 GameSpec V3，后续评审可以继续。原因：${reason}`.slice(0, 1200)
+        : `云端修订请求未能及时返回，已保留并重新校验当前 GameSpec V3，后续流程可以继续。原因：${reason}`.slice(0, 1200),
+      issues,
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      provider: request.provider,
+      model: request.model,
+    },
+    timestamp: new Date().toISOString(),
+  }
 }
 
 function normalizeArtifact(
@@ -284,6 +360,10 @@ export async function POST(nextRequest: NextRequest) {
       timestamp: new Date().toISOString(),
     } satisfies AgentExecuteResponse)
   } catch (error) {
+    const upstreamRejectedPermanently = error instanceof AgentUpstreamError && !error.recoverable
+    if (body && (body.role === 'integrator' || body.role === 'revision') && !upstreamRejectedPermanently) {
+      return NextResponse.json(localIntegratorResponse(body, error))
+    }
     const recoverable = error instanceof AgentUpstreamError
       ? error.recoverable
       : error instanceof Error && /fetch|network|socket|ECONN|ENOTFOUND|timeout/i.test(error.message)

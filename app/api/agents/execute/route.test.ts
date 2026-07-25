@@ -68,4 +68,30 @@ describe('POST /api/agents/execute', () => {
     expect(data.data.artifact.spec.levels).toHaveLength(3)
     expect(data.data.artifact.spec.assets.length).toBeGreaterThan(0)
   })
+
+  it('uses the deterministic local integrator when the upstream integration request times out', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('Gateway Timeout', { status: 504 })))
+
+    const request = new Request('http://localhost/api/agents/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        runId: 'timeout-run', taskId: 'integrator-r1', role: 'integrator', round: 1,
+        provider: 'openrouter', model: 'google/gemini-2.5-flash', apiKey: 'sk-test-only',
+        sourcePrompt: '游戏标题：星光救援\n世界观与故事：勇士收集钥匙并救出公主。',
+        projectName: '星光救援', levelCount: 2, artifacts: {
+          brief: { title: '星光救援', playerFantasy: '勇士', audience: 'players', pillars: ['救援'], explicitRequirements: ['两关'], constraints: [], levelCount: 2 },
+          narrative: { world: '星光群岛', backgroundStory: '勇士收集钥匙并救出公主。' },
+        },
+      }),
+    })
+
+    const response = await POST(request as never)
+    const data = await response.json()
+    expect(response.status).toBe(200)
+    expect(data.success).toBe(true)
+    expect(data.data.artifact.localFallback).toBe(true)
+    expect(data.data.artifact.spec.title).toBe('星光救援')
+    expect(data.data.artifact.spec.levels).toHaveLength(2)
+  })
 })

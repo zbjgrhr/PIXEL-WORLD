@@ -9,7 +9,11 @@ import { buildStructuredPrompt } from '@/lib/asset-catalog'
 const { Text } = Typography
 const { TextArea } = Input
 
-const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ creationMode = 'agent', onCreationModeChange, customThemeName, onThemeNameChange, customPrompt, onPromptChange, levelCount = 3, onLevelCountChange, onOptimizePrompt, isOptimizing = false, optimizedSpec, hasSavedDraft = false, onRestoreDraft }) => {
+function templateStory(prompt: string): string {
+  return prompt.match(/^背景故事：\s*(.+)$/m)?.[1]?.trim() || ''
+}
+
+const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ creationMode = 'agent', onCreationModeChange, customThemeName, onThemeNameChange, customStory, onStoryChange, customPrompt, onPromptChange, levelCount = 3, onLevelCountChange, onOptimizePrompt, isOptimizing = false, optimizedSpec, hasSavedDraft = false, onRestoreDraft }) => {
   const handleTemplateSelect = (templateId: string) => {
     const template = PROMPT_TEMPLATES.find((item) => item.id === templateId)
     if (!template) return
@@ -17,6 +21,7 @@ const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ creationMode = 'agent
     // be the final update and must never be overwritten by the level change.
     onLevelCountChange?.(template.levelCount)
     onThemeNameChange(template.themeName)
+    onStoryChange(templateStory(template.prompt))
     onPromptChange(template.prompt)
     message.success(`已加载模板：${template.name}`)
   }
@@ -41,6 +46,17 @@ const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ creationMode = 'agent
     <div>
       <Text strong style={{ display: 'block', marginBottom: 8 }}>Game Name / 游戏名称</Text>
       <Input value={customThemeName} onChange={(event) => onThemeNameChange(event.target.value)} placeholder="例如：龙之城堡" />
+    </div>
+    <div>
+      <Text strong style={{ display: 'block', marginBottom: 8 }}>Story / 故事</Text>
+      <TextArea
+        value={customStory}
+        onChange={(event) => onStoryChange(event.target.value)}
+        rows={4}
+        placeholder="写下主角、目标、主要冲突与结局方向。一键优化和 Agent 集群都会围绕游戏名称与这段故事展开。"
+        style={{ width: '100%', lineHeight: 1.65 }}
+      />
+      <Text type="secondary" style={{ fontSize: 12 }}>这部分属于你的核心设定，优化和评审只会补充细节，不会擅自改写主题。</Text>
     </div>
     <div className="structured-prompt-section">
       <div className="structured-prompt-heading">
