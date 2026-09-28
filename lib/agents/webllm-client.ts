@@ -1,4 +1,5 @@
 import type { ChatPayload } from '@/lib/agents/execution'
+import { buildWebLlmCreativeRequest, parseWebLlmCreativePatch, type WebLlmCreativePatch } from '@/lib/agents/webllm-lite'
 
 type WebLlmEngine = Awaited<ReturnType<typeof import('@mlc-ai/web-llm')['CreateMLCEngine']>>
 
@@ -58,4 +59,11 @@ export async function webLlmCompletion(model: string, system: string, user: stri
     max_tokens: maxTokens, temperature: 0.2, stream: false })
   return { choices: [{ message: { content: response.choices[0]?.message?.content || '' } }],
     usage: { prompt_tokens: response.usage?.prompt_tokens || 0, completion_tokens: response.usage?.completion_tokens || 0, total_tokens: response.usage?.total_tokens || 0 } }
+}
+
+export async function createWebLlmCreativePatch(model: string, projectName: string, story: string, inspirations: string[]): Promise<WebLlmCreativePatch> {
+  const prompt = buildWebLlmCreativeRequest(projectName, story, inspirations)
+  const payload = await webLlmCompletion(model, prompt.system, prompt.user, 480)
+  const content = payload.choices?.[0]?.message?.content
+  return parseWebLlmCreativePatch(typeof content === 'string' ? content : '')
 }

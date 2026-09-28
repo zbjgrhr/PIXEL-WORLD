@@ -33,9 +33,12 @@ import InspirationLibrary, { type InspirationTarget } from './ui/InspirationLibr
 import ThemesList from './ThemesList'
 import { getApiPlatformGuide } from '@/configs/api-platform-guide'
 import { mergeProjectBrief } from '@/lib/project-brief'
-import { serializeGameSpec } from '@/lib/game-spec'
+import { preserveExplicitPromptFields, serializeGameSpec } from '@/lib/game-spec'
 import { isLocalAgentProvider } from '@/lib/agents/config'
 import { executeLocalAgentTask } from '@/lib/agents/local-client'
+import { createWebLlmCreativePatch, isWebLlmReady } from '@/lib/agents/webllm-client'
+import { applyWebLlmCreativePatch } from '@/lib/agents/webllm-lite'
+import { selectedInspirationTexts } from '@/configs/inspiration-packs'
 import type {
   AnimationClipPose,
   AgentExecuteRequest,
@@ -343,7 +346,21 @@ const SideMenu: React.FC<SideMenuProps> = ({
       let modelWarning = ''
       const connection = textOptimizer
       if (connection.provider && connection.model) {
-        if (!isLocalAgentProvider(connection.provider) && !connection.apiKey.trim()) {
+        const sourceBrief = mergeProjectBrief(prompt, projectName, story)
+        if (connection.provider === 'webllm') {
+          if (!isWebLlmReady(connection.model)) {
+            modelWarning = 'WebLLM 尚未准备完成，已使用稳定的本地草案。先在文字策划中准备浏览器模型，再进行轻量灵感补全。'
+          } else {
+            try {
+              const patch = await createWebLlmCreativePatch(connection.model, projectName, story, selectedInspirationTexts(sourceBrief))
+              spec = preserveExplicitPromptFields(applyWebLlmCreativePatch(spec, patch), spec, sourceBrief)
+              usedModel = true
+              modelWarning = 'WebLLM 已补充世界、主角与画风方向；关卡和素材规格由本地规则稳定生成。'
+            } catch (error) {
+              modelWarning = `WebLLM 轻量补全失败，已使用本地草案：${error instanceof Error ? error.message : '未知错误'}`
+            }
+          }
+        } else if (!isLocalAgentProvider(connection.provider) && !connection.apiKey.trim()) {
           modelWarning = '文字服务缺少 API Key，已使用本地草案。'
         } else {
           try {
@@ -356,7 +373,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
               model: connection.model,
               apiKey: connection.apiKey.trim(),
               baseUrl: connection.baseUrl,
-              sourcePrompt: mergeProjectBrief(prompt, projectName, story),
+              sourcePrompt: sourceBrief,
               projectName,
               levelCount,
               baseSpec: spec,

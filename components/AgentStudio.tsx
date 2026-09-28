@@ -316,7 +316,18 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
     if (!isLocalAgentProvider(provider) && !activeKey) return void message.error('请先填写文字 Agent API Key。')
     if (!(provider === 'custom' ? customAgent.model : model).trim()) return void message.error('请先检测并选择模型。')
     if (!baseSpec) return void message.error('请先补全提示词并检查草案，再启动 Agent 集群。')
-    await cluster.start({ provider, model: provider === 'custom' ? customAgent.model.trim() : model, baseUrl: activeBaseUrl }, activeKey, baseSpec)
+    const modelLock = { provider, model: provider === 'custom' ? customAgent.model.trim() : model, baseUrl: activeBaseUrl }
+    if (provider === 'webllm') {
+      if (webLlmSetup.state !== 'ready') return void message.error('请先准备浏览器模型，再进行轻量灵感补全。')
+      await cluster.reviewLocalDraft(baseSpec, modelLock)
+      message.success('已用本地规则检查完整草案，等待你审核后制作素材。')
+      return
+    }
+    const finished = await cluster.start(modelLock, activeKey, baseSpec)
+    if (isLocalAgentProvider(provider) && finished.status === 'failed') {
+      await cluster.reviewLocalDraft(baseSpec, modelLock)
+      message.warning('本机模型无法完成完整 Agent 评审，已切换为可审核的本地草案。')
+    }
   }
 
   const runAgentAction = async (action: () => Promise<unknown>) => {
@@ -398,6 +409,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
           <p>{webLlmSetup.text || '先检查浏览器，再准备所选模型。模型下载源不可访问时会显示错误，不会把等待伪装成测试。'}</p>
           <Button type="primary" loading={webLlmSetup.state === 'preparing'} disabled={!model || webLlmSetup.state === 'ready'} onClick={() => { void prepareBrowserModel() }}>{webLlmSetup.state === 'ready' ? '浏览器模型已准备' : '准备模型'}</Button>
         </div>}
+        {provider === 'webllm' && <Alert type="info" showIcon message="WebLLM 的工作方式" description="浏览器模型只做名称、故事和灵感的轻量补全；完整 GameSpec、关卡与素材清单由本地规则生成并交给你审核。它不会运行完整 Agent 集群，因此不会因 4096 上下文限制卡住。" />}
         {localCheck.state !== 'idle' && <Alert type={localCheck.state === 'ready' ? 'success' : localCheck.state === 'failed' ? 'error' : 'info'} showIcon message={localCheck.text} style={{ marginTop: 2 }} />}
       </>}
       {selected && accessMode === 'ready' && !legacyManagedRun && <Collapse size="small" items={[{ key: 'ready-help', label: '安装与使用说明', children: <ReadyAgentGuide provider={provider} /> }]} />}
@@ -405,15 +417,15 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
       {selected && provider !== 'custom' && provider !== 'managed' && !isLocalAgentProvider(provider) && <Collapse size="small" items={[{ key: 'api-help', label: '平台接入说明', children: <ApiPlatformGuide selectedId={provider} mode="agent" /> }]} />}
 
       <div className="agent-workflow-action">
-        <Text strong>先补全构想，再启动 Agent 评审</Text>
-        <Text type="secondary">{!briefReady ? '请先在游戏构想中填写名称和故事。' : baseSpec ? '草案已建立，可以检查后启动 Agent 集群；重新补全会更新草案。' : selected ? '已选择文字工具。补全会调用当前模型；云端服务可能收费。' : '未选择文字工具时会生成本地草案；运行 Agent 前还需选择模型。'}</Text>
-        <Button type="primary" icon={<Sparkles size={14} />} loading={isOptimizing} disabled={!briefReady || locked || legacyManagedRun} onClick={() => { void onOptimizePrompt?.() }}>
+        <Text strong>{provider === 'webllm' ? '先补全灵感，再检查本地草案' : '先补全构想，再启动 Agent 评审'}</Text>
+        <Text type="secondary">{!briefReady ? '请先在游戏构想中填写名称和故事。' : provider === 'webllm' && webLlmSetup.state !== 'ready' ? '先准备浏览器模型。准备完成后，WebLLM 会轻量补全创意，本地规则会生成完整规格。' : provider === 'webllm' && baseSpec ? '草案已建立。下一步会检查本地草案并进入你的人工审核，不运行完整 Agent 集群。' : baseSpec ? '草案已建立，可以检查后启动 Agent 集群；重新补全会更新草案。' : selected ? '已选择文字工具。补全会调用当前模型；云端服务可能收费。' : '未选择文字工具时会生成本地草案；运行 Agent 前还需选择模型。'}</Text>
+        <Button type="primary" icon={<Sparkles size={14} />} loading={isOptimizing} disabled={!briefReady || locked || legacyManagedRun || (provider === 'webllm' && webLlmSetup.state !== 'ready')} onClick={() => { void onOptimizePrompt?.() }}>
           一键补全并优化提示词
         </Button>
       </div>
       <Space wrap>
         <Button icon={<FlaskConical size={14} />} disabled={!selected || legacyManagedRun || (provider === 'webllm' && webLlmSetup.state !== 'ready')} loading={testing} onClick={() => { void testAgentApi() }}>{!selected ? '选择工具后测试' : provider === 'custom' ? '测试连接' : isLocalAgentProvider(provider) ? '测试文字模型' : '测试 Agent API'}</Button>
-        {(!cluster.run || ['draft', 'failed', 'cancelled'].includes(cluster.run.status)) && <Button type="primary" disabled={!selected || !baseSpec || isOptimizing || legacyManagedRun} icon={<Play size={14} />} onClick={() => { void start() }}>启动 Agent 集群</Button>}
+        {(!cluster.run || ['draft', 'failed', 'cancelled'].includes(cluster.run.status)) && <Button type="primary" disabled={!selected || !baseSpec || isOptimizing || legacyManagedRun || (provider === 'webllm' && webLlmSetup.state !== 'ready')} icon={<Play size={14} />} onClick={() => { void start() }}>{provider === 'webllm' ? '检查草案并进入审核' : '启动 Agent 集群'}</Button>}
         {cluster.run && ['planning', 'reviewing'].includes(cluster.run.status) && <Button icon={<Pause size={14} />} onClick={cluster.pause}>暂停</Button>}
         {cluster.run?.status === 'paused' && <Button type="primary" disabled={legacyManagedRun} icon={<Play size={14} />} onClick={() => { void runAgentAction(() => cluster.resume(activeKey)) }}>继续</Button>}
         {cluster.run && ['planning', 'reviewing', 'paused'].includes(cluster.run.status) && <Button danger icon={<CircleStop size={14} />} onClick={cluster.cancel}>取消</Button>}
