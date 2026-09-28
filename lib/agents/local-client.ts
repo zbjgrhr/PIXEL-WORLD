@@ -36,7 +36,15 @@ export async function testLocalAgentConnection(provider: LocalAgentProviderId, m
   let payload: ChatPayload
   if (provider === 'webllm') {
     if (!isWebLlmReady(model)) throw new Error('请先准备浏览器模型；首次下载完成后再测试文字模型。')
-    payload = await webLlmCompletion(model, CONNECTION_SYSTEM_PROMPT, CONNECTION_USER_PROMPT, 32)
+    let timeout: ReturnType<typeof globalThis.setTimeout> | undefined
+    try {
+      payload = await Promise.race([
+        webLlmCompletion(model, CONNECTION_SYSTEM_PROMPT, CONNECTION_USER_PROMPT, 32),
+        new Promise<never>((_, reject) => { timeout = globalThis.setTimeout(() => reject(new Error('浏览器模型在 20 秒内没有完成短文字测试。请改用 Ollama、LM Studio，或直接使用本地草案继续。')), LOCAL_CONNECTION_TIMEOUT_MS) }),
+      ])
+    } finally {
+      if (timeout) globalThis.clearTimeout(timeout)
+    }
   } else {
     const endpoint = safeLocalBaseUrl(baseUrl || localProviderConfig(provider).baseUrl || '')
     const controller = new AbortController()
