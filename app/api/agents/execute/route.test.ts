@@ -2,7 +2,42 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { POST } from './route'
 
 describe('POST /api/agents/execute', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
+
+  it('refuses historical managed cloud requests before any upstream call', async () => {
+    const upstream = vi.fn()
+    vi.stubGlobal('fetch', upstream)
+    const request = new Request('http://localhost/api/agents/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runId: 'legacy-run', taskId: 'director-r1', role: 'director', round: 1,
+        provider: 'managed', model: 'legacy-model', apiKey: '', sourcePrompt: 'A game', projectName: 'Test', levelCount: 1, artifacts: {} }) })
+    const response = await POST(request as never)
+    expect(response.status).toBe(410)
+    expect(upstream).not.toHaveBeenCalled()
+  })
+
+  it('rejects a private custom Agent endpoint without masking the failure with a local GameSpec', async () => {
+    const request = new Request('http://localhost/api/agents/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runId: 'custom-test', taskId: 'integrator-r1', role: 'integrator', round: 1,
+        provider: 'custom', model: 'my-model', apiKey: 'test-key', baseUrl: 'https://127.0.0.1/v1',
+        sourcePrompt: 'A game', projectName: 'Test', levelCount: 1, artifacts: {} }) })
+    const response = await POST(request as never)
+    const result = await response.json()
+    expect(response.status).toBe(400)
+    expect(result.success).toBe(false)
+    expect(result.data?.artifact?.localFallback).toBeUndefined()
+  })
+
+  it('never spends an ordinary server API key for an anonymous BYOK request', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'server-secret-must-not-be-used')
+    const upstream = vi.fn()
+    vi.stubGlobal('fetch', upstream)
+    const request = new Request('http://localhost/api/agents/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runId: 'no-key-run', taskId: 'director-r1', role: 'director', round: 1,
+        provider: 'openrouter', model: 'google/gemini-2.5-flash', apiKey: '', sourcePrompt: 'A game', projectName: 'Test', levelCount: 1, artifacts: {} }) })
+    const response = await POST(request as never)
+    expect(response.status).toBe(401)
+    expect(upstream).not.toHaveBeenCalled()
+  })
 
   it('executes one short Agent task with the locked text model and returns structured JSON', async () => {
     const upstream = vi.fn(async (_url: string, init?: RequestInit) => {

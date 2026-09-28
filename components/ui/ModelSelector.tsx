@@ -31,6 +31,7 @@ function looksLikeInvalidKey(value: string): boolean {
 }
 
 const ModelSelector: React.FC<ModelSelectorProps> = ({
+  hideProviderSelector = false,
   selectedProvider,
   onProviderChange,
   selectedModel,
@@ -78,7 +79,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
 
   return (
     <>
-      <div>
+      {!hideProviderSelector && <div>
         <Text strong style={{ display: 'block', marginBottom: '8px' }}>
           Provider / 平台
         </Text>
@@ -99,7 +100,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
             </Option>
           })}
         </Select>
-      </div>
+      </div>}
 
       <div>
         <Text strong style={{ display: 'block', marginBottom: '8px' }}>

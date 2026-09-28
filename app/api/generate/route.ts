@@ -13,6 +13,7 @@ import {
 } from '@/lib/image-providers'
 import { ASSET_TYPES } from '@/types'
 import type { AnimationClipPose, AssetDefinition, AssetType, GameSpec, LevelData, ProviderId, SpawnPoint } from '@/types'
+import { CustomEndpointError, validateCustomBaseUrl } from '@/lib/custom-endpoint.server'
 
 interface GenerateRequest {
   theme: string
@@ -22,6 +23,7 @@ interface GenerateRequest {
   types?: AssetType[]
   levelCount?: number
   apiKey?: string
+  customBaseUrl?: string
   spec?: GameSpec
   asset?: AssetDefinition
   animationPose?: AnimationClipPose
@@ -72,6 +74,7 @@ async function generateAsset(
   spec: GameSpec,
   levelIndex: number,
   baseUrl: string,
+  customBaseUrl?: string,
 ): Promise<string> {
   const provider = getImageProvider(providerId)
   const prompt = buildGamePrompt(type, theme, spec, levelIndex, providerId, model)
@@ -81,6 +84,7 @@ async function generateAsset(
     assetType: type,
     apiKey,
     model,
+    baseUrl: customBaseUrl,
   })
   return processImageCutout(originalUrl, type, providerId, model, baseUrl)
 }
@@ -143,6 +147,8 @@ async function generatePlannedAsset(
   baseUrl: string,
   animationPose?: AnimationClipPose,
   referenceImages: string[] = [],
+  onAttempt?: () => Promise<void>,
+  customBaseUrl?: string,
 ): Promise<string> {
   const type = generationTypeForAsset(asset)
   if (!type || (asset.kind !== 'image' && asset.kind !== 'spriteSheet')) {
@@ -170,14 +176,16 @@ async function generatePlannedAsset(
   prompt += referenceGuidance
   let usedModerationRewrite = false
   let lastError: unknown
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < (onAttempt ? 1 : 3); attempt++) {
     try {
+      if (onAttempt) await onAttempt()
       const originalUrl = await provider.generateImage({
         prompt,
         negativePrompt,
         assetType: type,
         apiKey,
         model,
+        baseUrl: customBaseUrl,
         layout: animationPose ? 'animation-strip' : asset.kind === 'spriteSheet' ? 'sprite-sheet' : 'single',
         frameCount,
         referenceImages: safeReferenceImages,
@@ -199,7 +207,7 @@ async function generatePlannedAsset(
         usedModerationRewrite = true
         continue
       }
-      if (!isRetryable(error) || attempt === 2) throw error
+      if (!isRetryable(error) || onAttempt || attempt === 2) throw error
       await new Promise((resolve) => setTimeout(resolve, 700 * 2 ** attempt))
     }
   }
@@ -231,6 +239,7 @@ function generateObstacleLayout(levelId: string, levelIndex: number) {
 }
 
 function errorResponse(error: unknown, provider?: ProviderId, model?: string) {
+  if (error instanceof CustomEndpointError) return NextResponse.json({ success: false, error: error.message, provider, model }, { status: error.status >= 400 && error.status < 600 ? error.status : 502 })
   if (error instanceof ProviderApiKeyError || error instanceof ProviderValidationError) {
     return NextResponse.json(
       { success: false, error: error.message, provider, timestamp: new Date().toISOString() },
@@ -284,6 +293,7 @@ export async function POST(request: NextRequest) {
     providerId = normalized.provider
     modelId = normalized.model
     const apiKey = resolveApiKey(providerId, body.apiKey)
+    const customBaseUrl = providerId === 'custom' ? validateCustomBaseUrl(body.customBaseUrl || '') : undefined
     const fallback = createFallbackGameSpec(prompt, theme, levelCount)
     const spec = normalizeGameSpec(body.spec || fallback, fallback, levelCount)
     const baseUrl = request.nextUrl.origin
@@ -294,6 +304,8 @@ export async function POST(request: NextRequest) {
       const levelIndex = Math.min(levelCount - 1, Math.max(0, body.levelIndex || 0))
       const url = await generatePlannedAsset(
         providerId, modelId, apiKey, asset, theme, spec, levelIndex, baseUrl, animationPose, body.referenceImages,
+        undefined,
+        customBaseUrl,
       )
       const animation = asset.kind === 'spriteSheet' ? (
         normalizeAnimationSpec(asset.animation).layoutVersion === 3
@@ -326,13 +338,14 @@ export async function POST(request: NextRequest) {
         ...spec,
         assets: spec.assets.map((candidate) => candidate.id === completedAsset.id ? completedAsset : candidate),
       }
-      return NextResponse.json({
+      const result = NextResponse.json({
         success: true,
         data: { asset: completedAsset, spec: completedSpec },
         generationId: `asset_${asset.id}_${Date.now()}`,
         timestamp: new Date().toISOString(),
         metadata: { generationTime: (Date.now() - startedAt) / 1000, assetCount: 1, provider: providerId, model: modelId },
       })
+      return result
     }
 
     const assets: Record<string, string> = {
@@ -345,7 +358,7 @@ export async function POST(request: NextRequest) {
       const type = requestedGlobalTypes[index]
       if (index > 0) await new Promise((resolve) => setTimeout(resolve, 500))
       assets[`${type}Url`] = await generateAsset(
-        providerId, modelId, apiKey, type, theme, spec, 0, baseUrl,
+        providerId, modelId, apiKey, type, theme, spec, 0, baseUrl, customBaseUrl,
       )
     }
 
@@ -373,7 +386,7 @@ export async function POST(request: NextRequest) {
         }
         const type = requestedLevelTypes[typeIndex]
         level[`${type}Url` as 'backgroundUrl' | 'groundUrl' | 'obstacleUrl'] = await generateAsset(
-          providerId, modelId, apiKey, type, theme, spec, levelIndex, baseUrl,
+          providerId, modelId, apiKey, type, theme, spec, levelIndex, baseUrl, customBaseUrl,
         )
       }
       levels.push(level)

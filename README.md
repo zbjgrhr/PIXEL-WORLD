@@ -18,18 +18,15 @@ Pixel World 是一个由提示词驱动的 2D 像素动作游戏制作器。使�
 - 本地资产持久化：大图片保存在 IndexedDB；项目元数据保留版本信息，V2 数据会自动迁移到 V3。
 - 离线导出：ZIP 内含 `index.html`、`game.js`、`styles.css`、`project.json` 和全部图片素材；运行时不依赖任何图片 API。
 
-## 使用流程
+## 在原创作流程中选择模型来源
 
-1. 选择 Agent 模式（默认）或传统单次优化模式。
-2. 选择“龙之城堡五关冒险”模板，或填写自己的结构化游戏构想。
-3. Agent 模式下单独选择文字平台和固定模型，填入文字 API Key，并可先执行一次低成本测试。
-4. 启动 Agent 集群；系统完成策划、整合、评审与最多两轮修订后，展示 GameSpec V3、Token 用量和阻断项。
-5. 确认没有阻断项后点击“批准规格并开放生图”。传统模式则直接点击“一键优化提示词”。
-6. 在素材规划区启用、关闭、新增或复制素材，并勾选出现关卡。
-7. 选择图片服务商、固定图片模型和图片 API Key，先点击“测试 API（生成 1 张）”。
-8. 点击“生成已选素材”；任务以两个并发工作线程依次完成。Agent 生图前不会调用任何图片接口。
-9. 生成后可运行 Visual QA、试玩检查和发布检查；重新生成始终需要用户主动确认。
-10. 素材齐全后试玩或 Export ZIP；缺少已启用素材时会停止导出并列出缺失项。
+首页直接进入 Prompt to Play 工作区，默认使用 Agent 集群：填写游戏构想、运行多 Agent 策划与评审、人工批准 GameSpec V3，然后规划图片素材、生成、试玩并导出。传统模式仍可在世界编辑器中切换。选择图片来源不会切换或重置 Agent 工作流。
+
+- **两条独立路径**：文字 Agent 与图片素材各有“使用现成方案”和“连接我的 AI 服务”选项卡。新访客先看到现成方案：图片默认内置像素素材；文字 Agent 需先选工具。旧设置会恢复，切换选项卡也会保留另一边填写的内容。
+- **文字 Agent**：现成方案包括 [Ollama](https://docs.ollama.com/api/openai-compatibility)、[LM Studio](https://lmstudio.ai/docs/developer/openai-compat)、[GPT4All](https://docs.gpt4all.io/gpt4all_api_server/home.html)、[Jan](https://jan.ai/docs/api-server)、[WebLLM](https://github.com/mlc-ai/web-llm)。前四种在本机启动兼容 OpenAI 的服务；WebLLM 在支持 WebGPU 的浏览器里首次下载模型。点击“检测模型”，再点“一键测试 GameSpec”检查复杂 JSON 输出。Jan 本地密码只保留在页面内存中。“连接我的 AI 服务”保留 OpenRouter、OpenAI、DashScope，并增加手动接入。
+- **图片素材**：现成方案包含仓库内置像素 SVG、逐项上传自己的图片和浏览器直连的 ComfyUI Desktop。角色、敌人和 Boss 可以上传单张静态图，也可以按七种动作分别上传横向帧条；图片缓存在浏览器内，并进入离线 ZIP。玩家可主动使用内置素材补齐缺项，已上传图片不会被覆盖。ComfyUI 需启动本地服务并允许当前网页跨域访问。“连接我的 AI 服务”保留 DashScope、OpenAI、OpenRouter、Cloudflare Workers AI、Together AI、腾讯 TokenHub、Pollinations、Hugging Face，并增加手动接入。
+- **手动接入**：文字、图片分别填写可选显示名称、公开 HTTPS API 根地址、模型 ID、API Key。文字接口需兼容 OpenAI 风格的 `/chat/completions` 并返回 Agent 所需的结构化内容；图片接口需兼容 `/images/generations` 并返回 `data[0].b64_json` 或公开可读取的 `data[0].url`。图片测试会实际生成 256×256 小图，可能产生一次服务商费用。服务端拒绝本机和内网地址、跳转以及过大的响应；本机模型仍由浏览器直连。
+本地小模型的输出速度和 GameSpec 稳定性依赖设备与模型；云端通常更稳，但仍需以“一键测试 GameSpec”和实际生成结果为准。ComfyUI 当前使用标准单图工作流；角色动作可以逐项上传帧条，或使用自己的图片 API 生成。
 
 Agent 运行记录、任务状态和 Token 统计保存在浏览器 IndexedDB，刷新后会恢复为可继续的暂停状态。文字与图片 API Key 只进入 `sessionStorage` 和当次请求，不会写入 IndexedDB、项目配置、日志、GitHub 或导出 ZIP。详细设计见 [Agent Cluster 架构](docs/AGENT_CLUSTER.md)。
 
@@ -52,20 +49,9 @@ pnpm dev
 
 打开 `http://localhost:3000`。
 
-也可以在 `.env.local` 中配置服务端密钥：
+页面输入的自备 API Key 只保存在当前浏览器会话中，不写入项目配置、导出 ZIP 或 Git 仓库。公开的 BYOK 路由不会自动使用服务器环境中的普通平台密钥。
 
-```env
-DASHSCOPE_API_KEY=your-key-here
-OPENAI_API_KEY=your-key-here
-OPENROUTER_API_KEY=your-key-here
-TOGETHER_API_KEY=your-key-here
-TENCENT_TOKENHUB_API_KEY=your-key-here
-POLLINATIONS_API_KEY=your-key-here
-HF_TOKEN=hf_your-token-here
-CLOUDFLARE_WORKERS_AI_CREDENTIALS=account-id|api-token
-```
-
-页面输入的 API Key 只保存在当前浏览器会话中，不写入项目配置、导出 ZIP 或 Git 仓库。不要把真实密钥提交到 GitHub；如果密钥曾出现在历史提交中，应在服务商后台撤销并重新生成。
+站点无需配置共享 AI 密钥。用户可以选择内置素材、上传图片或连接自己的模型服务。
 
 ## 图片平台与模型参数
 

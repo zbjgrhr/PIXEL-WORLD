@@ -1,4 +1,4 @@
-import type { AgentProviderId, AgentRole } from '@/types'
+import type { AgentProviderId, AgentRole, LocalAgentProviderId } from '@/types'
 
 export interface AgentTextModelConfig {
   id: string
@@ -46,6 +46,22 @@ export const AGENT_PROVIDERS: AgentProviderConfig[] = [
     ],
   },
 ]
+
+export const LOCAL_AGENT_PROVIDERS: Array<{ id: LocalAgentProviderId; label: string; baseUrl?: string; instructions: string; downloadUrl: string }> = [
+  { id: 'ollama', label: 'Ollama', baseUrl: 'http://127.0.0.1:11434/v1', instructions: '安装 Ollama 并下载模型；浏览器直接连接本机服务。', downloadUrl: 'https://ollama.com/download' },
+  { id: 'lmstudio', label: 'LM Studio', baseUrl: 'http://127.0.0.1:1234/v1', instructions: '在 LM Studio 下载并加载模型，再启动 Local Server。', downloadUrl: 'https://lmstudio.ai/download' },
+  { id: 'gpt4all', label: 'GPT4All', baseUrl: 'http://127.0.0.1:4891/v1', instructions: '在 GPT4All 下载模型并开启 Local API Server。', downloadUrl: 'https://www.nomic.ai/gpt4all' },
+  { id: 'jan', label: 'Jan', baseUrl: 'http://127.0.0.1:1337/v1', instructions: '在 Jan 下载模型并启动 API Server；本地密码只留在当前浏览器会话。', downloadUrl: 'https://jan.ai/download' },
+  { id: 'webllm', label: 'WebLLM', instructions: '无需安装桌面软件；首次在浏览器中下载模型，需要 WebGPU。', downloadUrl: 'https://github.com/mlc-ai/web-llm' },
+]
+
+export function isLocalAgentProvider(provider: AgentProviderId): provider is LocalAgentProviderId {
+  return LOCAL_AGENT_PROVIDERS.some((item) => item.id === provider)
+}
+
+export function localProviderConfig(provider: LocalAgentProviderId) {
+  return LOCAL_AGENT_PROVIDERS.find((item) => item.id === provider)!
+}
 
 export const AGENT_ROLE_LABELS: Record<AgentRole, { en: string; zh: string; description: string }> = {
   director: { en: 'Director', zh: '总控', description: '理解需求并建立创作简报' },

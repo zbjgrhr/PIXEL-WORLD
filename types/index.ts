@@ -1,10 +1,12 @@
 import type { GameTheme } from '@/lib/theme-utils'
 import type { ProviderId } from '@/lib/image-providers/types'
+import type { ReactNode } from 'react'
 
 export type { ProviderId }
 export type { GameTheme } from '@/lib/theme-utils'
 
-export type AgentProviderId = 'openrouter' | 'openai' | 'dashscope'
+export type LocalAgentProviderId = 'ollama' | 'lmstudio' | 'gpt4all' | 'jan' | 'webllm'
+export type AgentProviderId = 'openrouter' | 'openai' | 'dashscope' | 'managed' | 'custom' | LocalAgentProviderId
 export type AgentRole =
   | 'director'
   | 'narrative'
@@ -43,6 +45,7 @@ export type AgentTaskStatus =
 export interface AgentModelLock {
   provider: AgentProviderId
   model: string
+  baseUrl?: string
 }
 
 export interface AgentIssue {
@@ -115,6 +118,7 @@ export interface AgentRun {
   maxReviewRounds: 2
   currentRound: number
   approved: boolean
+  reviewMode?: 'agent' | 'local-draft'
   tasks: AgentTask[]
   artifacts: AgentArtifacts
   createdAt: number
@@ -130,6 +134,8 @@ export interface AgentExecuteRequest {
   provider: AgentProviderId
   model: string
   apiKey: string
+  baseUrl?: string
+  requestId?: string
   sourcePrompt: string
   projectName: string
   levelCount: number
@@ -410,6 +416,7 @@ export interface ProjectHeaderProps {
 }
 
 export interface ModelSelectorProps {
+  hideProviderSelector?: boolean
   selectedProvider: ProviderId
   onProviderChange: (provider: ProviderId) => void
   selectedModel: string
@@ -426,6 +433,7 @@ export interface GenerateImageRequest {
   types: readonly AssetType[]
   levelCount?: number
   apiKey: string
+  customBaseUrl?: string
   spec?: GameSpec
   asset?: AssetDefinition
   animationPose?: AnimationClipPose
@@ -433,6 +441,7 @@ export interface GenerateImageRequest {
 }
 
 export interface ThemeCustomizerProps {
+  inspiration?: ReactNode
   creationMode?: 'agent' | 'classic'
   onCreationModeChange?: (mode: 'agent' | 'classic') => void
   customThemeName: string
@@ -444,6 +453,7 @@ export interface ThemeCustomizerProps {
   levelCount?: number
   onLevelCountChange?: (count: number) => void
   onOptimizePrompt?: () => void
+  onCompleteIdea?: () => void
   isOptimizing?: boolean
   optimizedSpec?: GameSpec | null
   hasSavedDraft?: boolean
@@ -457,6 +467,8 @@ export interface ActionButtonsProps {
   customPrompt: string
   customThemeName: string
   apiKey: string
+  allowWithoutApiKey?: boolean
+  showCreateButton?: boolean
   onCreateTheme: () => void
   onStartGame: () => void
 }
@@ -481,6 +493,7 @@ export interface ThemePreviewProps {
   regeneratingAssetIds?: string[]
   onRegenerateAsset?: (themeId: string, assetId: string, apiKey: string, animationPose?: AnimationClipPose) => Promise<void>
   onUpdateAsset?: (themeId: string, assetId: string, patch: Partial<AssetDefinition>) => void
+  onUploadAsset?: (themeId: string, assetId: string, file: File, pose?: AnimationClipPose) => Promise<void>
   onDeleteTheme?: (themeId: string) => void
 }
 

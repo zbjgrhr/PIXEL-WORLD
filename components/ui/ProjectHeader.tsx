@@ -5,9 +5,6 @@ import type { ProjectHeaderProps } from '@/types'
 
 const NAV_ITEMS = [
   { label: '世界主页', href: '#world-home' },
-  { label: '游戏构想', href: '#game-idea' },
-  { label: '素材工坊', href: '#asset-workshop' },
-  { label: 'Agent Studio', href: '#agent-studio' },
   { label: '预览与发布', href: '#preview-publish' },
 ]
 

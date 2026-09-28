@@ -26,4 +26,16 @@ describe('GameSpec deterministic guardrails', () => {
     expect(backgrounds.every((asset) => /no gray haze|no muddy wash/i.test(asset.prompt))).toBe(true)
     expect(inspectGameSpec(spec).filter((item) => item.severity === 'blocking')).toEqual([])
   })
+
+  it('keeps each new story template and its levels when building a game draft', () => {
+    for (const template of PROMPT_TEMPLATES.slice(1)) {
+      const spec = createFallbackGameSpec(template.prompt, template.themeName, template.levelCount)
+      expect(spec.title).toBe(template.themeName)
+      expect(spec.levels).toHaveLength(template.levelCount)
+      expect(spec.levels.every((level) => !/^Level \d+$/.test(level.name))).toBe(true)
+      expect(spec.backgroundStory).toContain(template.themeName === '霓虹失城' ? '小雷' : template.themeName === '月影森林' ? '阿芽' : '小澜')
+      expect(spec.levels.at(-1)?.hasBoss).toBe(true)
+      expect(inspectGameSpec(spec).filter((item) => item.severity === 'blocking')).toEqual([])
+    }
+  })
 })

@@ -1,21 +1,24 @@
 'use client'
 
 import React, { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { Splitter, message } from 'antd'
+import { message } from 'antd'
 import { useGameStore } from '@/lib/store'
 import { buildVirtualGameData } from '@/lib/virtual-levels'
 import { buildGameDataFromSpec } from '@/lib/virtual-levels'
 import { ensureThemeSpec, getThemeSourcePrompt, isStoredTheme } from '@/lib/theme-migration'
-import { GameCanvas, ProjectHeader, SideMenu, ThemesList, ThemePreview } from '@/components/ui'
+import { GameCanvas, ProjectHeader, SideMenu, ThemePreview } from '@/components/ui'
 import GameCoverMenu from '@/components/GameCoverMenu'
 import { PRESET_THEMES } from '@/configs'
 import { getDefaultModel, getDefaultProvider } from '@/configs/image-providers'
 import { formatGenerationError } from '@/lib/format-generation-error'
 import { loadImageApiPrefs, loadProviderApiKey, saveImageApiPrefs } from '@/lib/image-api-prefs'
-import { cacheAssetUrl, stripLargeAssetUrls } from '@/lib/asset-db'
+import { cacheAssetUrl, removeCachedAssetClips, stripLargeAssetUrls } from '@/lib/asset-db'
 import { prepareAnimationReferenceImages } from '@/lib/animation-references'
-import { animationIsComplete, createActionStripAnimation, normalizeAnimationSpec } from '@/lib/asset-catalog'
+import { animationClipDefaults, animationIsComplete, createActionStripAnimation, normalizeAnimationSpec } from '@/lib/asset-catalog'
 import { ASSET_TYPES } from '@/types'
+import { buildBuiltinGameSpec } from '@/lib/builtin-game'
+import { DEFAULT_COMFY_SETTINGS, generateComfyImage, type ComfySettings } from '@/lib/comfyui-client'
+import { readUploadedImage, withUploadedClip, withUploadedStatic } from '@/lib/uploaded-asset'
 import type {
   AnimationClipPose,
   AssetType,
@@ -136,6 +139,15 @@ export default function Home() {
   } = useGameStore()
 
   const [showGameInterface, setShowGameInterface] = useState(false)
+  const [activeStudioStage, setActiveStudioStage] = useState<'idea' | 'agents' | 'assets'>('idea')
+  const [studioWorkspaceTarget, setStudioWorkspaceTarget] = useState<HTMLDivElement | null>(null)
+  const previousStudioStage = useRef(activeStudioStage)
+
+  useEffect(() => {
+    if (previousStudioStage.current === activeStudioStage) return
+    previousStudioStage.current = activeStudioStage
+    document.querySelector<HTMLElement>('.world-content-frame')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [activeStudioStage])
   const [showGameCover, setShowGameCover] = useState(false)
   const [sessionTheme, setSessionTheme] = useState<SessionTheme | null>(null)
   const [themes, setThemes] = useState<Theme[]>([...PRESET_THEMES])
@@ -145,6 +157,9 @@ export default function Home() {
   const [apiKey, setApiKey] = useState('')
   const [selectedProvider, setSelectedProvider] = useState<ProviderId>(getDefaultProvider())
   const [selectedModel, setSelectedModel] = useState(getDefaultModel(getDefaultProvider()))
+  const [activeImageSource, setActiveImageSource] = useState<'builtin' | 'upload' | 'comfy' | 'byok' | 'custom'>('builtin')
+  const [customImageConnection, setCustomImageConnection] = useState({ displayName: '', baseUrl: '', model: '', apiKey: '' })
+  const [comfySettings, setComfySettings] = useState<ComfySettings>(DEFAULT_COMFY_SETTINGS)
 
   const persistPrefs = (provider = selectedProvider, model = selectedModel, key = apiKey) => {
     saveImageApiPrefs({ provider, model, apiKey: key })
@@ -265,11 +280,12 @@ export default function Home() {
       const result = await generateImages({
         theme: repairedTheme.name,
         prompt: sourcePrompt,
-        provider: selectedProvider,
-        model: selectedModel,
+        provider: activeImageSource === 'custom' ? 'custom' : selectedProvider,
+        model: activeImageSource === 'custom' ? customImageConnection.model.trim() : selectedModel,
         types: [imageType],
         levelCount,
-        apiKey: key.trim(),
+        apiKey: activeImageSource === 'custom' ? customImageConnection.apiKey.trim() : key.trim(),
+        customBaseUrl: activeImageSource === 'custom' ? customImageConnection.baseUrl.trim() : undefined,
         spec,
       })
       if (!result.data) throw new Error('重新生成结果为空。')
@@ -332,25 +348,59 @@ export default function Home() {
     setGameData(nextData, themeId)
   }
 
+  const handleUploadAsset = async (themeId: string, assetId: string, file: File, pose?: AnimationClipPose) => {
+    const current = getGameDataForTheme(themeId)
+    const spec = current.data?.spec || themes.find((item) => item.id === themeId)?.spec
+    const asset = spec?.assets.find((item) => item.id === assetId)
+    if (!asset) throw new Error('未找到该素材。')
+    const frames = pose ? normalizeAnimationSpec(asset.animation).clips?.[pose]?.frameCount || animationClipDefaults(pose).frameCount : 1
+    const url = await readUploadedImage(file, frames, Boolean(pose))
+    const next = pose ? withUploadedClip(asset, pose, url) : withUploadedStatic(asset, url)
+    if (pose) {
+      await cacheAssetUrl(themeId, `${assetId}:clip:${pose}`, url)
+      if (pose === 'idle') await cacheAssetUrl(themeId, assetId, url)
+    } else {
+      await removeCachedAssetClips(themeId, assetId)
+      await cacheAssetUrl(themeId, assetId, url)
+    }
+    handleUpdateAsset(themeId, assetId, next)
+  }
+
   const handleRegenerateAsset = async (themeId: string, assetId: string, key: string, requestedPose?: AnimationClipPose) => {
     const theme = themes.find((item) => item.id === themeId)
     const current = getGameDataForTheme(themeId)
     const spec = current.data?.spec || theme?.spec
     const asset = spec?.assets.find((item) => item.id === assetId)
     if (!theme || !spec || !asset) return void message.error('没有找到需要重新生成的素材。')
-    if (!key.trim()) return void message.error('请先填写 API Key。')
+    if (activeImageSource === 'byok' && !key.trim()) return void message.error('请先填写 API Key。')
+    if (activeImageSource === 'custom' && (!customImageConnection.baseUrl.trim() || !customImageConnection.model.trim() || !customImageConnection.apiKey.trim())) return void message.error('手动接入需要接口地址、模型 ID 和 API Key。')
+    if (activeImageSource === 'upload') return void message.info('请在素材卡片上传或替换图片。')
     const animationPose = asset.kind === 'spriteSheet' ? requestedPose || 'idle' : undefined
     const regenerationKey = animationPose ? `${assetId}:${animationPose}` : assetId
     setRegeneratingAssetIds((items) => [...items, regenerationKey])
     handleUpdateAsset(themeId, assetId, { status: 'generating', error: undefined })
     try {
+      if (activeImageSource === 'builtin' || (activeImageSource === 'comfy' && asset.kind === 'spriteSheet')) {
+        const builtIn = buildBuiltinGameSpec(spec, theme.name).assets.find((item) => item.id === assetId)
+        if (!builtIn?.url) throw new Error('这个素材没有可用的内置像素图。')
+        handleUpdateAsset(themeId, assetId, builtIn)
+        message.success('已替换为内置像素素材。')
+        return
+      }
+      if (activeImageSource === 'comfy') {
+        const url = await generateComfyImage(comfySettings, asset.prompt)
+        await cacheAssetUrl(themeId, asset.id, url)
+        handleUpdateAsset(themeId, assetId, { kind: 'image', url, status: 'success', error: undefined })
+        message.success('ComfyUI 已生成这张素材。')
+        return
+      }
       const levelIndex = Math.max(0, spec.levels.findIndex((level) => level.id === asset.levelIds[0]))
       const referenceImages = animationPose
         ? await prepareAnimationReferenceImages(spec, asset, animationPose)
         : []
       const response = await fetch('/api/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ theme: spec.title, prompt: asset.prompt, provider: selectedProvider, model: selectedModel, apiKey: key.trim(), levelCount: spec.levels.length, spec: stripLargeAssetUrls(spec), asset: stripLargeAssetUrls({ ...spec, assets: [asset] }).assets[0], levelIndex, animationPose, referenceImages }),
+        body: JSON.stringify({ theme: spec.title, prompt: asset.prompt, ...(activeImageSource === 'custom' ? { provider: 'custom', model: customImageConnection.model.trim(), apiKey: customImageConnection.apiKey.trim(), customBaseUrl: customImageConnection.baseUrl.trim() } : { provider: selectedProvider, model: selectedModel, apiKey: key.trim() }), levelCount: spec.levels.length, spec: stripLargeAssetUrls(spec), asset: stripLargeAssetUrls({ ...spec, assets: [asset] }).assets[0], levelIndex, animationPose, referenceImages }),
       })
       const result = await response.json().catch(() => null)
       const generatedAsset = result?.data?.asset as AssetDefinition | undefined
@@ -394,6 +444,7 @@ export default function Home() {
 
   const activeGameData = getGameDataForTheme(selectedTheme)
   const activeTheme = themes.find((theme) => theme.id === selectedTheme)
+  const createdThemes = themes.filter((theme) => theme.id.startsWith('custom-') || theme.id.startsWith('loading-'))
 
   const openGameCover = () => {
     const state = useGameStore.getState()
@@ -480,14 +531,12 @@ export default function Home() {
         <div id="world-home" className="pixel-world-shell">
           <ProjectHeader />
           <div className="world-content-frame">
-            <Splitter className="world-splitter">
-              <Splitter.Panel
-                defaultSize={410}
-                min={360}
-                max={480}
-                className="creator-panel"
-              >
+            <div className="world-columns">
+              <div className="creator-panel">
                 <SideMenu
+                  onImageSourceChange={setActiveImageSource}
+                  onCustomImageChange={setCustomImageConnection}
+                  onComfySettingsChange={setComfySettings}
                   apiKey={apiKey}
                   onApiKeyChange={(value) => { setApiKey(value); persistPrefs(selectedProvider, selectedModel, value) }}
                   selectedProvider={selectedProvider}
@@ -499,34 +548,38 @@ export default function Home() {
                   generateImages={generateImages}
                   onRegeneratingImagesChange={setRegeneratingImages}
                   themesListRef={themesListRef}
-                />
-              </Splitter.Panel>
-
-              <Splitter.Panel className="workspace-panel" style={{ padding: 20, overflow: 'visible' }}>
-              <div id="preview-publish" className="section-anchor" style={{ display: 'flex', alignItems: 'flex-start', gap: 20, width: '100%', height: 'auto' }}>
-                <ThemesList
-                  ref={themesListRef}
                   themes={themes}
-                  selectedTheme={selectedTheme as GameTheme}
                   onThemeSelect={setSelectedTheme}
-                />
-                <ThemePreview
-                  isLoading={isLoading}
-                  loadingMessage={loadingMessage}
-                  selectedTheme={selectedTheme}
-                  themes={themes}
-                  gameData={activeGameData}
-                  regeneratingImages={regeneratingImages}
-                  apiKey={apiKey}
-                  onRegenerateImage={handleRegenerateImage}
-                  regeneratingAssetIds={regeneratingAssetIds}
-                  onRegenerateAsset={handleRegenerateAsset}
-                  onUpdateAsset={handleUpdateAsset}
-                  onDeleteTheme={handleDeleteTheme}
+                  activeStage={activeStudioStage}
+                  onStageChange={setActiveStudioStage}
+                  workspaceTarget={studioWorkspaceTarget}
                 />
               </div>
-              </Splitter.Panel>
-            </Splitter>
+
+              <div className="themes-panel">
+                <div ref={setStudioWorkspaceTarget} className="studio-workspace-target" />
+              </div>
+
+              <div className="workspace-panel">
+                <div id="preview-publish" className="preview-scroll-content section-anchor">
+                  <ThemePreview
+                    isLoading={isLoading}
+                    loadingMessage={loadingMessage}
+                    selectedTheme={selectedTheme}
+                    themes={createdThemes}
+                    gameData={activeGameData}
+                    regeneratingImages={regeneratingImages}
+                    apiKey={apiKey}
+                    onRegenerateImage={handleRegenerateImage}
+                    regeneratingAssetIds={regeneratingAssetIds}
+                    onRegenerateAsset={activeImageSource === 'upload' ? undefined : handleRegenerateAsset}
+                    onUpdateAsset={handleUpdateAsset}
+                    onUploadAsset={handleUploadAsset}
+                    onDeleteTheme={handleDeleteTheme}
+                  />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

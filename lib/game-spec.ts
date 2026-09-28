@@ -1,5 +1,6 @@
 import { ANIMATION_CLIP_POSES, ASSET_CATALOG, createAssetPlan, normalizeAnimationSpec } from '@/lib/asset-catalog'
 import { stabilizeGameSpec } from '@/lib/game-spec-guardrails'
+import { extractStoryAnchors } from '@/lib/story-anchors'
 import type {
   AssetCategory,
   AssetDefinition,
@@ -197,10 +198,14 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
     explicitAssetValues[entry.category] || entry.defaultPrompt,
   ])) as Partial<Record<AssetCategory, string>>
 
-  const world = structuredField(prompt, ['世界观与故事', '世界观', 'world'])
+  const explicitWorld = structuredField(prompt, ['世界观与故事', '世界观', 'world'])
+  const world = explicitWorld
     || section(freeformPrompt, ['world', '世界'], freeformPrompt || 'A mysterious original fantasy pixel world with readable platforming spaces.')
+  const storyAnchors = extractStoryAnchors(world)
   const heroAppearance = explicitAssetValues.hero
-    || section(freeformPrompt, ['character', 'hero', '主角', '人物'], assetValues.hero || 'A brave side-view adult adventurer with a strong silhouette and practical travel armor.')
+    || (storyAnchors.hero
+      ? `An original full-body side-view pixel hero based on ${storyAnchors.hero}, with a clear silhouette and equipment suited to the adventure.`
+      : section(freeformPrompt, ['character', 'hero', '主角', '人物'], assetValues.hero || 'A brave side-view adult adventurer with a strong silhouette and practical travel armor.'))
   const enemyAppearance = explicitAssetValues.groundEnemy
     || section(freeformPrompt, ['enemy', 'enemies', '敌人', '怪物'], assetValues.groundEnemy || 'A hostile original creature with a readable side-view combat silhouette.')
   const meleeWeapon = explicitAssetValues.meleeWeapon || assetValues.meleeWeapon || 'One compact original melee weapon.'
@@ -211,20 +216,27 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
   const obstacle = explicitAssetValues.normalObstacle
     || section(freeformPrompt, ['obstacle', '障碍物'], assetValues.normalObstacle || 'A solid themed blocking object with a simple collision-friendly silhouette.')
   const bossAppearance = explicitAssetValues.boss
-    || section(freeformPrompt, ['boss', '首领'], assetValues.boss || `A towering original guardian evolved from the world's hostile creatures: ${enemyAppearance}`)
+    || (storyAnchors.antagonist
+      ? `An original full-body side-view pixel boss based on ${storyAnchors.antagonist}, with a distinct readable combat silhouette.`
+      : section(freeformPrompt, ['boss', '首领'], assetValues.boss || `A towering original guardian evolved from the world's hostile creatures: ${enemyAppearance}`))
   const collectibleAppearance = explicitAssetValues.collectible
-    || section(freeformPrompt, ['collectible', 'collectibles', '收集品'], assetValues.collectible || 'A luminous crystal pickup with a compact readable silhouette.')
+    || (storyAnchors.collectible
+      ? `One isolated side-view pixel pickup based on ${storyAnchors.collectible}, with a compact readable silhouette.`
+      : section(freeformPrompt, ['collectible', 'collectibles', '收集品'], assetValues.collectible || 'A luminous crystal pickup with a compact readable silhouette.'))
   const projectile = explicitAssetValues.rangedProjectile
     || section(freeformPrompt, ['projectile', '弹射物'], assetValues.rangedProjectile || 'A small bright horizontal energy bolt matching the ranged weapon palette.')
   const attackEffect = explicitAssetValues.meleeAttackEffect
     || section(freeformPrompt, ['attack effect', '攻击特效'], assetValues.meleeAttackEffect || 'A compact crescent slash effect with transparent surroundings.')
   const backgroundStory = structuredField(prompt, ['背景故事', 'background story', 'story'])
-    || section(freeformPrompt, ['background story', 'story', '背景故事'], `Long ago, ${themeName || 'this pixel world'} was protected by the power sealed inside the ${collectibleAppearance}. When ${bossAppearance} shattered that balance, a lone adventurer carrying original weapons set out to reconnect the lost regions, recover the scattered energy, and defeat the final guardian.`)
+    || (explicitWorld ? explicitWorld : section(freeformPrompt, ['background story', 'story', '背景故事'], `Long ago, ${themeName || 'this pixel world'} was protected by the power sealed inside the ${collectibleAppearance}. When ${bossAppearance} shattered that balance, a lone adventurer carrying original weapons set out to reconnect the lost regions, recover the scattered energy, and defeat the final guardian.`))
   const levelMentions: string[] = []
 
   const levels: LevelSpec[] = Array.from({ length: levelCount }, (_, index) => {
     const block = parsedLevelBlock(prompt, index)
-    const defaultEnvironment = `${world} — region ${index + 1}, with progressively stronger atmosphere and clear traversal lanes.`
+    const place = storyAnchors.place
+    const defaultEnvironment = place
+      ? `${index === levelCount - 1 ? 'Final confrontation at' : index === 0 ? 'Approach to' : 'A distinct route through'} ${place}; an original side-view pixel environment with clear traversal lanes.`
+      : `${world} — region ${index + 1}, with progressively stronger atmosphere and clear traversal lanes.`
     const environment = levelField(block, ['背景', 'background'])
       || (block ? defaultEnvironment : levelDescription(freeformPrompt, index, defaultEnvironment))
     const platformText = levelField(block, ['平台类型', 'platform type'])
@@ -295,11 +307,11 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
       lighting: 'Clear luminous light from the upper left with crisp silhouettes, sparkling highlights and readable depth in every scene.',
       pixelScale: 'Consistent 2x pixel scale and side-view orthographic camera.',
     },
-    hero: { name: 'Hero', appearance: heroAppearance, maxHealth: 100, moveSpeed: 5, jumpPower: 15 },
+    hero: { name: storyAnchors.hero || 'Hero', appearance: heroAppearance, maxHealth: 100, moveSpeed: 5, jumpPower: 15 },
     weapon: { name: 'Seedblade', appearance: weaponAppearance, mode: 'hybrid', meleeDamage: 24, rangedDamage: 16, cooldownMs: 420, projectileSpeed: 10 },
     enemies: [{ name: 'World Stalker', appearance: enemyAppearance, health: 48, damage: 12, speed: 1.4, behavior: 'chase' }],
-    boss: { name: 'World Guardian', appearance: bossAppearance, health: 280, damage: 20, speed: 1.1, attackPattern: 'Alternates between pursuit, projectiles, and an enraged final phase.' },
-    collectible: { name: 'Inner Seed', appearance: collectibleAppearance, effect: 'score', value: 100 },
+    boss: { name: storyAnchors.antagonist || 'World Guardian', appearance: bossAppearance, health: 280, damage: 20, speed: 1.1, attackPattern: 'Alternates between pursuit, projectiles, and an enraged final phase.' },
+    collectible: { name: storyAnchors.collectible || 'Inner Seed', appearance: collectibleAppearance, effect: 'score', value: 100 },
     projectile,
     attackEffect,
     levels,

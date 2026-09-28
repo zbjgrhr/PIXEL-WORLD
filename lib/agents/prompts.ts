@@ -1,4 +1,5 @@
 import { AGENT_ROLE_LABELS } from '@/lib/agents/config'
+import { selectedInspirationTexts } from '@/configs/inspiration-packs'
 import type { AgentExecuteRequest, AgentRole } from '@/types'
 
 const BASE = `You are one specialist inside Pixel World's controlled multi-agent game production system.
@@ -17,7 +18,7 @@ const ROLE_INSTRUCTIONS: Record<AgentRole, string> = {
   artDirector: `Create artifact {artDirection,palette,lighting,pixelScale,characterRules,backgroundRules,assetIsolationRules,animationRules}. Require coherent original non-branded art. Prefer bright high-saturation color harmony, luminous midtones, colorful shadows and crisp pixel detail; even dark biomes need vivid colored lighting and readable depth rather than a gray veil.`,
   levelDesigner: `Create artifact {levels:[{name,environment,platformMode,enemyCount,collectibleCount,hasBoss,enemyTypes,obstacles,music,effects}],progressionNotes}. The last level is the only mandatory Boss arena.`,
   integrator: `Create artifact {spec}. Return a compact partial GameSpec V3 patch containing only fields that the specialist plans genuinely improve. Omit assets and unchanged fields; the server deterministically merges this patch into the prepared complete base spec. Preserve explicit user content and keep every asset category isolated.`,
-  consistencyCritic: `Review the merged spec. Create artifact {issues}. Check contradictions, repeated scene descriptions inside isolated sprites, style drift, missing level assignments and story/mechanics mismatches. Do not rewrite the spec.`,
+  consistencyCritic: `Review the merged spec. Create artifact {issues}. Compare the player's name, story and selected inspiration ideas against the spec; report omissions or contradictions. Also check repeated scene descriptions inside isolated sprites, style drift, missing level assignments and story/mechanics mismatches. Do not rewrite the spec.`,
   engineQa: `Review the merged spec against the fixed engine. Create artifact {issues}. Check required assets, ranged combat, final Boss, valid levelIds, animation action strips, numeric bounds and export readiness. Do not generate code.`,
   revision: `Create artifact {spec}. Return a compact partial GameSpec V3 patch containing only fixes justified by reviewIssues. Omit unchanged fields and preserve explicit user choices; the server deterministically merges the patch into the complete current spec.`,
   assetCoordinator: `Create artifact {assetPromptPatches:[{assetId,prompt}],estimatedImageJobs,productionNotes}. Return only prompts that truly need refinement; each prompt must describe one isolated asset and preserve its identity and intended level. Do not repeat the complete GameSpec and do not call image tools.`,
@@ -90,6 +91,8 @@ function roleContext(request: AgentExecuteRequest): string[] {
       ]
     case 'consistencyCritic':
       return [
+        `Player-selected inspiration ideas to check:\n${compact(selectedInspirationTexts(request.sourcePrompt), 5000)}`,
+        `Original request:\n${compactText(request.sourcePrompt, 10000)}`,
         `GameSpec under review:\n${compact(spec, 65000)}`,
         `Locked intent and art rules:\n${compact({ brief: a.brief, artDirection: a.artDirection, narrative: a.narrative }, 26000)}`,
       ]
