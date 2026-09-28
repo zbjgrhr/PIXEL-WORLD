@@ -27,8 +27,8 @@ export default function ReadyAgentGuide({ provider }: { provider: AgentProviderI
     </div>
     <p className="platform-slogan">{visual.benefit}。{local?.instructions}</p>
     {local ? <>
-      <div className="platform-strengths"><span><Sparkles size={11} />{provider === 'webllm' ? '打开浏览器即可使用' : '先下载或打开工具'}</span><span><Sparkles size={11} />{provider === 'webllm' ? '首次下载浏览器模型' : '加载模型并启动服务'}</span><span><Sparkles size={11} />检测后测试 GameSpec</span></div>
-      <p className="ai-ready-caution">{provider === 'webllm' ? '需要浏览器支持 WebGPU；首次下载可能较慢。' : '模型在你的设备运行；小模型可能无法稳定生成完整游戏规格。'}</p>
+      <div className="platform-strengths"><span><Sparkles size={11} />{provider === 'webllm' ? '检查浏览器与 WebGPU' : '检查本机服务与模型'}</span><span><Sparkles size={11} />{provider === 'webllm' ? '准备模型并查看下载进度' : '先加载模型，再做短文字测试'}</span><span><Sparkles size={11} />通过后再启动策划</span></div>
+      <p className="ai-ready-caution">{provider === 'webllm' ? '首次模型下载依赖浏览器网络与 WebGPU；准备超过 30 秒会提示你改用其他方案，不会无限测试。' : '连接测试只生成很短的文字；完整 GameSpec 会在你主动启动 Agent 后才生成。'}</p>
       <Button size="small" href={local.downloadUrl} target="_blank" rel="noopener noreferrer">官方下载与说明 <ExternalLink size={12} /></Button>
     </> : null}
   </div>

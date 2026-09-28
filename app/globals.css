@@ -1054,6 +1054,16 @@ body {
 .agent-workflow-action { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 12px; border: 1px solid #cbbcf0; border-radius: 11px; background: #f6f2ff; }
 .agent-workflow-action .ant-typography { margin: 0; }
 .agent-workflow-action .ant-btn { max-width: 100%; }
+.webllm-setup { display: grid; gap: 8px; padding: 11px 12px; border: 1px solid #b9d9ee; border-radius: 11px; background: linear-gradient(135deg, #f4fbff, #edf6ff); }
+.webllm-setup-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.webllm-setup-heading > div { display: grid; gap: 2px; min-width: 0; }
+.webllm-setup-heading strong { color: #176eaa; font-size: 12px; }
+.webllm-setup-heading span, .webllm-setup p { color: #587489; font-size: 11px; line-height: 1.55; }
+.webllm-setup p { margin: 0; }
+.webllm-setup .ant-tag { flex: 0 0 auto; margin-inline-end: 0; }
+.webllm-setup .ant-btn { justify-self: start; }
+.webllm-setup-failed { border-color: #efc5bf; background: #fff7f4; }
+.webllm-setup-failed .webllm-setup-heading strong { color: #b24f45; }
 .stage-gate-note { display: flex; flex-direction: column; gap: 6px; padding: 13px 14px; border: 1px solid #d5c9ed; border-radius: 11px; background: #f7f3ff; color: #625184; line-height: 1.55; }
 .stage-gate-note strong { color: #59437f; }
 .studio-workspace-target { min-height: 100%; min-width: 0; }

@@ -3,6 +3,11 @@ import { localProviderConfig } from '@/lib/agents/config'
 import { localIntegratorResponse, normalizeArtifact, parseJsonObject, prepareAgentRequest, responseText, ROLE_TOKEN_BUDGET } from '@/lib/agents/execution'
 import type { ChatPayload } from '@/lib/agents/execution'
 import type { AgentExecuteRequest, AgentExecuteResponse, LocalAgentProviderId } from '@/types'
+import { isWebLlmReady, webLlmCompletion } from '@/lib/agents/webllm-client'
+
+const LOCAL_CONNECTION_TIMEOUT_MS = 20_000
+const CONNECTION_SYSTEM_PROMPT = 'You are a connection test. Reply with this exact JSON only: {"ready":true}'
+const CONNECTION_USER_PROMPT = 'Return the connection test JSON now.'
 
 export function safeLocalBaseUrl(value: string): string {
   const url = new URL(value)
@@ -25,12 +30,47 @@ export async function discoverLocalModels(provider: LocalAgentProviderId, baseUr
   return (payload.data || []).filter((item): item is { id: string } => Boolean(item.id)).map((item) => ({ id: item.id, label: item.id }))
 }
 
+/** A short, bounded check. Full GameSpec planning deliberately happens later. */
+export async function testLocalAgentConnection(provider: LocalAgentProviderId, model: string, baseUrl?: string, password?: string): Promise<void> {
+  if (!model.trim()) throw new Error('请先检测并选择模型。')
+  let payload: ChatPayload
+  if (provider === 'webllm') {
+    if (!isWebLlmReady(model)) throw new Error('请先准备浏览器模型；首次下载完成后再测试文字模型。')
+    payload = await webLlmCompletion(model, CONNECTION_SYSTEM_PROMPT, CONNECTION_USER_PROMPT, 32)
+  } else {
+    const endpoint = safeLocalBaseUrl(baseUrl || localProviderConfig(provider).baseUrl || '')
+    const controller = new AbortController()
+    const timer = globalThis.setTimeout(() => controller.abort(), LOCAL_CONNECTION_TIMEOUT_MS)
+    let response: Response
+    try {
+      response = await fetch(`${endpoint}/chat/completions`, {
+        method: 'POST', signal: controller.signal,
+        headers: { 'Content-Type': 'application/json', ...(password ? { Authorization: `Bearer ${password}` } : {}) },
+        body: JSON.stringify({ model, temperature: 0, max_tokens: 32, stream: false,
+          messages: [{ role: 'system', content: CONNECTION_SYSTEM_PROMPT }, { role: 'user', content: CONNECTION_USER_PROMPT }] }),
+      })
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') throw new Error('本机模型在 20 秒内没有响应。请确认模型已加载；小模型首次唤醒也可能较慢。')
+      throw error
+    } finally {
+      globalThis.clearTimeout(timer)
+    }
+    if (!response.ok) throw new Error(`本机模型测试失败（HTTP ${response.status}）：${(await response.text()).slice(0, 240)}`)
+    payload = await response.json() as ChatPayload
+  }
+  try {
+    const result = JSON.parse(responseText(payload).trim()) as { ready?: unknown }
+    if (result.ready !== true) throw new Error('unexpected response')
+  } catch {
+    throw new Error('模型已响应，但没有完成短格式测试。请换一个指令模型，或直接使用本地草案继续。')
+  }
+}
+
 export async function executeLocalAgentTask(rawRequest: AgentExecuteRequest, signal?: AbortSignal): Promise<AgentExecuteResponse> {
   const request = prepareAgentRequest(rawRequest)
   const prompts = buildAgentPrompts(request)
   let payload: ChatPayload
   if (request.provider === 'webllm') {
-    const { webLlmCompletion } = await import('@/lib/agents/webllm-client')
     payload = await webLlmCompletion(request.model, prompts.system, prompts.user, ROLE_TOKEN_BUDGET[request.role])
   } else {
     const provider = request.provider as Exclude<LocalAgentProviderId, 'webllm'>

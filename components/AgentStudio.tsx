@@ -6,9 +6,8 @@ import { Alert, Button, Card, Collapse, Input, Progress, Select, Space, Tag, Typ
 import { CheckCircle2, CircleStop, FlaskConical, Pause, Play, RotateCcw, ShieldCheck, Sparkles } from 'lucide-react'
 import { loadAgentApiKey, loadAgentApiPrefs, saveAgentApiPrefs } from '@/lib/agent-api-prefs'
 import { AGENT_PROVIDERS, AGENT_ROLE_LABELS, LOCAL_AGENT_PROVIDERS, getAgentProvider, getDefaultAgentModel, isLocalAgentProvider, localProviderConfig } from '@/lib/agents/config'
-import { discoverLocalModels, executeLocalAgentTask, safeLocalBaseUrl } from '@/lib/agents/local-client'
-import { createFallbackGameSpec } from '@/lib/game-spec'
-import { inspectGameSpec } from '@/lib/agents/validation'
+import { discoverLocalModels, safeLocalBaseUrl, testLocalAgentConnection } from '@/lib/agents/local-client'
+import { inspectWebLlm, prepareWebLlm } from '@/lib/agents/webllm-client'
 import { countBlockingIssues } from '@/lib/agents/validation'
 import { useAgentCluster } from '@/hooks/useAgentCluster'
 import type { AgentExecuteRequest, AgentExecuteResponse, AgentProviderId, AgentTaskStatus, GameSpec } from '@/types'
@@ -82,6 +81,9 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
   const [baseUrl, setBaseUrl] = useState('http://127.0.0.1:11434/v1')
   const [localPassword, setLocalPassword] = useState('')
   const [discovering, setDiscovering] = useState(false)
+  const [localCheck, setLocalCheck] = useState<{ state: 'idle' | 'checking' | 'ready' | 'failed'; text: string }>({ state: 'idle', text: '' })
+  const [webLlmSetup, setWebLlmSetup] = useState<{ state: 'idle' | 'checking' | 'preparing' | 'ready' | 'failed'; progress: number; text: string; cached?: boolean }>({ state: 'idle', progress: 0, text: '' })
+  const webLlmAttempt = useRef(0)
   const cluster = useAgentCluster({ projectId, sourcePrompt, projectName, levelCount, baseSpec, onSpecReady, onApproved })
   const seenInputRevision = useRef(inputRevision)
 
@@ -169,6 +171,9 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
       setBaseUrl(localStorage.getItem(`pixel-local-url-${value}`) || localProviderConfig(value).baseUrl || '')
       setLocalPassword('')
       setLocalModels([])
+      setLocalCheck({ state: 'idle', text: '' })
+      setWebLlmSetup({ state: 'idle', progress: 0, text: '' })
+      webLlmAttempt.current += 1
       localStorage.setItem('pixel-local-provider', value)
       return
     }
@@ -229,28 +234,79 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
         message.success(`Agent API 可用，锁定模型：${model}`)
         return
       }
-      const testSpec = createFallbackGameSpec('A colorful one-level pixel adventure with a hero and a boss.', 'Local Model Test', 1)
+      if (isLocalAgentProvider(provider)) {
+        setLocalCheck({ state: 'checking', text: provider === 'webllm' ? '正在发送短文字测试…' : '正在向本机模型发送短文字测试…' })
+        await testLocalAgentConnection(provider, model, activeBaseUrl, activeKey)
+        setLocalCheck({ state: 'ready', text: '文字模型可用。完整 GameSpec 会在你启动 Agent 后才生成。' })
+        message.success('文字模型已通过短测试。')
+        return
+      }
       const body: AgentExecuteRequest = {
-        runId: `agent-test-${Date.now()}`, taskId: 'integrator-test', role: 'integrator', round: 1,
-        provider, model: provider === 'custom' ? customAgent.model.trim() : model, apiKey: activeKey, baseUrl: activeBaseUrl,
-        sourcePrompt: 'Create a minimal original pixel platform game test brief.',
-        projectName: 'Agent API Test', levelCount: 1, baseSpec: testSpec, artifacts: {},
+        runId: `agent-test-${Date.now()}`, taskId: 'director-test', role: 'director', round: 1,
+        provider, model: customAgent.model.trim(), apiKey: activeKey, baseUrl: activeBaseUrl,
+        sourcePrompt: 'Create a minimal original pixel platform game test brief.', projectName: 'Agent API Test', levelCount: 1, artifacts: {},
       }
-      const result = isLocalAgentProvider(provider)
-        ? await executeLocalAgentTask(body)
-        : await fetch('/api/agents/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((response) => response.json() as Promise<AgentExecuteResponse>)
-      if (!result?.success || !result.data) throw new Error(result?.error || '模型未返回结果。')
-      const spec = result.data.artifact.spec as GameSpec | undefined
-      if (!spec || inspectGameSpec(spec, 'engineQa').some((issue) => issue.severity === 'blocking')) {
-        if (isLocalAgentProvider(provider)) return void message.warning('本机服务已连接，但模型没有给出可用的游戏规格。可先补全本地草案，再由你审核后进入素材。', 8)
-        throw new Error('模型返回的游戏规格未通过检查；请调整模型或游戏设定。')
-      }
-      if (result.data.artifact.localFallback) message.warning('本机服务已连接；模型的规格格式不完整，已用本地规则生成可检查的草案。', 8)
-      else message.success(`模型连接与游戏规格检查通过：${model}`)
+      const response = await fetch('/api/agents/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const result = await response.json().catch(() => null) as AgentExecuteResponse | null
+      if (!response.ok || !result?.success) throw new Error(result?.error || `HTTP ${response.status}`)
+      message.success(`自定义文字服务可用，锁定模型：${customAgent.model.trim()}`)
     } catch (error) {
+      if (isLocalAgentProvider(provider)) setLocalCheck({ state: 'failed', text: error instanceof Error ? error.message : '本机文字模型测试失败。' })
       message.error(error instanceof Error ? error.message : 'Agent API 测试失败。')
     } finally {
       setTesting(false)
+    }
+  }
+
+  const checkLocalTool = async () => {
+    if (!isLocalAgentProvider(provider)) return
+    setDiscovering(true)
+    setLocalCheck({ state: 'checking', text: provider === 'webllm' ? '正在检查浏览器与可选模型…' : '正在检查本机服务与已加载模型…' })
+    try {
+      const models = await discoverLocalModels(provider, baseUrl, localPassword)
+      setLocalModels(models.map((item) => ({ value: item.id, label: item.label })))
+      if (!models.length) throw new Error(provider === 'webllm' ? '没有找到适合浏览器运行的 WebLLM 模型。' : '没有检测到已下载并加载的模型。')
+      const selectedModel = models.some((item) => item.id === model) ? model : models[0].id
+      setModel(selectedModel)
+      if (provider === 'webllm') {
+        const readiness = await inspectWebLlm(selectedModel)
+        setWebLlmSetup({ state: readiness.cached ? 'checking' : 'idle', progress: readiness.cached ? 0 : 0, text: readiness.cached ? '浏览器已缓存该模型；仍需加载到显卡。' : '浏览器和模型列表可用；下一步准备模型。', cached: readiness.cached })
+      }
+      setLocalCheck({ state: 'ready', text: provider === 'webllm' ? '浏览器支持 WebLLM。请先准备模型，再进行短文字测试。' : `已找到 ${models.length} 个本机模型。请选择一个，再测试文字模型。` })
+    } catch (error) {
+      const text = error instanceof Error ? error.message : '模型检查失败。'
+      setLocalCheck({ state: 'failed', text })
+      if (provider === 'webllm') setWebLlmSetup({ state: 'failed', progress: 0, text })
+      message.error(text)
+    } finally {
+      setDiscovering(false)
+    }
+  }
+
+  const prepareBrowserModel = async () => {
+    if (provider !== 'webllm' || !model.trim()) return void message.error('请先检查浏览器并选择模型。')
+    const attempt = ++webLlmAttempt.current
+    setWebLlmSetup({ state: 'preparing', progress: 0, text: '正在连接模型下载源…' })
+    let timeout: number | undefined
+    try {
+      const prepared = prepareWebLlm(model, ({ progress, text }) => {
+        if (webLlmAttempt.current === attempt) setWebLlmSetup({ state: 'preparing', progress, text })
+      })
+      await Promise.race([
+        prepared,
+        new Promise<never>((_, reject) => { timeout = window.setTimeout(() => reject(new Error('模型准备超过 30 秒仍未完成。下载源或 WebGPU 可能没有响应；请改用 Ollama、LM Studio，或使用本地草案继续。')), 30_000) }),
+      ])
+      if (webLlmAttempt.current !== attempt) return
+      setWebLlmSetup({ state: 'ready', progress: 1, text: '模型已加载到浏览器，可以测试文字模型。', cached: true })
+      message.success('浏览器模型已经准备好。')
+    } catch (error) {
+      if (webLlmAttempt.current !== attempt) return
+      const text = error instanceof Error ? error.message : '浏览器模型准备失败。'
+      setWebLlmSetup({ state: 'failed', progress: 0, text })
+      message.error(text)
+      webLlmAttempt.current += 1
+    } finally {
+      if (timeout) window.clearTimeout(timeout)
     }
   }
 
@@ -304,7 +360,17 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
         {selected && provider !== 'custom' && <Select
           value={model || undefined}
           disabled={locked}
-          onChange={(value) => { setModel(value); if (isLocalAgentProvider(provider)) localStorage.setItem(`pixel-local-model-${provider}`, value); else persist(provider, value, apiKey) }}
+          onChange={(value) => {
+            setModel(value)
+            if (isLocalAgentProvider(provider)) {
+              localStorage.setItem(`pixel-local-model-${provider}`, value)
+              setLocalCheck({ state: 'idle', text: '' })
+              if (provider === 'webllm') {
+                webLlmAttempt.current += 1
+                setWebLlmSetup({ state: 'idle', progress: 0, text: '' })
+              }
+            } else persist(provider, value, apiKey)
+          }}
           style={{ width: '100%' }}
           options={isLocalAgentProvider(provider) ? localModels : getAgentProvider(provider).models.map((item) => ({ value: item.id, label: item.label }))}
         />}
@@ -324,8 +390,15 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
         <Space wrap style={{ width: '100%' }}>
           {provider !== 'webllm' && <Input value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); localStorage.setItem(`pixel-local-url-${provider}`, event.target.value) }} placeholder="本地 API 地址" style={{ minWidth: 260, flex: 1 }} />}
           {provider !== 'webllm' && <Input.Password value={localPassword} onChange={(event) => setLocalPassword(event.target.value)} placeholder={provider === 'jan' ? 'Jan 本地访问密码（仅当前页面）' : '本地服务密码（如有，仅当前页面）'} style={{ minWidth: 240 }} />}
-          <Button loading={discovering} onClick={() => { void (async () => { setDiscovering(true); try { const models = await discoverLocalModels(provider, baseUrl, localPassword); setLocalModels(models.map((item) => ({ value: item.id, label: item.label }))); if (models.length) setModel((current) => models.some((item) => item.id === current) ? current : models[0].id); else message.warning('未检测到已下载并加载的模型。') } catch (error) { message.error(error instanceof Error ? error.message : '模型检测失败。') } finally { setDiscovering(false) } })() }}>检测模型</Button>
+          <Button loading={discovering} onClick={() => { void checkLocalTool() }}>{provider === 'webllm' ? '检查浏览器' : '检查本机服务'}</Button>
         </Space>
+        {provider === 'webllm' && <div className={`webllm-setup webllm-setup-${webLlmSetup.state}`}>
+          <div className="webllm-setup-heading"><div><strong>准备浏览器模型</strong><span>首次需要下载并加载模型；这一步不生成 GameSpec。</span></div><Tag color={webLlmSetup.state === 'ready' ? 'success' : webLlmSetup.state === 'failed' ? 'error' : webLlmSetup.state === 'preparing' ? 'processing' : 'default'}>{webLlmSetup.state === 'ready' ? '已准备' : webLlmSetup.state === 'failed' ? '需要处理' : webLlmSetup.state === 'preparing' ? '准备中' : '未准备'}</Tag></div>
+          {webLlmSetup.state === 'preparing' && <Progress percent={Math.round(webLlmSetup.progress * 100)} status="active" size="small" />}
+          <p>{webLlmSetup.text || '先检查浏览器，再准备所选模型。模型下载源不可访问时会显示错误，不会把等待伪装成测试。'}</p>
+          <Button type="primary" loading={webLlmSetup.state === 'preparing'} disabled={!model || webLlmSetup.state === 'ready'} onClick={() => { void prepareBrowserModel() }}>{webLlmSetup.state === 'ready' ? '浏览器模型已准备' : '准备模型'}</Button>
+        </div>}
+        {localCheck.state !== 'idle' && <Alert type={localCheck.state === 'ready' ? 'success' : localCheck.state === 'failed' ? 'error' : 'info'} showIcon message={localCheck.text} style={{ marginTop: 2 }} />}
       </>}
       {selected && accessMode === 'ready' && !legacyManagedRun && <Collapse size="small" items={[{ key: 'ready-help', label: '安装与使用说明', children: <ReadyAgentGuide provider={provider} /> }]} />}
 
@@ -339,7 +412,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
         </Button>
       </div>
       <Space wrap>
-        <Button icon={<FlaskConical size={14} />} disabled={!selected || legacyManagedRun} loading={testing} onClick={() => { void testAgentApi() }}>{!selected ? '选择工具后测试' : provider === 'custom' ? '测试连接' : isLocalAgentProvider(provider) ? '一键测试 GameSpec' : '测试 Agent API'}</Button>
+        <Button icon={<FlaskConical size={14} />} disabled={!selected || legacyManagedRun || (provider === 'webllm' && webLlmSetup.state !== 'ready')} loading={testing} onClick={() => { void testAgentApi() }}>{!selected ? '选择工具后测试' : provider === 'custom' ? '测试连接' : isLocalAgentProvider(provider) ? '测试文字模型' : '测试 Agent API'}</Button>
         {(!cluster.run || ['draft', 'failed', 'cancelled'].includes(cluster.run.status)) && <Button type="primary" disabled={!selected || !baseSpec || isOptimizing || legacyManagedRun} icon={<Play size={14} />} onClick={() => { void start() }}>启动 Agent 集群</Button>}
         {cluster.run && ['planning', 'reviewing'].includes(cluster.run.status) && <Button icon={<Pause size={14} />} onClick={cluster.pause}>暂停</Button>}
         {cluster.run?.status === 'paused' && <Button type="primary" disabled={legacyManagedRun} icon={<Play size={14} />} onClick={() => { void runAgentAction(() => cluster.resume(activeKey)) }}>继续</Button>}

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { executeLocalAgentTask } from './local-client'
+import { executeLocalAgentTask, testLocalAgentConnection } from './local-client'
 import { createFallbackGameSpec } from '@/lib/game-spec'
 import type { AgentExecuteRequest } from '@/types'
 
@@ -14,6 +14,15 @@ const request: AgentExecuteRequest = {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('local model GameSpec fallback', () => {
+  it('uses a short bounded response for the connection check instead of asking for a GameSpec', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: '{"ready":true}' } }] }) })
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(testLocalAgentConnection('ollama', 'small-local', 'http://127.0.0.1:11434/v1')).resolves.toBeUndefined()
+    const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    expect(payload.max_tokens).toBe(32)
+    expect(payload.messages[0].content).toContain('connection test')
+  })
+
   it('returns a reviewable rules draft when a reachable model emits no JSON', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ choices: [{ message: { content: 'I cannot output that JSON.' } }] }) }))
     const result = await executeLocalAgentTask(request)
