@@ -7,6 +7,7 @@ import { buildVirtualGameData } from '@/lib/virtual-levels'
 import { buildGameDataFromSpec } from '@/lib/virtual-levels'
 import { ensureThemeSpec, getThemeSourcePrompt, isStoredTheme } from '@/lib/theme-migration'
 import { GameCanvas, ProjectHeader, SideMenu, ThemePreview } from '@/components/ui'
+import Guidebook from '@/components/ui/Guidebook'
 import GameCoverMenu from '@/components/GameCoverMenu'
 import { PRESET_THEMES } from '@/configs'
 import { getDefaultModel, getDefaultProvider } from '@/configs/image-providers'
@@ -530,6 +531,7 @@ export default function Home() {
       ) : (
         <div id="world-home" className="pixel-world-shell">
           <ProjectHeader />
+          <Guidebook />
           <div className="world-content-frame">
             <div className="world-columns">
               <div className="creator-panel">
