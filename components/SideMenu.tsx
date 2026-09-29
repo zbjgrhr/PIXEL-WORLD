@@ -18,6 +18,8 @@ import {
 } from '@/lib/asset-catalog'
 import { cacheAssetUrl, cacheSpecAssets, hydrateSpecAssets, stripLargeAssetUrls } from '@/lib/asset-db'
 import { prepareAnimationReferenceImages } from '@/lib/animation-references'
+import { buildBuiltinGameSpec } from '@/lib/builtin-game'
+import { readUploadedImage, withUploadedClip, withUploadedStatic } from '@/lib/uploaded-asset'
 import { ASSET_TYPES } from '@/types'
 import type {
   AnimationClipPose,
@@ -32,6 +34,9 @@ import type {
 } from '@/types'
 
 export interface SideMenuProps {
+  onImageSourceChange?: (source: 'builtin' | 'upload' | 'comfy' | 'byok' | 'custom') => void
+  onCustomImageChange?: (connection: { displayName: string; baseUrl: string; model: string; apiKey: string }) => void
+  onComfySettingsChange?: (settings: { endpoint: string; checkpoint: string }) => void
   apiKey: string
   onApiKeyChange: (apiKey: string) => void
   selectedProvider: ProviderId
@@ -84,6 +89,7 @@ function patchSpecAsset(spec: GameSpec, id: string, patch: Partial<AssetDefiniti
 }
 
 const SideMenu: React.FC<SideMenuProps> = ({
+  onImageSourceChange,
   apiKey,
   onApiKeyChange,
   selectedProvider,
@@ -113,6 +119,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
   const [generationProgress, setGenerationProgress] = useState(0)
   const [isTesting, setIsTesting] = useState(false)
   const [savedDraft, setSavedDraft] = useState<SavedDraft | null>(null)
+  const [imageSource, setImageSource] = useState<'builtin' | 'upload' | 'comfy' | 'byok' | 'custom'>('builtin')
   const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -157,6 +164,36 @@ const SideMenu: React.FC<SideMenuProps> = ({
   const updateSpec = (spec: GameSpec) => {
     setOptimizedSpec(spec)
     persistDraft(spec)
+  }
+
+  const uploadPlannerAsset = async (assetId: string, file: File, pose?: AnimationClipPose) => {
+    if (!optimizedSpec) throw new Error('请先生成并审核游戏规格。')
+    const asset = optimizedSpec.assets.find((item) => item.id === assetId)
+    if (!asset) throw new Error('未找到要上传的素材。')
+    const frames = pose ? normalizeAnimationSpec(asset.animation).clips?.[pose]?.frameCount || 1 : 1
+    const url = await readUploadedImage(file, frames, Boolean(pose))
+    const nextAsset = pose ? withUploadedClip(asset, pose, url) : withUploadedStatic(asset, url)
+    if (pose) {
+      await cacheAssetUrl(DRAFT_PROJECT_ID, `${assetId}:clip:${pose}`, url)
+      if (pose === 'idle') await cacheAssetUrl(DRAFT_PROJECT_ID, assetId, url)
+    } else {
+      await cacheAssetUrl(DRAFT_PROJECT_ID, assetId, url)
+    }
+    updateSpec(patchSpecAsset(optimizedSpec, assetId, nextAsset))
+    message.success('素材已上传并保存。')
+  }
+
+  const fillMissingPlannerAssets = () => {
+    if (!optimizedSpec) return
+    const builtIn = buildBuiltinGameSpec(optimizedSpec, customThemeName || optimizedSpec.title)
+    const fallbackById = new Map(builtIn.assets.map((asset) => [asset.id, asset]))
+    const assets = optimizedSpec.assets.map((asset) => {
+      const hasClip = asset.kind === 'spriteSheet' && Object.values(normalizeAnimationSpec(asset.animation).clips || {}).some((clip) => Boolean(clip?.url))
+      if (asset.url || hasClip || !asset.enabled) return asset
+      return fallbackById.get(asset.id) || asset
+    })
+    updateSpec({ ...optimizedSpec, assets })
+    message.success('已用内置像素素材补齐空缺，已上传的图片未改动。')
   }
 
   const optimizePrompt = async (quiet = false, promptOverride?: string, themeOverride?: string): Promise<GameSpec | null> => {
@@ -484,6 +521,18 @@ const SideMenu: React.FC<SideMenuProps> = ({
     <div className="creator-stack" style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%' }}>
       <section className="studio-section api-section">
         <div className="section-kicker">IMAGE LAB · 图片生成引擎</div>
+        <div className="image-source-choice">
+          <label htmlFor="image-source">图片来源</label>
+          <select id="image-source" value={imageSource} onChange={(event) => {
+            const next = event.target.value as typeof imageSource
+            setImageSource(next)
+            onImageSourceChange?.(next)
+          }}>
+            <option value="builtin">内置像素素材</option>
+            <option value="upload">上传自己的图片</option>
+            <option value="byok">自己的图片 API</option>
+          </select>
+        </div>
         <ModelSelector selectedProvider={selectedProvider} onProviderChange={onProviderChange} selectedModel={selectedModel} onModelChange={onModelChange} apiKey={apiKey} onApiKeyChange={onApiKeyChange} />
       </section>
       <section id="game-idea" className="studio-section prompt-section section-anchor">
@@ -509,6 +558,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
           projectId={DRAFT_PROJECT_ID}
           sourcePrompt={composeProjectPrompt(customThemeName, customStory, customPrompt, levelCount)}
           projectName={customThemeName}
+          briefReady={Boolean(customThemeName.trim() && customStory.trim())}
           levelCount={levelCount}
           baseSpec={optimizedSpec}
           onOptimizePrompt={() => optimizePrompt(false)}
@@ -522,7 +572,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
       </section>
       <section id="asset-workshop" className="section-anchor">
         {optimizedSpec && (creationMode === 'classic' || agentApproved)
-          ? <AssetPlanner spec={optimizedSpec} onChange={updateSpec} onGenerate={() => { void generateSelectedAssets() }} onCancel={() => abortRef.current?.abort()} onTestApi={() => { void testApi() }} isGenerating={isLoading} isTesting={isTesting} progress={generationProgress} />
+          ? <AssetPlanner spec={optimizedSpec} onChange={updateSpec} onGenerate={() => { void generateSelectedAssets() }} onCancel={() => abortRef.current?.abort()} onTestApi={() => { void testApi() }} onUpload={uploadPlannerAsset} onFillMissing={fillMissingPlannerAssets} imageSource={imageSource} isGenerating={isLoading} isTesting={isTesting} progress={generationProgress} />
           : <div className="studio-section nav-section-placeholder">
             <div className="section-kicker">ASSET WORKSHOP · 素材工坊</div>
             <p>{creationMode === 'agent' ? '完成 Agent 评审并批准规格后，素材卡片、关卡分配和生成队列会显示在这里。' : '先完成一次提示词优化，素材卡片、关卡分配和生成队列会显示在这里。'}</p>

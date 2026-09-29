@@ -13,7 +13,7 @@ function templateStory(prompt: string): string {
   return prompt.match(/^背景故事：\s*(.+)$/m)?.[1]?.trim() || ''
 }
 
-const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ creationMode = 'agent', onCreationModeChange, customThemeName, onThemeNameChange, customStory, onStoryChange, customPrompt, onPromptChange, levelCount = 3, onLevelCountChange, onOptimizePrompt, isOptimizing = false, optimizedSpec, hasSavedDraft = false, onRestoreDraft }) => {
+const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ inspiration, creationMode = 'agent', onCreationModeChange, customThemeName, onThemeNameChange, customStory, onStoryChange, customPrompt, onPromptChange, levelCount = 3, onLevelCountChange, onOptimizePrompt, onCompleteIdea, isOptimizing = false, optimizedSpec, hasSavedDraft = false, onRestoreDraft }) => {
   const handleTemplateSelect = (templateId: string) => {
     const template = PROMPT_TEMPLATES.find((item) => item.id === templateId)
     if (!template) return

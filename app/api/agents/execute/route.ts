@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { apiKeyHasUnsupportedCharacters, normalizeApiKey } from '@/lib/api-key'
 import { agentModelSupportsVision, getAgentProvider } from '@/lib/agents/config'
 import { buildAgentPrompts } from '@/lib/agents/prompts'
+import { CustomEndpointError, validateCustomBaseUrl } from '@/lib/custom-endpoint.server'
+import { parseJsonObject, responseText } from '@/lib/agents/execution'
 import { sanitizeAgentArtifact, sanitizeSharedArtifacts } from '@/lib/agents/sanitize'
 import {
   countBlockingIssues,

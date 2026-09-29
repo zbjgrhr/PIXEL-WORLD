@@ -68,7 +68,7 @@ function artifactPreview(output?: Record<string, unknown>): string {
   return json.length > 20000 ? `${json.slice(0, 20000)}\n…（内容过长，已在界面截断）` : json
 }
 
-export default function AgentStudio({ projectId, sourcePrompt, projectName, levelCount, baseSpec, onOptimizePrompt, isOptimizing = false, onSpecReady, onApproved }: AgentStudioProps) {
+export default function AgentStudio({ embedded = false, projectId, sourcePrompt, projectName, briefReady, levelCount, baseSpec, onOptimizePrompt, isOptimizing = false, onSpecReady, onApproved, onTextConnectionChange, reviewTarget, inputRevision = 0 }: AgentStudioProps) {
   const [provider, setProvider] = useState<AgentProviderId>('openrouter')
   const [accessMode, setAccessMode] = useState<AiAccessMode>('ready')
   const [readyProvider, setReadyProvider] = useState<AgentProviderId | null>(null)
@@ -307,6 +307,14 @@ export default function AgentStudio({ projectId, sourcePrompt, projectName, leve
       webLlmAttempt.current += 1
     } finally {
       if (timeout) window.clearTimeout(timeout)
+    }
+  }
+
+  const runAgentAction = async (action: () => Promise<unknown>) => {
+    try {
+      await action()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Agent 操作未完成，请稍后重试。')
     }
   }
 
