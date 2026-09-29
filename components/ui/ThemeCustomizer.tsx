@@ -13,19 +13,6 @@ function templateStory(prompt: string): string {
   return prompt.match(/^背景故事：\s*(.+)$/m)?.[1]?.trim() || ''
 }
 
-import { Alert, Button, Collapse, Input, InputNumber, Segmented, Select, Space, Tag, Typography, message } from 'antd'
-import { History, ListRestart, Sparkles } from 'lucide-react'
-import type { ThemeCustomizerProps } from '@/types'
-import { PROMPT_TEMPLATES } from '@/configs/prompt-templates'
-import { buildStructuredPrompt } from '@/lib/asset-catalog'
-
-const { Text } = Typography
-const { TextArea } = Input
-
-function templateStory(prompt: string): string {
-  return prompt.match(/^背景故事：\s*(.+)$/m)?.[1]?.trim() || ''
-}
-
 const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ creationMode = 'agent', onCreationModeChange, customThemeName, onThemeNameChange, customStory, onStoryChange, customPrompt, onPromptChange, levelCount = 3, onLevelCountChange, onOptimizePrompt, isOptimizing = false, optimizedSpec, hasSavedDraft = false, onRestoreDraft }) => {
   const handleTemplateSelect = (templateId: string) => {
     const template = PROMPT_TEMPLATES.find((item) => item.id === templateId)
