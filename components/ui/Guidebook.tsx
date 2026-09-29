@@ -9,7 +9,17 @@ export default function Guidebook() {
   const [open, setOpen] = useState(false)
   const [chapter, setChapter] = useState(0)
   const [position, setPosition] = useState({ x: 28, y: 72 })
-  const dragging = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
+  const [size, setSize] = useState({ width: 680, height: 520 })
+  const gesture = useRef<{
+    kind: 'move' | 'resize'
+    direction?: string
+    pointerX: number
+    pointerY: number
+    left: number
+    top: number
+    width: number
+    height: number
+  } | null>(null)
   const chapters: Chapter[] = [
     { title: '总览', content: <><p className="lead">Pixel World 使用说明</p><p>Pixel World 把游戏名称、故事和灵感整理成游戏设定，经你确认后制作素材并试玩。</p><p className="flow">写故事 → 完善设定 → 审核 GameSpec → 制作素材 → 试玩与导出</p><h3>术语</h3><List><li><b>本地草案：</b>系统用内置规则生成的完整游戏方案，可修改、可审核。</li><li><b>GameSpec：</b>游戏完整制作说明，是审核、生成素材和试玩的依据。</li><li><b>文字模型：</b>生成世界观、主角、关卡等文字内容的 AI。</li><li><b>图片模型：</b>生成图片素材的 AI。</li><li><b>Agent 集群：</b>多个 AI 步骤完成策划、评审和修订。</li></List></> },
     { title: '写故事', content: <><p>填写游戏名称和故事。故事最好包含：</p><List><li>主角是谁</li><li>主角想完成什么</li><li>遇到什么困难</li></List><h3>例如</h3><div className="example"><b>游戏名称：</b>星潮群岛<br /><b>故事：</b>年轻地图师驾驶飞行船来到随潮汐升降的群岛。海雾吞没航线，他要收集星火，重新点亮三座灯塔，找到失踪的船队。</div><p>也可从“灵感与主题库”加入世界、主角、冲突、目标和画风。</p><p className="tip">修改名称、故事或灵感后，建议重新补全设定。</p></> },
@@ -19,8 +29,128 @@ export default function Guidebook() {
     { title: '试玩与导出', content: <><p>素材准备完成后，在右侧预览游戏。</p><h3>试玩前检查</h3><List><li>主角清晰</li><li>关卡背景留出行走区</li><li>Boss 在最后一关</li><li>角色帧条完整</li><li>素材已补齐</li></List><p>确认后导出离线游戏 ZIP。ZIP 包含 GameSpec 和已缓存的上传素材。</p></> },
     { title: '常见情况', content: <table><thead><tr><th>遇到的情况</th><th>触发条件</th><th>处理建议</th></tr></thead><tbody><tr><td>WebLLM 准备超过 30 秒</td><td>下载源或 WebGPU 无响应</td><td>改用 Ollama、LM Studio，或使用本地草案</td></tr><tr><td>本机文字模型 20 秒无响应</td><td>本地服务未启动、模型未加载或太慢</td><td>检查本机工具，换更小模型，或使用本地草案</td></tr><tr><td>WebLLM 未返回创意 JSON</td><td>模型无法稳定返回所需格式</td><td>保留本地草案，使用“检查草案并进入审核”，或更换模型</td></tr><tr><td>本机模型未输出完整 GameSpec</td><td>模型无法稳定返回所需格式</td><td>保留本地草案，使用“检查本地草案并继续”，或更换模型</td></tr><tr><td>提示“先批准 GameSpec”</td><td>游戏内容未通过人工确认</td><td>回到 AI 策划，检查并点击“批准规格并开放生图”</td></tr><tr><td>提示“图片生成需要 API Key”</td><td>当前为云端图片服务</td><td>填写 Key，或改用内置素材、上传图片、ComfyUI</td></tr><tr><td>素材仍显示待生成或缺项</td><td>有角色动作或图片未准备</td><td>上传对应图片，或用内置素材补齐</td></tr></tbody></table> },
   ]
-  useEffect(() => { if (!open) return; const onKey = (event: KeyboardEvent) => { const tag = (event.target as HTMLElement).tagName; if (tag === 'INPUT' || tag === 'TEXTAREA') return; if (event.key === 'ArrowLeft' || event.key.toLowerCase() === 'a') setChapter(value => Math.max(0, value - 1)); if (event.key === 'ArrowRight' || event.key.toLowerCase() === 'd') setChapter(value => Math.min(chapters.length - 1, value + 1)); if (event.key === 'Escape') setOpen(false) }; window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey) }, [open, chapters.length])
-  const startDrag = (event: React.PointerEvent<HTMLElement>) => { dragging.current = { x: event.clientX, y: event.clientY, left: position.x, top: position.y }; event.currentTarget.setPointerCapture(event.pointerId) }
-  const moveDrag = (event: React.PointerEvent<HTMLElement>) => { if (!dragging.current) return; setPosition({ x: Math.max(8, dragging.current.left + event.clientX - dragging.current.x), y: Math.max(8, dragging.current.top + event.clientY - dragging.current.y) }) }
-  return <><button className="guide-trigger" type="button" onClick={() => setOpen(true)}>✦ 使用说明</button>{open && <section className="guide" role="dialog" aria-label="Pixel World 使用说明" style={{ left: position.x, top: position.y }}><header onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => { dragging.current = null }}><span>⋮⋮</span><b>Pixel World 使用说明</b><small>拖动移动，右下角缩放</small><button type="button" onClick={() => setOpen(false)}>×</button></header><div className="guide-layout"><nav>{chapters.map((item, index) => <button type="button" className={index === chapter ? 'active' : ''} onClick={() => setChapter(index)} key={item.title}><i>{String(index + 1).padStart(2, '0')}</i>{item.title}</button>)}</nav><article><div className="title"><span>使用说明</span><h2>{chapters[chapter].title}</h2></div><div className="content">{chapters[chapter].content}</div><footer><button type="button" disabled={chapter === 0} onClick={() => setChapter(chapter - 1)}>← 上一页</button><span>{chapter + 1} / {chapters.length} · A / D 翻页</span><button type="button" disabled={chapter === chapters.length - 1} onClick={() => setChapter(chapter + 1)}>下一页 →</button></footer></article></div></section>}<style jsx>{`.guide-trigger{position:fixed;z-index:30;right:24px;bottom:24px;padding:10px 14px;border:1px solid #a8d0b2;border-radius:10px;background:#398b6f;color:#fffdf4;font-weight:800;box-shadow:0 10px 25px rgba(27,75,58,.22);cursor:pointer}.guide{position:fixed;z-index:40;width:min(760px,calc(100vw - 16px));height:min(690px,calc(100vh - 16px));min-width:440px;min-height:390px;resize:both;overflow:hidden;border:1px solid #a7cdb4;border-radius:14px;background:#fffdf5;box-shadow:0 24px 58px rgba(22,65,52,.3)}header{height:46px;display:flex;align-items:center;gap:8px;padding:0 11px;border-bottom:1px solid #bdd7c3;background:linear-gradient(100deg,#e4f4e7,#fff6dd 70%,#eef7ec);color:#245d4b;cursor:grab;user-select:none}header span{color:#679b78;letter-spacing:-3px}header b{font-size:14px}header small{margin-left:auto;color:#708a79;font-size:10px}header button{display:grid;width:27px;height:27px;place-items:center;border:0;border-radius:7px;background:transparent;color:#356d55;font-size:22px;cursor:pointer}.guide-layout{display:grid;height:calc(100% - 46px);grid-template-columns:155px minmax(0,1fr)}nav{overflow:auto;padding:10px 8px;background:#f4f9f1;border-right:1px solid #d4e2d0}nav button{display:flex;width:100%;gap:7px;align-items:center;padding:9px 7px;margin-bottom:3px;border:1px solid transparent;border-radius:8px;background:transparent;color:#557366;font:inherit;font-size:12px;font-weight:800;text-align:left;cursor:pointer}nav i{color:#96ab9d;font-size:9px;font-style:normal}nav button.active{border-color:#a9d0b4;background:#fffdf5;color:#245d4b;box-shadow:inset 3px 0 #459072}article{display:grid;min-width:0;grid-template-rows:auto minmax(0,1fr) auto}.title{display:flex;align-items:baseline;gap:8px;padding:16px 20px 9px;border-bottom:1px solid #e1eadc}.title span{color:#be812d;font-size:9px;font-weight:900;letter-spacing:.15em}.title h2{margin:0;color:#245d4b;font-family:Georgia,'Songti SC',serif;font-size:21px}.content{overflow:auto;padding:13px 20px 20px;color:#46675a;font-size:13px;line-height:1.72}.content p{margin:0 0 11px}.content h3{margin:17px 0 7px;color:#275f4c;font-size:14px}.content ul{margin:6px 0 12px;padding-left:19px}.content li{margin:5px 0}.content li::marker{color:#c4812b}.content ol{padding-left:23px}.lead{color:#245d4b;font-family:Georgia,'Songti SC',serif;font-size:20px;font-weight:800}.flow{padding:11px 12px;border:1px dashed #9fcaab;border-radius:9px;background:#eff8ef;color:#326d57;font-size:12px;font-weight:800}.example,.tip{padding:10px 11px;border-radius:8px;font-size:12px}.example{border-left:3px solid #d09642;background:#fff7df;color:#5e694e}.tip{border:1px solid #b8d9e6;background:#eff9fc;color:#416b78}.content code{padding:1px 4px;border-radius:4px;background:#edf3ec;color:#37634f}.content table{width:100%;min-width:540px;margin:10px 0 14px;border-collapse:collapse;font-size:11px;line-height:1.55}.content th,.content td{padding:8px 9px;border:1px solid #dce8d9;vertical-align:top;text-align:left}.content th{background:#e8f3e8;color:#29624d}.content td:first-child{color:#2d6651;font-weight:800}footer{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:8px 12px;border-top:1px solid #d9e6d6;background:#f6faf3}footer button{padding:5px 8px;border:1px solid #bcd5c2;border-radius:6px;background:#fffdf5;color:#326c55;font:inherit;font-size:11px;font-weight:800;cursor:pointer}footer button:disabled{opacity:.4;cursor:not-allowed}footer span{color:#7b9584;font-size:10px}@media(max-width:600px){.guide{min-width:0;height:min(720px,calc(100vh - 16px));resize:none}.guide-layout{grid-template-columns:110px minmax(0,1fr)}nav{padding:8px 5px}nav button{padding:8px 4px;font-size:11px}nav i{display:none}.title{padding:13px}.content{padding:11px 13px 16px}header small,footer span{display:none}.guide-trigger{right:14px;bottom:14px}}`}</style></>
+  useEffect(() => {
+    if (!open) return
+    const margin = 8
+    setSize(current => ({
+      width: Math.min(current.width, window.innerWidth - margin * 2),
+      height: Math.min(current.height, window.innerHeight - margin * 2),
+    }))
+    setPosition(current => ({
+      x: Math.max(margin, Math.min(current.x, window.innerWidth - Math.min(size.width, window.innerWidth - margin * 2) - margin)),
+      y: Math.max(margin, Math.min(current.y, window.innerHeight - Math.min(size.height, window.innerHeight - margin * 2) - margin)),
+    }))
+  }, [open, size.height, size.width])
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent) => {
+      const tag = (event.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (event.key === 'ArrowLeft' || event.key.toLowerCase() === 'a') setChapter(value => Math.max(0, value - 1))
+      if (event.key === 'ArrowRight' || event.key.toLowerCase() === 'd') setChapter(value => Math.min(chapters.length - 1, value + 1))
+      if (event.key === 'Escape') setOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, chapters.length])
+
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent) => {
+      const active = gesture.current
+      if (!active) return
+      event.preventDefault()
+      const margin = 8
+      const deltaX = event.clientX - active.pointerX
+      const deltaY = event.clientY - active.pointerY
+      if (active.kind === 'move') {
+        setPosition({
+          x: Math.max(margin, Math.min(active.left + deltaX, window.innerWidth - active.width - margin)),
+          y: Math.max(margin, Math.min(active.top + deltaY, window.innerHeight - active.height - margin)),
+        })
+        return
+      }
+
+      const direction = active.direction || ''
+      const minimumWidth = window.innerWidth < 600 ? Math.min(300, window.innerWidth - margin * 2) : 460
+      const minimumHeight = window.innerWidth < 600 ? 300 : 340
+      let left = active.left
+      let top = active.top
+      let width = active.width
+      let height = active.height
+
+      if (direction.includes('e')) width = Math.max(minimumWidth, Math.min(active.width + deltaX, window.innerWidth - active.left - margin))
+      if (direction.includes('s')) height = Math.max(minimumHeight, Math.min(active.height + deltaY, window.innerHeight - active.top - margin))
+      if (direction.includes('w')) {
+        const right = active.left + active.width
+        left = Math.max(margin, Math.min(active.left + deltaX, right - minimumWidth))
+        width = right - left
+      }
+      if (direction.includes('n')) {
+        const bottom = active.top + active.height
+        top = Math.max(margin, Math.min(active.top + deltaY, bottom - minimumHeight))
+        height = bottom - top
+      }
+      setPosition({ x: left, y: top })
+      setSize({ width, height })
+    }
+    const stopGesture = () => { gesture.current = null }
+    window.addEventListener('pointermove', onPointerMove, { passive: false })
+    window.addEventListener('pointerup', stopGesture)
+    window.addEventListener('pointercancel', stopGesture)
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', stopGesture)
+      window.removeEventListener('pointercancel', stopGesture)
+    }
+  }, [])
+
+  const beginMove = (event: React.PointerEvent<HTMLElement>) => {
+    if ((event.target as HTMLElement).closest('button')) return
+    gesture.current = {
+      kind: 'move', pointerX: event.clientX, pointerY: event.clientY,
+      left: position.x, top: position.y, width: size.width, height: size.height,
+    }
+  }
+
+  const beginResize = (direction: string) => (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    gesture.current = {
+      kind: 'resize', direction, pointerX: event.clientX, pointerY: event.clientY,
+      left: position.x, top: position.y, width: size.width, height: size.height,
+    }
+  }
+
+  const closeGuide = () => {
+    gesture.current = null
+    setOpen(false)
+  }
+
+  return <>
+    <button className="guide-trigger" type="button" onClick={() => setOpen(true)}>✦ 使用说明</button>
+    {open && <section
+      className="guide"
+      role="dialog"
+      aria-label="Pixel World 使用说明"
+      style={{ left: position.x, top: position.y, width: size.width, height: size.height }}
+    >
+      <header onPointerDown={beginMove}>
+        <span>⋮⋮</span>
+        <b>Pixel World 使用说明</b>
+        <small>拖动标题栏移动 · 拖动边框缩放</small>
+        <button type="button" aria-label="关闭使用说明" title="关闭" onPointerDown={event => event.stopPropagation()} onClick={closeGuide}>×</button>
+      </header>
+      <div className="guide-layout">
+        <nav>{chapters.map((item, index) => <button type="button" className={index === chapter ? 'active' : ''} onClick={() => setChapter(index)} key={item.title}><i>{String(index + 1).padStart(2, '0')}</i>{item.title}</button>)}</nav>
+        <article>
+          <div className="title"><span>使用说明</span><h2>{chapters[chapter].title}</h2></div>
+          <div className="content">{chapters[chapter].content}</div>
+          <footer><button type="button" disabled={chapter === 0} onClick={() => setChapter(chapter - 1)}>← 上一页</button><span>{chapter + 1} / {chapters.length} · A / D 翻页</span><button type="button" disabled={chapter === chapters.length - 1} onClick={() => setChapter(chapter + 1)}>下一页 →</button></footer>
+        </article>
+      </div>
+      {['n', 'e', 's', 'w', 'ne', 'se', 'sw', 'nw'].map(direction => <div key={direction} className="resize-handle" data-direction={direction} onPointerDown={beginResize(direction)} aria-hidden="true" />)}
+    </section>}
+    <style jsx>{`.guide-trigger{position:fixed;z-index:30;right:24px;bottom:24px;padding:10px 14px;border:1px solid #a8d0b2;border-radius:10px;background:#398b6f;color:#fffdf4;font-weight:800;box-shadow:0 10px 25px rgba(27,75,58,.22);cursor:pointer}.guide{position:fixed;z-index:40;min-width:0;min-height:0;overflow:hidden;border:1px solid #86b69a;border-radius:14px;background:#fffdf5;box-shadow:0 24px 58px rgba(22,65,52,.3)}header{height:44px;display:flex;align-items:center;gap:8px;padding:0 9px 0 11px;border-bottom:1px solid #bdd7c3;background:linear-gradient(100deg,#e4f4e7,#fff6dd 70%,#eef7ec);color:#245d4b;cursor:grab;user-select:none;touch-action:none}header:active{cursor:grabbing}header span{color:#679b78;letter-spacing:-3px}header b{font-size:14px}header small{margin-left:auto;color:#708a79;font-size:10px}header button{display:grid;width:30px;height:30px;place-items:center;border:1px solid transparent;border-radius:8px;background:transparent;color:#356d55;font-size:23px;line-height:1;cursor:pointer}header button:hover,header button:focus-visible{border-color:#a9cdb5;background:#fffaf0;color:#174c3a;outline:none}.guide-layout{display:grid;height:calc(100% - 44px);min-height:0;grid-template-columns:145px minmax(0,1fr)}nav{min-height:0;overflow:auto;padding:9px 7px;background:#f4f9f1;border-right:1px solid #d4e2d0}nav button{display:flex;width:100%;gap:7px;align-items:center;padding:8px 7px;margin-bottom:3px;border:1px solid transparent;border-radius:8px;background:transparent;color:#557366;font:inherit;font-size:12px;font-weight:800;text-align:left;cursor:pointer}nav i{color:#96ab9d;font-size:9px;font-style:normal}nav button.active{border-color:#a9d0b4;background:#fffdf5;color:#245d4b;box-shadow:inset 3px 0 #459072}article{display:grid;min-width:0;min-height:0;grid-template-rows:auto minmax(0,1fr) auto}.title{display:flex;align-items:baseline;gap:8px;padding:12px 17px 8px;border-bottom:1px solid #e1eadc}.title span{color:#be812d;font-size:9px;font-weight:900;letter-spacing:.15em}.title h2{margin:0;color:#245d4b;font-family:Georgia,'Songti SC',serif;font-size:19px}.content{min-height:0;overflow:auto;overscroll-behavior:contain;padding:11px 17px 17px;color:#46675a;font-size:13px;line-height:1.68;scrollbar-color:#8ebaa0 #eef5ea;scrollbar-width:thin}.content p{margin:0 0 10px}.content h3{margin:15px 0 6px;color:#275f4c;font-size:14px}.content ul{margin:6px 0 12px;padding-left:19px}.content li{margin:5px 0}.content li::marker{color:#c4812b}.content ol{padding-left:23px}.lead{color:#245d4b;font-family:Georgia,'Songti SC',serif;font-size:19px;font-weight:800}.flow{padding:10px 11px;border:1px dashed #9fcaab;border-radius:9px;background:#eff8ef;color:#326d57;font-size:12px;font-weight:800}.example,.tip{padding:10px 11px;border-radius:8px;font-size:12px}.example{border-left:3px solid #d09642;background:#fff7df;color:#5e694e}.tip{border:1px solid #b8d9e6;background:#eff9fc;color:#416b78}.content code{padding:1px 4px;border-radius:4px;background:#edf3ec;color:#37634f}.content table{width:100%;min-width:500px;margin:8px 0 13px;border-collapse:collapse;font-size:11px;line-height:1.5}.content th,.content td{padding:7px 8px;border:1px solid #dce8d9;vertical-align:top;text-align:left}.content th{background:#e8f3e8;color:#29624d}.content td:first-child{color:#2d6651;font-weight:800}footer{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:7px 10px;border-top:1px solid #d9e6d6;background:#f6faf3}footer button{padding:5px 8px;border:1px solid #bcd5c2;border-radius:6px;background:#fffdf5;color:#326c55;font:inherit;font-size:11px;font-weight:800;cursor:pointer}footer button:disabled{opacity:.4;cursor:not-allowed}footer span{color:#7b9584;font-size:10px}.resize-handle{position:absolute;z-index:5;touch-action:none}.resize-handle[data-direction=n]{top:0;right:13px;left:13px;height:8px;cursor:ns-resize}.resize-handle[data-direction=s]{right:13px;bottom:0;left:13px;height:8px;cursor:ns-resize}.resize-handle[data-direction=e]{top:13px;right:0;bottom:13px;width:8px;cursor:ew-resize}.resize-handle[data-direction=w]{top:13px;bottom:13px;left:0;width:8px;cursor:ew-resize}.resize-handle[data-direction=ne],.resize-handle[data-direction=se],.resize-handle[data-direction=sw],.resize-handle[data-direction=nw]{width:14px;height:14px}.resize-handle[data-direction=ne]{top:0;right:0;cursor:nesw-resize}.resize-handle[data-direction=se]{right:0;bottom:0;cursor:nwse-resize}.resize-handle[data-direction=sw]{bottom:0;left:0;cursor:nesw-resize}.resize-handle[data-direction=nw]{top:0;left:0;cursor:nwse-resize}@media(max-width:600px){.guide-layout{grid-template-columns:108px minmax(0,1fr)}nav{padding:7px 4px}nav button{padding:7px 4px;font-size:11px}nav i{display:none}.title{padding:11px}.content{padding:10px 11px 14px}header small,footer span{display:none}.guide-trigger{right:14px;bottom:14px}}`}</style>
+  </>
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { message } from 'antd'
+import { message, Splitter } from 'antd'
 import { useGameStore } from '@/lib/store'
 import { buildVirtualGameData } from '@/lib/virtual-levels'
 import { buildGameDataFromSpec } from '@/lib/virtual-levels'
@@ -533,8 +533,8 @@ export default function Home() {
           <ProjectHeader />
           <Guidebook />
           <div className="world-content-frame">
-            <div className="world-columns">
-              <div className="creator-panel">
+            <Splitter className="world-splitter">
+              <Splitter.Panel className="creator-panel" defaultSize="24%" min="18%" max="36%">
                 <SideMenu
                   onImageSourceChange={setActiveImageSource}
                   onCustomImageChange={setCustomImageConnection}
@@ -551,13 +551,13 @@ export default function Home() {
                   onRegeneratingImagesChange={setRegeneratingImages}
                   themesListRef={themesListRef}
                 />
-              </div>
+              </Splitter.Panel>
 
-              <div className="themes-panel">
+              <Splitter.Panel className="themes-panel" defaultSize="29%" min="20%" max="42%">
                 <div ref={setStudioWorkspaceTarget} className="studio-workspace-target" />
-              </div>
+              </Splitter.Panel>
 
-              <div className="workspace-panel">
+              <Splitter.Panel className="workspace-panel" defaultSize="47%" min="32%">
                 <div id="preview-publish" className="preview-scroll-content section-anchor">
                   <ThemePreview
                     isLoading={isLoading}
@@ -575,8 +575,8 @@ export default function Home() {
                     onDeleteTheme={handleDeleteTheme}
                   />
                 </div>
-              </div>
-            </div>
+              </Splitter.Panel>
+            </Splitter>
           </div>
         </div>
       )}
