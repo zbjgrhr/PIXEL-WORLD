@@ -1,5 +1,5 @@
 import type { GameSpec } from '@/types'
-import { animationClipPoses, normalizeAnimationSpec } from '@/lib/asset-catalog'
+import { ANIMATION_CLIP_POSES, animationClipPoses, normalizeAnimationSpec } from '@/lib/asset-catalog'
 
 const DB_NAME = 'pixel-world-assets-v3'
 const STORE_NAME = 'assets'
@@ -42,6 +42,20 @@ export async function cacheAssetUrl(projectId: string, assetId: string, url: str
       url,
       updatedAt: Date.now(),
     } satisfies StoredAsset)
+    transaction.oncomplete = () => resolve()
+    transaction.onerror = () => reject(transaction.error)
+  })
+  database.close()
+}
+
+export async function removeCachedAssetClips(projectId: string, assetId: string): Promise<void> {
+  const database = await openDatabase()
+  if (!database) return
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, 'readwrite')
+    for (const pose of ANIMATION_CLIP_POSES) {
+      transaction.objectStore(STORE_NAME).delete(`${projectId}:${assetId}:clip:${pose}`)
+    }
     transaction.oncomplete = () => resolve()
     transaction.onerror = () => reject(transaction.error)
   })

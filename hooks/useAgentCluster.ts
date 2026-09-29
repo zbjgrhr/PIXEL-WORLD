@@ -4,8 +4,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { loadLatestAgentRun, saveAgentRun } from '@/lib/agent-db'
 import { createPlanningTasks, createQualityTasks, taskId } from '@/lib/agents/graph'
 import { digestAgentInput } from '@/lib/agents/hash'
-import { countBlockingIssues, dedupeIssues } from '@/lib/agents/validation'
+import { countBlockingIssues, dedupeIssues, inspectGameSpec } from '@/lib/agents/validation'
+import { inspectSelectedInspirations } from '@/lib/agents/inspiration-review'
+import { stabilizeGameSpec } from '@/lib/game-spec-guardrails'
 import { stripLargeAssetUrls } from '@/lib/asset-db'
+import { isLocalAgentProvider } from '@/lib/agents/config'
+import { executeLocalAgentTask } from '@/lib/agents/local-client'
 import type {
   AgentArtifacts,
   AgentExecuteRequest,
@@ -55,6 +59,7 @@ function createRun(options: UseAgentClusterOptions, modelLock: AgentModelLock): 
     maxReviewRounds: 2,
     currentRound: 1,
     approved: false,
+    reviewMode: 'agent',
     tasks: createPlanningTasks(1),
     artifacts: {},
     createdAt: now,
@@ -190,6 +195,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
   }, [options.projectId])
 
   const callTask = useCallback(async (current: AgentRun, task: AgentTask, apiKey: string, baseSpec?: GameSpec): Promise<AgentCallResult> => {
+    if (current.modelLock.provider === 'managed') return { task: { ...task, status: 'failed', error: '站点云端体验已移除；请新建运行并选择其他文字工具。' }, error: '站点云端体验已移除。', recoverable: false }
     const requestData = {
       role: task.role,
       round: task.round,
@@ -216,6 +222,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
           provider: current.modelLock.provider,
           model: current.modelLock.model,
           apiKey,
+          baseUrl: current.modelLock.baseUrl,
           sourcePrompt: current.sourcePrompt,
           projectName: current.projectName,
           levelCount: current.levelCount,
@@ -223,15 +230,14 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
           artifacts: artifactsForRole(task.role, current.artifacts),
           imageUrls: task.role === 'visualQa' ? imageUrls(baseSpec) : undefined,
         }
-        const response = await fetch('/api/agents/execute', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: control.current.controller?.signal,
-          body: JSON.stringify(body),
-        })
-        const result = await response.json().catch(() => null) as AgentExecuteResponse | null
-        if (!response.ok || !result?.success || !result.data) {
-          lastError = result?.error || `Agent request failed (${response.status}).`
+        const result = isLocalAgentProvider(body.provider)
+          ? await executeLocalAgentTask(body, control.current.controller?.signal)
+          : await fetch('/api/agents/execute', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            signal: control.current.controller?.signal, body: JSON.stringify(body),
+          }).then(async (response) => (await response.json().catch(() => null) || { success: false, error: `HTTP ${response.status}` }) as AgentExecuteResponse)
+        if (!result?.success || !result.data) {
+          lastError = result?.error || 'Agent request failed.'
           recoverable = Boolean(result?.recoverable)
           if (recoverable && attempt < maxAttempts) {
             await new Promise((resolve) => setTimeout(resolve, 700 * (2 ** (attempt - 1))))
@@ -381,6 +387,30 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
     return drivePlanning(next, apiKey, initialSpec)
   }, [drivePlanning, options, publish])
 
+  const reviewLocalDraft = useCallback(async (baseSpec: GameSpec, modelLock: AgentModelLock) => {
+    control.current.controller?.abort()
+    control.current = { paused: false, cancelled: false }
+    const spec = stabilizeGameSpec(baseSpec)
+    const issues = dedupeIssues([
+      ...inspectGameSpec(spec, 'engineQa'),
+      ...inspectSelectedInspirations(options.sourcePrompt, spec),
+    ])
+    const now = Date.now()
+    const next: AgentRun = {
+      ...createRun(options, modelLock),
+      status: 'awaiting_approval',
+      reviewMode: 'local-draft',
+      tasks: [{ id: taskId('engineQa', 1), role: 'engineQa', phase: 'review', round: 1, dependencies: [],
+        status: countBlockingIssues(issues) ? 'needs-review' : 'completed', attempts: 0, issues,
+        summary: '由本地规则检查结构与引擎兼容性；所选灵感列出供你核对。未运行完整 Agent 集群。', completedAt: now }],
+      artifacts: { productionSpec: spec, reviewIssues: issues },
+      updatedAt: now,
+    }
+    await publish(next)
+    options.onSpecReady?.(spec)
+    return next
+  }, [options, publish])
+
   const pause = useCallback(() => {
     control.current.paused = true
     setRunState((current) => current ? { ...current, status: 'paused', updatedAt: Date.now() } : current)
@@ -444,6 +474,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
 
   const approve = useCallback(async () => {
     if (!run) return null
+    if (blockingIssues(run).length) return null
     const spec = run.artifacts.productionSpec || run.artifacts.revisedSpec || run.artifacts.mergedSpec
     if (!spec) return null
     const next = await publish({ ...run, approved: true, status: 'producing', updatedAt: Date.now() })
@@ -473,10 +504,10 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
   const reset = useCallback(async () => {
     control.current.controller?.abort()
     control.current = { paused: false, cancelled: false }
-    const next = createRun(options, run?.modelLock || { provider: 'openrouter', model: 'google/gemini-2.5-flash' })
+    const next = createRun(options, run?.modelLock.provider === 'managed' ? { provider: 'openrouter', model: 'google/gemini-2.5-flash' } : run?.modelLock || { provider: 'openrouter', model: 'google/gemini-2.5-flash' })
     await publish(next)
     return next
   }, [options, publish, run?.modelLock])
 
-  return { run, restoring, start, pause, cancel, resume, retryTask, approve, runQualityChecks, reset }
+  return { run, restoring, start, reviewLocalDraft, pause, cancel, resume, retryTask, approve, runQualityChecks, reset }
 }

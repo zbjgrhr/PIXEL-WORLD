@@ -1,4 +1,5 @@
 import { AGENT_ROLE_LABELS } from '@/lib/agents/config'
+import { selectedInspirationTexts } from '@/configs/inspiration-packs'
 import type { AgentExecuteRequest, AgentRole } from '@/types'
 
 const BASE = `You are one specialist inside Pixel World's controlled multi-agent game production system.
@@ -90,6 +91,8 @@ function roleContext(request: AgentExecuteRequest): string[] {
       ]
     case 'consistencyCritic':
       return [
+        `Player-selected inspiration ideas to check:\n${compact(selectedInspirationTexts(request.sourcePrompt), 5000)}`,
+        `Original request:\n${compactText(request.sourcePrompt, 10000)}`,
         `GameSpec under review:\n${compact(spec, 65000)}`,
         `Locked intent and art rules:\n${compact({ brief: a.brief, artDirection: a.artDirection, narrative: a.narrative }, 26000)}`,
       ]

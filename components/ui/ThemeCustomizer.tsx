@@ -13,6 +13,19 @@ function templateStory(prompt: string): string {
   return prompt.match(/^背景故事：\s*(.+)$/m)?.[1]?.trim() || ''
 }
 
+import { Alert, Button, Collapse, Input, InputNumber, Segmented, Select, Space, Tag, Typography, message } from 'antd'
+import { History, ListRestart, Sparkles } from 'lucide-react'
+import type { ThemeCustomizerProps } from '@/types'
+import { PROMPT_TEMPLATES } from '@/configs/prompt-templates'
+import { buildStructuredPrompt } from '@/lib/asset-catalog'
+
+const { Text } = Typography
+const { TextArea } = Input
+
+function templateStory(prompt: string): string {
+  return prompt.match(/^背景故事：\s*(.+)$/m)?.[1]?.trim() || ''
+}
+
 const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ creationMode = 'agent', onCreationModeChange, customThemeName, onThemeNameChange, customStory, onStoryChange, customPrompt, onPromptChange, levelCount = 3, onLevelCountChange, onOptimizePrompt, isOptimizing = false, optimizedSpec, hasSavedDraft = false, onRestoreDraft }) => {
   const handleTemplateSelect = (templateId: string) => {
     const template = PROMPT_TEMPLATES.find((item) => item.id === templateId)
@@ -26,8 +39,31 @@ const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ creationMode = 'agent
     message.success(`已加载模板：${template.name}`)
   }
   return <>
+    <div className="story-template-picker">
+      <Text strong>从故事模板开始（可选）</Text>
+      <Text type="secondary">选一个示例，会填入游戏名称、故事和关卡设定；之后都能修改。</Text>
+      <Select aria-label="选择故事模板" placeholder="选择故事模板" style={{ width: '100%' }} allowClear onChange={(value) => value && handleTemplateSelect(value)} options={PROMPT_TEMPLATES.map((item) => ({ value: item.id, label: item.name }))} />
+    </div>
     <div>
-      <Text strong style={{ display: 'block', marginBottom: 8 }}>Creation Mode / 创建方式</Text>
+      <Text strong style={{ display: 'block', marginBottom: 8 }}>游戏名称 <Text type="danger">*</Text></Text>
+      <Input required value={customThemeName} onChange={(event) => onThemeNameChange(event.target.value)} placeholder="例如：龙之城堡" />
+    </div>
+    <div>
+      <Text strong style={{ display: 'block', marginBottom: 8 }}>游戏故事 <Text type="danger">*</Text></Text>
+      <TextArea
+        required
+        value={customStory}
+        onChange={(event) => onStoryChange(event.target.value)}
+        rows={4}
+        placeholder="写下主角、目标、主要冲突与结局方向。一键优化和 Agent 集群都会围绕游戏名称与这段故事展开。"
+        style={{ width: '100%', lineHeight: 1.65 }}
+      />
+      <Text type="secondary" style={{ fontSize: 12 }}>这部分属于你的核心设定，优化和评审只会补充细节，不会擅自改写主题。</Text>
+    </div>
+    {inspiration}
+    <Button className="idea-next-button" type="primary" block disabled={!customThemeName.trim() || !customStory.trim()} onClick={onCompleteIdea}>完成故事，进入 AI 策划 →</Button>
+    <div>
+      <Text strong style={{ display: 'block', marginBottom: 8 }}>策划方式</Text>
       <Segmented
         block
         value={creationMode}
@@ -79,6 +115,7 @@ const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ creationMode = 'agent
         一键补全并优化提示词
       </Button>
       <TextArea value={customPrompt} onChange={(event) => onPromptChange(event.target.value)} rows={18} placeholder="请在各字段冒号后填写；不需要的项目可以留空。" style={{ width: '100%', fontSize: 12, lineHeight: 1.7 }} />
+      <div className="prompt-writing-help"><strong>怎么填写</strong><span>在字段冒号后写具体画面或玩法；不确定的留空。</span><small>主角：戴蓝披风的骑士，侧视像素风</small><small>关卡 1 背景：黄昏森林，留出行走区域</small></div>
       <Text type="secondary" style={{ fontSize: 12 }}>{creationMode === 'agent' ? '保留你明确填写的要求；Agent 只补充空白、消除冲突，不会覆盖你的核心设定。' : '保留需要的描述，其余字段留空；一键优化只补全空白或不足的字段。'}</Text>
     </div>
     {optimizedSpec && <Collapse size="small" items={[{
@@ -93,7 +130,7 @@ const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ creationMode = 'agent
       </Space>,
     }]} />}
     <div>
-      <Text strong style={{ display: 'block', marginBottom: 8 }}>Level Count / 关卡数量</Text>
+      <Text strong style={{ display: 'block', marginBottom: 8 }}>关卡数量</Text>
       <InputNumber value={levelCount} onChange={(value) => onLevelCountChange?.(value || 1)} min={1} max={10} style={{ width: '100%' }} />
       <Text type="secondary" style={{ fontSize: 12 }}>每关拥有独立背景、音乐和画面特效；最后一关默认包含 Boss。</Text>
     </div>

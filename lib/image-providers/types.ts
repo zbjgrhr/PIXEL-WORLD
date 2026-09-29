@@ -1,4 +1,5 @@
 export type ProviderId =
+  | 'custom'
   | 'dashscope'
   | 'openai'
   | 'openrouter'
@@ -27,6 +28,7 @@ export interface GenerateImageParams {
   assetType: AssetType
   apiKey: string
   model: string
+  baseUrl?: string
   size?: string
   layout?: 'single' | 'sprite-sheet' | 'animation-strip'
   frameCount?: number

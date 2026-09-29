@@ -13,6 +13,7 @@
     "@ant-design/icons": "^6.0.0",
     "@ant-design/nextjs-registry": "^1.1.0",
     "@ant-design/v5-patch-for-react-19": "^1.0.3",
+    "@mlc-ai/web-llm": "^0.2.85",
     "antd": "^5.27.1",
     "clsx": "^2.1.1",
     "framer-motion": "^12.23.12",

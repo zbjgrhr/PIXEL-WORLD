@@ -6,6 +6,7 @@ import { Download, RotateCcw, Sparkles, Trash2, Volume2 } from 'lucide-react'
 import { animationClipPoses, normalizeAnimationSpec } from '@/lib/asset-catalog'
 import type { AnimationClipPose, AnimationPose, AssetDefinition, ThemePreviewProps } from '@/types'
 import { ExportValidationError, exportGameZip } from '@/lib/export-game'
+import AssetUpload from '@/components/ui/AssetUpload'
 
 const { Text, Title, Paragraph } = Typography
 
@@ -66,7 +67,7 @@ function AnimatedSpritePreview({ asset, meleeWeaponUrl, rangedWeaponUrl, loading
   </div>
 }
 
-function PlannedAssetCard({ asset, levelOptions, loading, loadingPose, meleeWeaponUrl, rangedWeaponUrl, onRegenerate, onRegeneratePose, onUpdate }: {
+function PlannedAssetCard({ asset, levelOptions, loading, loadingPose, meleeWeaponUrl, rangedWeaponUrl, onRegenerate, onRegeneratePose, onUpdate, onUpload }: {
   asset: AssetDefinition
   levelOptions: Array<{ label: string; value: string }>
   loading: boolean
@@ -76,18 +77,20 @@ function PlannedAssetCard({ asset, levelOptions, loading, loadingPose, meleeWeap
   onRegenerate?: () => void
   onRegeneratePose?: (pose: AnimationClipPose) => void
   onUpdate?: (patch: Partial<AssetDefinition>) => void
+  onUpload?: (file: File, pose?: AnimationClipPose) => Promise<void>
 }) {
   return <Card size="small" title={<Space><Switch size="small" checked={asset.enabled} onChange={(enabled) => onUpdate?.({ enabled })} /><Text strong>{asset.title}</Text></Space>} extra={<Tag color={asset.status === 'success' ? 'success' : asset.status === 'failed' ? 'error' : asset.status === 'generating' ? 'processing' : 'default'}>{asset.status}</Tag>}>
     {loading && asset.kind !== 'spriteSheet' ? <Skeleton.Image active style={{ width: 190, height: 150 }} /> : asset.kind === 'spriteSheet' ? <AnimatedSpritePreview asset={asset} meleeWeaponUrl={meleeWeaponUrl} rangedWeaponUrl={rangedWeaponUrl} loadingPose={loadingPose} onRegenerate={onRegeneratePose} /> : asset.kind === 'image' ? (
       asset.url ? <Image src={asset.url} alt={asset.title} style={{ width: 190, height: 150, objectFit: asset.category === 'levelBackground' ? 'cover' : 'contain', imageRendering: 'pixelated' }} /> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Not generated" />
     ) : asset.kind === 'audio' ? <div style={{ minHeight: 110, display: 'grid', placeItems: 'center', background: '#f4f7ff', borderRadius: 8 }}><Space direction="vertical" align="center"><Volume2 /><Text>{asset.sound?.waveform} · {asset.sound?.frequency}Hz</Text><Tag color="purple">Web Audio</Tag></Space></div> : <div style={{ minHeight: 110, padding: 12, background: '#f7f7f7', borderRadius: 8 }}><Paragraph>{asset.prompt}</Paragraph><Tag color="cyan">{asset.motion?.pattern || 'Runtime Effect'}</Tag></div>}
     <Checkbox.Group value={asset.levelIds} options={levelOptions} onChange={(values) => onUpdate?.({ levelIds: values as string[] })} style={{ display: 'grid', gap: 4, marginTop: 10 }} />
+    {onUpload && (asset.kind === 'image' || asset.kind === 'spriteSheet') && <AssetUpload asset={asset} onUpload={onUpload} disabled={loading} />}
     {asset.error && <Paragraph type="danger" ellipsis={{ rows: 2, expandable: true }} style={{ margin: '8px 0 0' }}>{asset.error}</Paragraph>}
     {onRegenerate && asset.kind === 'image' && <Button size="small" icon={<RotateCcw size={13} />} loading={loading} onClick={onRegenerate} style={{ marginTop: 10 }}>Regenerate</Button>}
   </Card>
 }
 
-const ThemePreview: React.FC<ThemePreviewProps> = ({ isLoading, loadingMessage, gameData, selectedTheme, themes, apiKey = '', regeneratingAssetIds = [], onRegenerateAsset, onUpdateAsset, onDeleteTheme }) => {
+const ThemePreview: React.FC<ThemePreviewProps> = ({ isLoading, loadingMessage, gameData, selectedTheme, themes, apiKey = '', regeneratingAssetIds = [], onRegenerateAsset, onUpdateAsset, onUploadAsset, onDeleteTheme }) => {
   const [isExporting, setIsExporting] = useState(false)
   const selected = themes.find((theme) => theme.id === selectedTheme)
   const data = gameData?.data
@@ -122,7 +125,7 @@ const ThemePreview: React.FC<ThemePreviewProps> = ({ isLoading, loadingMessage, 
     }
   }
 
-  if (isLoading) return <Card style={{ flex: 1 }}><Title level={3}>Generating selected assets</Title><Paragraph>{loadingMessage}</Paragraph><Progress percent={Math.round((spec?.assets.filter((asset) => asset.status === 'success').length || 0) / Math.max(1, spec?.assets.length || 1) * 100)} status="active" /><Skeleton active paragraph={{ rows: 8 }} /></Card>
+  if (isLoading) return <Card style={{ flex: 1 }}><Title level={3}>正在制作素材</Title><Paragraph>{loadingMessage}</Paragraph><Progress percent={Math.round((spec?.assets.filter((asset) => asset.status === 'success').length || 0) / Math.max(1, spec?.assets.length || 1) * 100)} status="active" /><Skeleton active paragraph={{ rows: 8 }} /></Card>
   if (!selected) return <Card className="theme-preview-empty-card glass-card" style={{ flex: 1 }}>
     <div className="preview-empty-world">
       <div className="preview-empty-particles" aria-hidden="true">
@@ -130,9 +133,9 @@ const ThemePreview: React.FC<ThemePreviewProps> = ({ isLoading, loadingMessage, 
       </div>
       <div className="preview-empty-message">
         <span className="preview-empty-icon"><Sparkles size={24} /></span>
-        <Text className="preview-empty-kicker">YOUR NEXT PIXEL ADVENTURE</Text>
-        <Title level={2}>Select a theme</Title>
-        <Paragraph>Choose a world on the left, or describe your own colorful adventure to begin.</Paragraph>
+        <Text className="preview-empty-kicker">游戏预览</Text>
+        <Title level={2}>你的游戏会显示在这里</Title>
+        <Paragraph>先在中栏写名称和故事，完成策划与素材后，就能在这里查看和试玩。</Paragraph>
       </div>
     </div>
   </Card>
@@ -140,12 +143,12 @@ const ThemePreview: React.FC<ThemePreviewProps> = ({ isLoading, loadingMessage, 
   return <Card className="theme-preview-card glass-card" style={{ flex: 1, overflow: 'visible', height: 'fit-content' }} title={<div><Title level={3} style={{ margin: 0 }}>{selected.name}</Title><Text type="secondary">Theme Preview, Asset Assignment & Game Data</Text></div>} extra={<Space><Button type="primary" icon={<Download size={15} />} loading={isExporting} disabled={!spec} onClick={() => { void exportGame() }}>Export ZIP</Button>{selectedTheme.startsWith('custom-') && onDeleteTheme ? <Button danger icon={<Trash2 size={15} />} onClick={() => onDeleteTheme(selectedTheme)}>Delete</Button> : null}</Space>}>
     {spec ? <>
       <Card size="small" style={{ marginBottom: 20, background: '#f6f9ff' }}>
-        <Space wrap><Tag color="blue">V{spec.version}</Tag><Tag color="blue">{spec.levels.length} Levels</Tag><Tag color="purple">{spec.assets.filter((asset) => asset.enabled).length} Enabled Assets</Tag><Tag color="green">{spec.assets.reduce((count, asset) => count + (asset.kind === 'spriteSheet' && asset.animation?.layoutVersion === 3 ? animationClipPoses(asset).filter((pose) => normalizeAnimationSpec(asset.animation).clips?.[pose]?.url).length : asset.url ? 1 : 0), 0)} Generated Images</Tag></Space>
+        <Space wrap><Tag color="blue">{spec.levels.length} 关</Tag><Tag color="purple">{spec.assets.filter((asset) => asset.enabled).length} 项素材</Tag><Tag color="green">{spec.assets.reduce((count, asset) => count + (asset.kind === 'spriteSheet' && asset.animation?.layoutVersion === 3 ? animationClipPoses(asset).filter((pose) => normalizeAnimationSpec(asset.animation).clips?.[pose]?.url).length : asset.url ? 1 : 0), 0)} 张图片</Tag></Space>
         <Paragraph ellipsis={{ rows: 2, expandable: true }} style={{ margin: '10px 0 0' }}>{spec.world}</Paragraph>
       </Card>
       {groupedAssets.map(([group, assets]) => <section key={group} style={{ marginBottom: 28 }}><Title level={4}>{group}</Title><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(235px, 1fr))', gap: 14 }}>{assets.map((asset) => {
         const loadingPose = animationClipPoses(asset).find((pose) => regeneratingAssetIds.includes(`${asset.id}:${pose}`))
-        return <PlannedAssetCard key={asset.id} asset={asset} levelOptions={levelOptions} loading={regeneratingAssetIds.includes(asset.id) || Boolean(loadingPose)} loadingPose={loadingPose} meleeWeaponUrl={meleeWeaponUrl} rangedWeaponUrl={rangedWeaponUrl} onRegenerate={onRegenerateAsset ? () => onRegenerateAsset(selectedTheme, asset.id, apiKey) : undefined} onRegeneratePose={onRegenerateAsset ? (pose) => onRegenerateAsset(selectedTheme, asset.id, apiKey, pose) : undefined} onUpdate={onUpdateAsset ? (patch) => onUpdateAsset(selectedTheme, asset.id, patch) : undefined} />
+        return <PlannedAssetCard key={asset.id} asset={asset} levelOptions={levelOptions} loading={regeneratingAssetIds.includes(asset.id) || Boolean(loadingPose)} loadingPose={loadingPose} meleeWeaponUrl={meleeWeaponUrl} rangedWeaponUrl={rangedWeaponUrl} onRegenerate={onRegenerateAsset ? () => onRegenerateAsset(selectedTheme, asset.id, apiKey) : undefined} onRegeneratePose={onRegenerateAsset ? (pose) => onRegenerateAsset(selectedTheme, asset.id, apiKey, pose) : undefined} onUpdate={onUpdateAsset ? (patch) => onUpdateAsset(selectedTheme, asset.id, patch) : undefined} onUpload={selectedTheme.startsWith('custom-') && onUploadAsset ? (file, pose) => onUploadAsset(selectedTheme, asset.id, file, pose) : undefined} />
       })}</div></section>)}
     </> : <Empty description="No V3 game specification" />}
   </Card>

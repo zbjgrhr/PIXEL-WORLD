@@ -12,12 +12,14 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
   customPrompt,
   customThemeName,
   apiKey,
+  allowWithoutApiKey = false,
+  showCreateButton = true,
   onCreateTheme,
   onStartGame
 }) => {
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Button
+      {showCreateButton && <Button
         type="default"
         size="large"
         icon={!isThemeCreated ? <Sparkles size={16} /> : <RotateCcw size={16} />}
@@ -25,14 +27,14 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         loading={isLoading}
         style={{ width: '100%', height: '48px' }}
         disabled={
-          !apiKey.trim() ||
+          (!allowWithoutApiKey && !apiKey.trim()) ||
           (customThemeName.trim() || customPrompt.trim()
             ? !customThemeName.trim() || !customPrompt.trim()
             : !selectedTheme)
         }
       >
-        {!isThemeCreated ? 'Create Theme' : 'Reset'}
-      </Button>
+        {!isThemeCreated ? '生成所选素材' : '重新生成所选素材'}
+      </Button>}
       <Button
         type="primary"
         size="large"
@@ -41,7 +43,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         style={{ width: '100%', height: '48px' }}
         disabled={!selectedTheme}
       >
-        Start Game
+        试玩我的游戏
       </Button>
     </Space>
   )

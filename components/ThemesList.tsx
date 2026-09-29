@@ -1,10 +1,8 @@
 'use client'
 
 import React, { forwardRef } from 'react'
-import { Card, Space, Skeleton } from 'antd'
-import { ThemesListProps } from '../types'
-import { useGameStore } from '../lib/store'
-import { isCustomTheme } from '../lib/theme-utils'
+import { Select } from 'antd'
+import type { GameTheme, ThemesListProps } from '@/types'
 
 const ThemesList = forwardRef<HTMLDivElement, ThemesListProps>((
   { themes, selectedTheme, onThemeSelect },
@@ -82,5 +80,4 @@ const ThemesList = forwardRef<HTMLDivElement, ThemesListProps>((
 })
 
 ThemesList.displayName = 'ThemesList'
-
 export default ThemesList

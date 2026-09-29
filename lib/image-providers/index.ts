@@ -13,6 +13,7 @@ import { openrouterProvider } from '@/lib/image-providers/openrouter'
 import { pollinationsProvider } from '@/lib/image-providers/pollinations'
 import { tencentProvider } from '@/lib/image-providers/tencent'
 import { togetherProvider } from '@/lib/image-providers/together'
+import { customImageProvider } from '@/lib/image-providers/custom'
 import {
   ProviderApiKeyError,
   ProviderValidationError,
@@ -22,6 +23,7 @@ import {
 import { apiKeyHasUnsupportedCharacters, normalizeApiKey } from '@/lib/api-key'
 
 const providers: Record<ProviderId, ImageProvider> = {
+  custom: customImageProvider,
   dashscope: dashscopeProvider,
   openai: openaiProvider,
   openrouter: openrouterProvider,
@@ -41,12 +43,17 @@ export function getImageProvider(providerId: ProviderId): ImageProvider {
 }
 
 export function resolveApiKey(providerId: ProviderId, requestKey?: string): string {
+  if (providerId === 'custom') {
+    const key = normalizeApiKey(requestKey?.trim())
+    if (!key || apiKeyHasUnsupportedCharacters(key)) throw new ProviderValidationError('请填写有效的自定义服务 API Key。', 'custom')
+    return key
+  }
   const config = getProviderConfig(providerId)
   if (!config) {
     throw new ProviderValidationError(`Unknown provider: ${providerId}`)
   }
 
-  const rawKey = requestKey?.trim() || process.env[config.envKey]?.trim()
+  const rawKey = requestKey?.trim()
   const key = normalizeApiKey(rawKey)
   if (!key) {
     throw new ProviderApiKeyError(providerId)
@@ -65,6 +72,11 @@ export function normalizeProviderRequest(
   model?: string,
 ): { provider: ProviderId; model: string } {
   const resolvedProvider = (provider as ProviderId) || getDefaultProvider()
+  if (resolvedProvider === 'custom') {
+    const customModel = model?.trim() || ''
+    if (!customModel || customModel.length > 160 || /[\r\n]/.test(customModel)) throw new ProviderValidationError('请填写有效的自定义图片模型 ID。', 'custom')
+    return { provider: 'custom', model: customModel }
+  }
   const config = getProviderConfig(resolvedProvider)
 
   if (!config) {

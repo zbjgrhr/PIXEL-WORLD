@@ -64,23 +64,6 @@ function endpoint(provider: AgentProviderId): string {
   return 'https://openrouter.ai/api/v1/chat/completions'
 }
 
-function responseText(payload: ChatPayload): string {
-  const content = payload.choices?.[0]?.message?.content
-  if (typeof content === 'string') return content
-  if (Array.isArray(content)) return content.map((part) => part.text || '').join('')
-  return ''
-}
-
-function parseJsonObject(content: string): Record<string, unknown> {
-  const cleaned = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '')
-  const start = cleaned.indexOf('{')
-  const end = cleaned.lastIndexOf('}')
-  if (start < 0 || end <= start) throw new Error('Agent returned no JSON object.')
-  const parsed = JSON.parse(cleaned.slice(start, end + 1)) as unknown
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Agent JSON must be an object.')
-  return parsed as Record<string, unknown>
-}
-
 function imageContent(text: string, urls: string[]) {
   const safeUrls = urls.filter((url) => /^https:\/\//i.test(url)).slice(0, 6)
   if (!safeUrls.length) return text
@@ -96,6 +79,7 @@ async function callModel(
   system: string,
   user: string,
   responseFormat = true,
+  onAttempt?: () => Promise<void>,
 ): Promise<ChatPayload> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS)
@@ -137,7 +121,7 @@ async function callModel(
   if (!response.ok) {
     const detail = (await response.text()).slice(0, 1000)
     if (response.status === 400 && responseFormat && /response.format|response_format|json.object/i.test(detail)) {
-      return callModel(request, apiKey, system, user, false)
+      return callModel(request, apiKey, system, user, false, onAttempt)
     }
     const recoverable = response.status === 408 || response.status === 429 || response.status >= 500
     throw new AgentUpstreamError(response.status, `Agent API failed (${response.status}): ${detail}`, recoverable)
@@ -145,14 +129,15 @@ async function callModel(
   return response.json() as Promise<ChatPayload>
 }
 
-async function callAndParse(request: AgentExecuteRequest, apiKey: string): Promise<{ parsed: Record<string, unknown>; usage: AgentUsage }> {
+async function callAndParse(request: AgentExecuteRequest, apiKey: string, onAttempt?: () => Promise<void>): Promise<{ parsed: Record<string, unknown>; usage: AgentUsage }> {
   const prompts = buildAgentPrompts(request)
-  const first = await callModel(request, apiKey, prompts.system, prompts.user)
+  const first = await callModel(request, apiKey, prompts.system, prompts.user, !onAttempt, onAttempt)
   let parsed: Record<string, unknown>
   let payload = first
   try {
     parsed = parseJsonObject(responseText(first))
   } catch {
+    if (onAttempt) throw new AgentUpstreamError(502, '云端文字模型未返回有效 JSON；本次上游尝试已计费。', false)
     const repairSystem = 'Return valid JSON only. Preserve the supplied content without adding executable code or explanations.'
     const repairUser = `Repair this malformed Agent response into {"summary":string,"artifact":object,"issues":array}:\n${responseText(first).slice(0, 30000)}`
     payload = await callModel(request, apiKey, repairSystem, repairUser, true)
@@ -318,6 +303,7 @@ function normalizeArtifact(
 }
 
 function errorStatus(error: unknown): number {
+  if (error instanceof CustomEndpointError) return error.status === 401 || error.status === 403 ? 401 : error.status === 429 ? 429 : error.status >= 500 ? 502 : 400
   if (error instanceof AgentUpstreamError) return error.status === 401 || error.status === 403 ? 401 : error.status === 429 ? 429 : error.status >= 500 ? 502 : 400
   return 500
 }
@@ -341,24 +327,41 @@ export async function POST(nextRequest: NextRequest) {
       imageUrls: Array.isArray(body.imageUrls) ? body.imageUrls.filter((url) => typeof url === 'string' && /^https:\/\//i.test(url)).slice(0, 6) : undefined,
     }
     const provider = getAgentProvider(body.provider)
-    if (!provider.models.some((model) => model.id === body!.model)) {
+    if (body.provider === 'custom') {
+      body.baseUrl = validateCustomBaseUrl(body.baseUrl || '')
+      if (!body.model?.trim() || body.model.length > 160 || /[\r\n]/.test(body.model)) throw new CustomEndpointError(400, '请填写有效的自定义文字模型 ID。')
+    } else if (!provider.models.some((model) => model.id === body!.model)) {
       return NextResponse.json({ success: false, error: 'The selected Agent model is not supported.', recoverable: false, timestamp: new Date().toISOString() } satisfies AgentExecuteResponse, { status: 400 })
     }
-    const key = normalizeApiKey(body.apiKey || process.env[provider.envKey])
+    const key = normalizeApiKey(body.apiKey)
     if (!key || apiKeyHasUnsupportedCharacters(key)) {
       return NextResponse.json({ success: false, error: 'A valid Agent API Key is required.', recoverable: false, timestamp: new Date().toISOString() } satisfies AgentExecuteResponse, { status: 401 })
     }
 
     const { parsed, usage } = await callAndParse(body, key)
+    if (body.provider === 'custom') {
+      const rawArtifact = parsed.artifact
+      if (!rawArtifact || typeof rawArtifact !== 'object' || Array.isArray(rawArtifact) || !Object.keys(rawArtifact).length
+        || ((body.role === 'integrator' || body.role === 'revision') && !(rawArtifact as Record<string, unknown>).spec)) {
+        throw new AgentUpstreamError(502, '自定义文字模型未返回 Agent 所需的结构化内容。', false)
+      }
+      if (body.provider === 'custom' && body.runId.startsWith('agent-test-') && body.role === 'integrator') {
+        const spec = (rawArtifact as Record<string, unknown>).spec as Record<string, unknown> | undefined
+        if (!spec || spec.version !== 3 || !Array.isArray(spec.levels) || !spec.levels.length || !Array.isArray(spec.assets) || !spec.assets.length) {
+          throw new AgentUpstreamError(502, '模型返回了 JSON，但未提供完整的 GameSpec V3 关卡和素材结构。', false)
+        }
+      }
+    }
     const { artifact, issues } = normalizeArtifact(body, parsed)
     const summary = typeof parsed.summary === 'string' && parsed.summary.trim()
       ? parsed.summary.trim().slice(0, 1200)
       : `${body.role} completed its structured deliverable.`
-    return NextResponse.json({
+    const result = NextResponse.json({
       success: true,
       data: { role: body.role, artifact, summary, issues, usage, provider: body.provider, model: body.model },
       timestamp: new Date().toISOString(),
     } satisfies AgentExecuteResponse)
+    return result
   } catch (error) {
     const upstreamRejectedPermanently = error instanceof AgentUpstreamError && !error.recoverable
     if (body && (body.role === 'integrator' || body.role === 'revision') && !upstreamRejectedPermanently) {
@@ -367,11 +370,12 @@ export async function POST(nextRequest: NextRequest) {
     const recoverable = error instanceof AgentUpstreamError
       ? error.recoverable
       : error instanceof Error && /fetch|network|socket|ECONN|ENOTFOUND|timeout/i.test(error.message)
-    return NextResponse.json({
+    const result = NextResponse.json({
       success: false,
       error: error instanceof Error ? error.message : 'Agent execution failed.',
       recoverable,
       timestamp: new Date().toISOString(),
     } satisfies AgentExecuteResponse, { status: errorStatus(error) })
+    return result
   }
 }
