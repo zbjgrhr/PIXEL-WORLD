@@ -140,7 +140,7 @@ const ThemePreview: React.FC<ThemePreviewProps> = ({ isLoading, loadingMessage, 
     </div>
   </Card>
 
-  return <Card className="theme-preview-card glass-card" style={{ flex: 1, overflow: 'visible', height: 'fit-content' }} title={<div><Title level={3} style={{ margin: 0 }}>{selected.name}</Title><Text type="secondary">Theme Preview, Asset Assignment & Game Data</Text></div>} extra={<Space><Button type="primary" icon={<Download size={15} />} loading={isExporting} disabled={!spec} onClick={() => { void exportGame() }}>Export ZIP</Button>{selectedTheme.startsWith('custom-') && onDeleteTheme ? <Button danger icon={<Trash2 size={15} />} onClick={() => onDeleteTheme(selectedTheme)}>Delete</Button> : null}</Space>}>
+  return <Card className="theme-preview-card glass-card" style={{ flex: 1, overflow: 'visible', height: 'fit-content' }} extra={<Space><Button type="primary" icon={<Download size={15} />} loading={isExporting} disabled={!spec} onClick={() => { void exportGame() }}>导出游戏 ZIP</Button>{selectedTheme.startsWith('custom-') && onDeleteTheme ? <Button danger icon={<Trash2 size={15} />} onClick={() => onDeleteTheme(selectedTheme)}>删除游戏</Button> : null}</Space>}>
     {spec ? <>
       <Card size="small" style={{ marginBottom: 20, background: '#f6f9ff' }}>
         <Space wrap><Tag color="blue">{spec.levels.length} 关</Tag><Tag color="purple">{spec.assets.filter((asset) => asset.enabled).length} 项素材</Tag><Tag color="green">{spec.assets.reduce((count, asset) => count + (asset.kind === 'spriteSheet' && asset.animation?.layoutVersion === 3 ? animationClipPoses(asset).filter((pose) => normalizeAnimationSpec(asset.animation).clips?.[pose]?.url).length : asset.url ? 1 : 0), 0)} 张图片</Tag></Space>

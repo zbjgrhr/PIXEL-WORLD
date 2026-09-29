@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Alert, Button, Card, Collapse, Input, Progress, Select, Space, Tag, Typography, message } from 'antd'
-import { Bot, CheckCircle2, CircleStop, FlaskConical, Pause, Play, RotateCcw, ShieldCheck, Sparkles } from 'lucide-react'
+import { CheckCircle2, CircleStop, FlaskConical, Pause, Play, RotateCcw, ShieldCheck, Sparkles } from 'lucide-react'
 import { loadAgentApiKey, loadAgentApiPrefs, saveAgentApiPrefs } from '@/lib/agent-api-prefs'
 import { AGENT_PROVIDERS, AGENT_ROLE_LABELS, LOCAL_AGENT_PROVIDERS, getAgentProvider, getDefaultAgentModel, isLocalAgentProvider, localProviderConfig } from '@/lib/agents/config'
 import { discoverLocalModels, safeLocalBaseUrl, testLocalAgentConnection } from '@/lib/agents/local-client'
@@ -310,19 +310,31 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
     }
   }
 
-  const runAgentAction = async (action: () => Promise<unknown>) => {
-    try {
-      await action()
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Agent 操作未完成，请稍后重试。')
+  const start = async () => {
+    if (!selected) return void message.error('请先选择一个可用的文字 Agent 工具。')
+    if (provider === 'custom') { const issue = customConnectionError(customAgent); if (issue) return void message.error(issue) }
+    if (!isLocalAgentProvider(provider) && !activeKey) return void message.error('请先填写文字 Agent API Key。')
+    if (!(provider === 'custom' ? customAgent.model : model).trim()) return void message.error('请先检测并选择模型。')
+    if (!baseSpec) return void message.error('请先补全提示词并检查草案，再启动 Agent 集群。')
+    const modelLock = { provider, model: provider === 'custom' ? customAgent.model.trim() : model, baseUrl: activeBaseUrl }
+    if (provider === 'webllm') {
+      if (webLlmSetup.state !== 'ready') return void message.error('请先准备浏览器模型，再进行轻量灵感补全。')
+      await cluster.reviewLocalDraft(baseSpec, modelLock)
+      message.success('已用本地规则检查完整草案，等待你审核后制作素材。')
+      return
+    }
+    const finished = await cluster.start(modelLock, activeKey, baseSpec)
+    if (isLocalAgentProvider(provider) && finished.status === 'failed') {
+      await cluster.reviewLocalDraft(baseSpec, modelLock)
+      message.warning('本机模型无法完成完整 Agent 评审，已切换为可审核的本地草案。')
     }
   }
 
-  const start = async () => {
-    if (!apiKey.trim()) return void message.error('请先填写文字 Agent API Key。')
-    const preparedSpec = baseSpec || await onOptimizePrompt?.()
-    if (!preparedSpec) return void message.error('暂时无法建立游戏规格，请先点击“一键补全并优化提示词”后重试。')
-    await cluster.start({ provider, model }, apiKey.trim(), preparedSpec)
+  const runAgentAction = async (action: () => Promise<unknown>) => {
+    try {
+      if (legacyManagedRun) throw new Error('这个历史运行使用已移除的站点云端服务；请新建运行并选择文字工具。')
+      await action()
+    } catch (error) { message.error(error instanceof Error ? error.message : 'Agent 操作失败。') }
   }
 
   return <Card
@@ -412,11 +424,8 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
         </Button>
       </div>
       <Space wrap>
-        <Button icon={<Sparkles size={14} />} loading={isOptimizing} onClick={() => { void onOptimizePrompt?.() }}>
-          一键补全并优化提示词
-        </Button>
-        <Button icon={<FlaskConical size={14} />} loading={testing} onClick={() => { void testAgentApi() }}>测试 Agent API</Button>
-        {(!cluster.run || ['draft', 'failed', 'cancelled'].includes(cluster.run.status)) && <Button type="primary" icon={<Play size={14} />} onClick={() => { void start() }}>启动 Agent 集群</Button>}
+        <Button icon={<FlaskConical size={14} />} disabled={!selected || legacyManagedRun || (provider === 'webllm' && webLlmSetup.state !== 'ready')} loading={testing} onClick={() => { void testAgentApi() }}>{!selected ? '选择工具后测试' : provider === 'custom' ? '测试连接' : isLocalAgentProvider(provider) ? '测试文字模型' : '测试 Agent API'}</Button>
+        {(!cluster.run || ['draft', 'failed', 'cancelled'].includes(cluster.run.status)) && <Button type="primary" disabled={!selected || !baseSpec || isOptimizing || legacyManagedRun || (provider === 'webllm' && webLlmSetup.state !== 'ready')} icon={<Play size={14} />} onClick={() => { void start() }}>{provider === 'webllm' ? '检查草案并进入审核' : '启动 Agent 集群'}</Button>}
         {cluster.run && ['planning', 'reviewing'].includes(cluster.run.status) && <Button icon={<Pause size={14} />} onClick={cluster.pause}>暂停</Button>}
         {cluster.run?.status === 'paused' && <Button type="primary" disabled={legacyManagedRun} icon={<Play size={14} />} onClick={() => { void runAgentAction(() => cluster.resume(activeKey)) }}>继续</Button>}
         {cluster.run && ['planning', 'reviewing', 'paused'].includes(cluster.run.status) && <Button danger icon={<CircleStop size={14} />} onClick={cluster.cancel}>取消</Button>}

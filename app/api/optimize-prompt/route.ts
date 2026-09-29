@@ -10,6 +10,7 @@ import type { GameSpec, ProviderId } from '@/types'
 import { PROMPT_TEMPLATES } from '@/configs/prompt-templates'
 import { apiKeyHasUnsupportedCharacters, normalizeApiKey } from '@/lib/api-key'
 import { isStructuredPromptBlank } from '@/lib/asset-catalog'
+import { mergeProjectBrief } from '@/lib/project-brief'
 
 interface OptimizeRequest {
   prompt?: string
@@ -120,11 +121,9 @@ export async function POST(request: NextRequest) {
     const levelCount = Math.min(10, Math.max(1, body.levelCount || 3))
     const submittedPrompt = body.prompt?.trim() || ''
     const basePrompt = isStructuredPromptBlank(submittedPrompt)
-      ? `Create an original colorful ${levelCount}-level pixel platform adventure. Fill every required GameSpec V3 field with a coherent hero, melee and ranged combat, enemies, collectibles, distinct level environments, and a final boss. Keep every visual asset isolated and game-ready.`
+      ? story ? '' : `Create an original colorful ${levelCount}-level pixel platform adventure. Fill every required GameSpec V3 field with a coherent hero, melee and ranged combat, enemies, collectibles, distinct level environments, and a final boss. Keep every visual asset isolated and game-ready.`
       : submittedPrompt
-    const prompt = story
-      ? `游戏标题：${theme}\n世界观与故事：${story}\n背景故事：${story}\n\n${basePrompt}`
-      : basePrompt
+    const prompt = mergeProjectBrief(basePrompt, body.theme?.trim() || '', story)
 
     const fallback = createFallbackGameSpec(prompt, theme, levelCount)
     const provider = body.provider || 'dashscope'

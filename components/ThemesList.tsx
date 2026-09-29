@@ -1,85 +1,22 @@
 'use client'
 
 import React, { forwardRef } from 'react'
-import { Card, Skeleton, Space } from 'antd'
+import { Select } from 'antd'
 import type { GameTheme, ThemesListProps } from '@/types'
-import { useGameStore } from '@/lib/store'
-import { isCustomTheme } from '@/lib/theme-utils'
 
-const ThemesList = forwardRef<HTMLDivElement, ThemesListProps>((
-  { themes, selectedTheme, onThemeSelect },
-  ref
-) => {
-  const { getGameDataForTheme } = useGameStore()
-  return (
-    <Card
-      className="theme-list-card glass-card"
-      title="Theme List"
-      style={{ width: '400px', height: 'fit-content', display: 'flex', flexDirection: 'column' }}
-      styles={{
-        body: {
-          overflow: 'visible'
-        } as React.CSSProperties
-      }}
-    >
-      <div ref={ref} style={{ height: 'auto', overflow: 'visible' }}>
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        {themes.map((theme) => (
-          <div key={theme.id} style={{ width: '100%' }}>
-            <Card
-              className={`theme-choice-card${selectedTheme === theme.id ? ' is-selected' : ''}`}
-              hoverable={!(theme as any).isLoading}
-              size="small"
-              style={{
-                border: selectedTheme === theme.id ? '2px solid #1890ff' : '2px solid rgb(233, 236, 239)',
-                cursor: (theme as any).isLoading ? 'default' : 'pointer',
-                width: '100%',
-                opacity: (theme as any).isLoading ? 0.7 : 1
-              }}
-              onClick={() => !(theme as any).isLoading && onThemeSelect(theme.id)}
-              cover={
-                <div style={{ height: '120px', overflow: 'hidden', position: 'relative' }}>
-                  {(theme as any).isLoading ? (
-                    <div style={{
-                      width: '100%',
-                      height: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      backgroundColor: '#f5f5f5'
-                    }}>
-                      <Skeleton.Image style={{ width: '100%', height: '100%' }} />
-                    </div>
-                  ) : (
-                    <img
-                        alt={theme.name}
-                        src={
-                          isCustomTheme(theme.id) && getGameDataForTheme(theme.id)?.data?.levels?.[0]?.backgroundUrl
-                            ? getGameDataForTheme(theme.id).data!.levels[0].backgroundUrl
-                            : theme.backgroundImage
-                        }
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      />
-                  )}
-                </div>
-              }
-            >
-              <Card.Meta
-                title={<span style={{ fontSize: '14px' }}>{theme.name}</span>}
-                description={
-                  <span style={{ fontSize: '12px', color: '#666' }}>
-                    {theme.description}
-                  </span>
-                }
-              />
-            </Card>
-          </div>
-        ))}
-      </Space>
-      </div>
-    </Card>
-  )
-})
+const ThemesList = forwardRef<HTMLDivElement, ThemesListProps>(({ themes, selectedTheme, onThemeSelect }, ref) => (
+  <div ref={ref} className="workspace-project-switcher">
+    <div className="workspace-project-label"><strong>已创建的游戏</strong><span>选择一个，在右栏查看和试玩</span></div>
+    <Select<GameTheme>
+      aria-label="选择游戏"
+      value={themes.some((theme) => theme.id === selectedTheme) ? selectedTheme : undefined}
+      placeholder="选择自己的游戏"
+      onChange={onThemeSelect}
+      options={themes.map((theme) => ({ value: theme.id, label: theme.name, disabled: Boolean(theme.isLoading) }))}
+      style={{ width: '100%' }}
+    />
+  </div>
+))
 
 ThemesList.displayName = 'ThemesList'
 export default ThemesList

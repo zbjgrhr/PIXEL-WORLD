@@ -413,6 +413,7 @@ export interface GameData {
 
 export interface ProjectHeaderProps {
   className?: string
+  onOpenGuide?: () => void
 }
 
 export interface ModelSelectorProps {

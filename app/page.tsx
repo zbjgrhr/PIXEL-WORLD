@@ -1,13 +1,12 @@
 'use client'
 
 import React, { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { message, Splitter } from 'antd'
+import { message } from 'antd'
 import { useGameStore } from '@/lib/store'
 import { buildVirtualGameData } from '@/lib/virtual-levels'
 import { buildGameDataFromSpec } from '@/lib/virtual-levels'
 import { ensureThemeSpec, getThemeSourcePrompt, isStoredTheme } from '@/lib/theme-migration'
-import { GameCanvas, ProjectHeader, SideMenu, ThemePreview } from '@/components/ui'
-import Guidebook from '@/components/ui/Guidebook'
+import { GameCanvas, Guidebook, ProjectHeader, SideMenu, ThemePreview } from '@/components/ui'
 import GameCoverMenu from '@/components/GameCoverMenu'
 import { PRESET_THEMES } from '@/configs'
 import { getDefaultModel, getDefaultProvider } from '@/configs/image-providers'
@@ -533,8 +532,8 @@ export default function Home() {
           <ProjectHeader />
           <Guidebook />
           <div className="world-content-frame">
-            <Splitter className="world-splitter">
-              <Splitter.Panel className="creator-panel" defaultSize="24%" min="18%" max="36%">
+            <div className="world-columns">
+              <div className="creator-panel">
                 <SideMenu
                   onImageSourceChange={setActiveImageSource}
                   onCustomImageChange={setCustomImageConnection}
@@ -550,14 +549,19 @@ export default function Home() {
                   generateImages={generateImages}
                   onRegeneratingImagesChange={setRegeneratingImages}
                   themesListRef={themesListRef}
+                  themes={themes}
+                  onThemeSelect={setSelectedTheme}
+                  activeStage={activeStudioStage}
+                  onStageChange={setActiveStudioStage}
+                  workspaceTarget={studioWorkspaceTarget}
                 />
-              </Splitter.Panel>
+              </div>
 
-              <Splitter.Panel className="themes-panel" defaultSize="29%" min="20%" max="42%">
+              <div className="themes-panel">
                 <div ref={setStudioWorkspaceTarget} className="studio-workspace-target" />
-              </Splitter.Panel>
+              </div>
 
-              <Splitter.Panel className="workspace-panel" defaultSize="47%" min="32%">
+              <div className="workspace-panel">
                 <div id="preview-publish" className="preview-scroll-content section-anchor">
                   <ThemePreview
                     isLoading={isLoading}
@@ -575,8 +579,8 @@ export default function Home() {
                     onDeleteTheme={handleDeleteTheme}
                   />
                 </div>
-              </Splitter.Panel>
-            </Splitter>
+              </div>
+            </div>
           </div>
         </div>
       )}

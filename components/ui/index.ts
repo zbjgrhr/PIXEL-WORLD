@@ -2,6 +2,7 @@
 // This file provides a centralized export for all UI components
 
 export { default as ProjectHeader } from './ProjectHeader'
+export { default as Guidebook } from './Guidebook'
 export { default as ModelSelector } from './ModelSelector'
 export { default as ApiPlatformGuide } from './ApiPlatformGuide'
 export { default as ThemeCustomizer } from './ThemeCustomizer'
