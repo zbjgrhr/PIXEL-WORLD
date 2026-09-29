@@ -30,6 +30,7 @@ interface UseAgentClusterOptions {
   baseSpec?: GameSpec | null
   onSpecReady?: (spec: GameSpec) => void
   onApproved?: (spec: GameSpec) => void
+  onApprovedRestored?: (spec: GameSpec) => void
 }
 
 interface AgentCallResult {
@@ -188,7 +189,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
       setRunState(recovered)
       if (recovered?.artifacts.productionSpec) {
         options.onSpecReady?.(recovered.artifacts.productionSpec)
-        if (recovered.approved) options.onApproved?.(recovered.artifacts.productionSpec)
+        if (recovered.approved) options.onApprovedRestored?.(recovered.artifacts.productionSpec)
       }
     }).finally(() => active && setRestoring(false))
     return () => { active = false }

@@ -814,6 +814,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
             isOptimizing={isOptimizing}
             onSpecReady={(spec) => { updateSpec(spec); setAgentApproved(false) }}
             onApproved={(spec) => { updateSpec(spec); setAgentApproved(true); onStageChange('assets'); message.success('Agent 规格已批准，现在可以检查素材卡片并开始生成。') }}
+            onApprovedRestored={(spec) => { updateSpec(spec); setAgentApproved(true) }}
             onTextConnectionChange={setTextOptimizer}
             reviewTarget={activeStage === 'agents' ? agentReviewTarget : null}
             inputRevision={inputRevision}

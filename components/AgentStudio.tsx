@@ -34,6 +34,7 @@ interface AgentStudioProps {
   isOptimizing?: boolean
   onSpecReady: (spec: GameSpec) => void
   onApproved: (spec: GameSpec) => void
+  onApprovedRestored?: (spec: GameSpec) => void
   onTextConnectionChange?: (connection: { provider?: AgentProviderId; model?: string; apiKey: string; baseUrl?: string }) => void
   reviewTarget?: HTMLDivElement | null
   inputRevision?: number
@@ -68,7 +69,7 @@ function artifactPreview(output?: Record<string, unknown>): string {
   return json.length > 20000 ? `${json.slice(0, 20000)}\n…（内容过长，已在界面截断）` : json
 }
 
-export default function AgentStudio({ embedded = false, projectId, sourcePrompt, projectName, briefReady, levelCount, baseSpec, onOptimizePrompt, isOptimizing = false, onSpecReady, onApproved, onTextConnectionChange, reviewTarget, inputRevision = 0 }: AgentStudioProps) {
+export default function AgentStudio({ embedded = false, projectId, sourcePrompt, projectName, briefReady, levelCount, baseSpec, onOptimizePrompt, isOptimizing = false, onSpecReady, onApproved, onApprovedRestored, onTextConnectionChange, reviewTarget, inputRevision = 0 }: AgentStudioProps) {
   const [provider, setProvider] = useState<AgentProviderId>('openrouter')
   const [accessMode, setAccessMode] = useState<AiAccessMode>('ready')
   const [readyProvider, setReadyProvider] = useState<AgentProviderId | null>(null)
@@ -84,7 +85,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
   const [localCheck, setLocalCheck] = useState<{ state: 'idle' | 'checking' | 'ready' | 'failed'; text: string }>({ state: 'idle', text: '' })
   const [webLlmSetup, setWebLlmSetup] = useState<{ state: 'idle' | 'checking' | 'preparing' | 'ready' | 'failed'; progress: number; text: string; cached?: boolean }>({ state: 'idle', progress: 0, text: '' })
   const webLlmAttempt = useRef(0)
-  const cluster = useAgentCluster({ projectId, sourcePrompt, projectName, levelCount, baseSpec, onSpecReady, onApproved })
+  const cluster = useAgentCluster({ projectId, sourcePrompt, projectName, levelCount, baseSpec, onSpecReady, onApproved, onApprovedRestored })
   const seenInputRevision = useRef(inputRevision)
 
   useEffect(() => {
