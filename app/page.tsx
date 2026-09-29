@@ -549,30 +549,6 @@ export default function Home() {
                   onRegeneratingImagesChange={setRegeneratingImages}
                   themesListRef={themesListRef}
                 />
-              </Splitter.Panel>
-
-              <Splitter.Panel className="workspace-panel" style={{ padding: 20, overflow: 'visible' }}>
-              <div id="preview-publish" className="section-anchor" style={{ display: 'flex', alignItems: 'flex-start', gap: 20, width: '100%', height: 'auto' }}>
-                <ThemesList
-                  ref={themesListRef}
-                  themes={themes}
-                  selectedTheme={selectedTheme as GameTheme}
-                  onThemeSelect={setSelectedTheme}
-                />
-                <ThemePreview
-                  isLoading={isLoading}
-                  loadingMessage={loadingMessage}
-                  selectedTheme={selectedTheme}
-                  themes={themes}
-                  gameData={activeGameData}
-                  regeneratingImages={regeneratingImages}
-                  apiKey={apiKey}
-                  onRegenerateImage={handleRegenerateImage}
-                  regeneratingAssetIds={regeneratingAssetIds}
-                  onRegenerateAsset={handleRegenerateAsset}
-                  onUpdateAsset={handleUpdateAsset}
-                  onDeleteTheme={handleDeleteTheme}
-                />
               </div>
 
               <div className="themes-panel">
