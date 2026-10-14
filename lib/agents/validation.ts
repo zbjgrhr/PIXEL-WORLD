@@ -89,7 +89,7 @@ export function inspectVisualAssets(spec: GameSpec): AgentIssue[] {
       const animation = normalizeAnimationSpec(asset.animation)
       for (const pose of animationClipPoses(asset)) {
         const clip = animation.clips?.[pose]
-        if (!clip?.url) issues.push(issue('visualQa', 'blocking', `assets.${asset.id}.animation.${pose}`, `${asset.title} 缺少 ${pose} 动作条。`, `重新生成 ${pose} 动作。`))
+        if (!clip?.url || clip.status !== 'success') issues.push(issue('visualQa', 'blocking', `assets.${asset.id}.animation.${pose}`, `${asset.title} 的 ${pose} 动作条缺失或未通过生成检查。`, `重新生成 ${pose} 动作。`))
         if (clip && (clip.frameCount < 1 || clip.frameCount > 3)) issues.push(issue('visualQa', 'blocking', `assets.${asset.id}.animation.${pose}.frameCount`, `${asset.title} 的 ${pose} 帧数超出引擎规则。`, '将动作条限制为 1～3 帧。'))
       }
     } else if (!asset.url) {
@@ -122,7 +122,8 @@ export function sanitizeIssues(value: unknown, fallbackSource: AgentRole): Agent
   if (!Array.isArray(value)) return []
   return dedupeIssues(value.slice(0, 40).map((candidate, index) => {
     const item = candidate && typeof candidate === 'object' ? candidate as Record<string, unknown> : {}
-    const severity = item.severity === 'blocking' || item.severity === 'warning' ? item.severity : 'info'
+    const reported = String(item.severity || '').toLowerCase()
+    const severity = ['blocking', 'critical', 'error'].includes(reported) ? 'blocking' : reported === 'info' ? 'info' : 'warning'
     return {
       id: typeof item.id === 'string' ? item.id : `${fallbackSource}-${index}`,
       severity,

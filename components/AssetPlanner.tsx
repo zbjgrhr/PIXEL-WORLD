@@ -44,7 +44,7 @@ export default function AssetPlanner({ spec, onChange, onGenerate, onCancel, onT
     if (asset.kind !== 'spriteSheet') return [{ asset, done: Boolean(asset.url) }]
     const animation = normalizeAnimationSpec(asset.animation)
     if (animation.layoutVersion !== 3 || !animation.clips) return [{ asset, done: Boolean(asset.url) }]
-    return animationClipPoses(asset).map((pose) => ({ asset, done: Boolean(animation.clips?.[pose]?.url) }))
+    return animationClipPoses(asset).map((pose) => ({ asset, done: Boolean(animation.clips?.[pose]?.url && animation.clips[pose]?.status === 'success') }))
   })
   const completed = imageJobs.filter((job) => job.done).length
   const pendingCount = imageJobs.length - completed
@@ -94,7 +94,7 @@ export default function AssetPlanner({ spec, onChange, onGenerate, onCancel, onT
             {asset.kind === 'spriteSheet' && asset.animation?.layoutVersion === 3 ? <Space size={[4, 4]} wrap style={{ marginBottom: 8 }}>
               {animationClipPoses(asset).map((pose) => {
                 const clip = normalizeAnimationSpec(asset.animation).clips?.[pose]
-                return <Tag key={pose} color={clip?.url ? 'success' : clip?.status === 'failed' ? 'error' : clip?.status === 'generating' ? 'processing' : 'default'}>{pose} · {clip?.frameCount || 1}帧</Tag>
+                return <Tag key={pose} title={clip?.error} color={clip?.status === 'failed' ? 'error' : clip?.status === 'generating' ? 'processing' : clip?.url ? 'success' : 'default'}>{pose} · {clip?.frameCount || 1}帧</Tag>
               })}
             </Space> : asset.url && <Image src={asset.url} alt={asset.title} height={120} style={{ width: '100%', objectFit: asset.category === 'levelBackground' ? 'cover' : 'contain', imageRendering: 'pixelated' }} />}
             <TextArea value={asset.prompt} rows={3} onChange={(event) => patchAsset(asset.id, { prompt: event.target.value, status: asset.url ? asset.status : asset.kind === 'audio' || asset.kind === 'runtime' ? 'success' : 'pending' })} style={{ marginTop: asset.url ? 8 : 0 }} />

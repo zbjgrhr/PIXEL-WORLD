@@ -16,9 +16,11 @@ import {
   createActionStripAnimation,
   isStructuredPromptBlank,
   normalizeAnimationSpec,
+  replaceAnimationClip,
 } from '@/lib/asset-catalog'
 import { cacheAssetUrl, cacheSpecAssets, hydrateSpecAssets, removeCachedAssetClips, stripLargeAssetUrls } from '@/lib/asset-db'
 import { prepareAnimationReferenceImages } from '@/lib/animation-references'
+import { createGenerationJobs, runGenerationJobs, type AssetGenerationJob } from '@/lib/asset-generation-queue'
 import { ASSET_TYPES } from '@/types'
 import { BUILTIN_ART, buildBuiltinGameSpec } from '@/lib/builtin-game'
 import { DEFAULT_COMFY_SETTINGS, discoverComfyCheckpoints, generateComfyImage, type ComfySettings } from '@/lib/comfyui-client'
@@ -41,6 +43,7 @@ import { applyWebLlmCreativePatch } from '@/lib/agents/webllm-lite'
 import { selectedInspirationTexts } from '@/configs/inspiration-packs'
 import type {
   AnimationClipPose,
+  AnimationClipSpec,
   AgentExecuteRequest,
   AgentExecuteResponse,
   AgentProviderId,
@@ -452,7 +455,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
       ? await prepareAnimationReferenceImages(spec, asset, animationPose)
       : []
     const response = await fetch('/api/generate', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(110_000)]) : AbortSignal.timeout(110_000),
       body: JSON.stringify({
         theme: spec.title,
         prompt: asset.prompt,
@@ -473,20 +476,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
     }
     if (!generatedAsset) throw new Error('The image API returned no asset data.')
     if (!animationPose) return generatedAsset
-    const currentAnimation = asset.animation?.layoutVersion === 3
-      ? normalizeAnimationSpec(asset.animation)
-      : createActionStripAnimation()
-    const mergedAsset: AssetDefinition = {
-      ...asset,
-      ...generatedAsset,
-      animation: {
-        ...currentAnimation,
-        clips: { ...currentAnimation.clips, [animationPose]: generatedClip },
-      },
-      url: animationPose === 'idle' ? generatedClip?.url : asset.url,
-      error: undefined,
-    }
-    return { ...mergedAsset, status: animationIsComplete(mergedAsset) ? 'success' : 'pending' }
+    return replaceAnimationClip(asset, animationPose, generatedClip!)
   }
 
   const testApi = async () => {
@@ -529,6 +519,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
   }
 
   const generateSelectedAssets = async () => {
+    if (abortRef.current) return void message.info('素材正在生成，请等待完成或先取消。')
     if (creationMode === 'agent' && !agentApproved) return void message.error('请先完成 Agent 集群评审，并点击“批准规格并开放生图”。')
     if (imageSource === 'builtin') return createBuiltinGame()
     if (imageSource === 'upload') return void message.info('请在素材卡片逐项上传图片，或主动用内置素材补齐。')
@@ -566,23 +557,15 @@ const SideMenu: React.FC<SideMenuProps> = ({
     }
     const concurrency = imageSource === 'comfy' ? 1 : providerConcurrency[generationTarget.provider] || 2
 
-    const pendingPoses = (asset: AssetDefinition): AnimationClipPose[] => {
-      if (asset.kind !== 'spriteSheet') return []
-      const animation = normalizeAnimationSpec(asset.animation)
-      if (animation.layoutVersion !== 3 || !animation.clips) return []
-      return animationClipPoses(asset).filter((pose) => {
-        const clip = animation.clips?.[pose]
-        return !clip?.url || clip.status === 'failed' || clip.status === 'cancelled'
-      })
-    }
-    const totalJobs = tasks.reduce((sum, asset) => sum + (asset.kind === 'spriteSheet' ? pendingPoses(asset).length : 1), 0)
+    const jobs = createGenerationJobs(tasks)
+    const totalJobs = jobs.length
 
     const loadingId = `loading-${Date.now()}` as GameTheme
     const loadingTheme: Theme = { id: loadingId, name: baseSpec.title, description: customPrompt, characterImage: '', backgroundImage: '', groundImage: '', obstacleImage: '', spec: baseSpec, isLoading: true }
     const themesWithLoading = [...themes.filter((theme) => !theme.isLoading), loadingTheme]
     const controller = new AbortController()
+    if (abortRef.current) return
     abortRef.current = controller
-    const results = new Map<string, AssetDefinition>()
     const workingAssets = new Map(baseSpec.assets.map((asset) => [asset.id, asset]))
     let finished = 0
 
@@ -606,103 +589,53 @@ const SideMenu: React.FC<SideMenuProps> = ({
       setSelectedTheme(loadingId)
       onThemeUpdate?.(themesWithLoading)
 
-      const runPhase = async (phaseTasks: AssetDefinition[]) => {
-        let cursor = 0
-        const worker = async () => {
-        while (!controller.signal.aborted) {
-          const taskIndex = cursor++
-          if (taskIndex >= phaseTasks.length) return
-          const asset = phaseTasks[taskIndex]
-          let currentAsset: AssetDefinition = asset.kind === 'spriteSheet' && asset.animation?.layoutVersion !== 3
-            ? { ...asset, url: undefined, animation: createActionStripAnimation(), status: 'pending' }
-            : asset
-          updateAsset(asset.id, { ...currentAsset, status: 'generating', error: undefined })
-          try {
-            if (currentAsset.kind === 'spriteSheet') {
-              const poses = pendingPoses(currentAsset)
-              for (const pose of poses) {
-                if (controller.signal.aborted) break
-                const animation = normalizeAnimationSpec(currentAsset.animation)
-                currentAsset = {
-                  ...currentAsset,
-                  status: 'generating',
-                  animation: {
-                    ...animation,
-                    clips: {
-                      ...animation.clips,
-                      [pose]: { ...animation.clips?.[pose]!, status: 'generating', error: undefined },
-                    },
-                  },
-                }
-                updateAsset(asset.id, currentAsset)
-                try {
-                  const liveSpec = { ...baseSpec!, assets: baseSpec!.assets.map((candidate) => workingAssets.get(candidate.id) || candidate) }
-                  currentAsset = await requestAsset(liveSpec, currentAsset, controller.signal, pose, generationTarget)
-                  const clip = normalizeAnimationSpec(currentAsset.animation).clips?.[pose]
-                  if (clip?.url) {
-                    await cacheAssetUrl(DRAFT_PROJECT_ID, `${asset.id}:clip:${pose}`, clip.url)
-                    if (pose === 'idle') await cacheAssetUrl(DRAFT_PROJECT_ID, asset.id, clip.url)
-                  }
-                  updateAsset(asset.id, currentAsset)
-                } catch (error) {
-                  const cancelled = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
-                  const clipError = cancelled ? 'Generation cancelled.' : error instanceof Error ? error.message : 'Generation failed.'
-                  const failedAnimation = normalizeAnimationSpec(currentAsset.animation)
-                  currentAsset = {
-                    ...currentAsset,
-                    status: cancelled ? 'cancelled' : 'failed',
-                    error: clipError,
-                    animation: {
-                      ...failedAnimation,
-                      clips: {
-                        ...failedAnimation.clips,
-                        [pose]: { ...failedAnimation.clips?.[pose]!, status: cancelled ? 'cancelled' : 'failed', error: clipError },
-                      },
-                    },
-                  }
-                  updateAsset(asset.id, currentAsset)
-                } finally {
-                  finished += 1
-                  setGenerationProgress(Math.round(finished / Math.max(1, totalJobs) * 100))
-                  setLoadingMessage(`动作与素材生成进度 ${finished}/${totalJobs}`)
-                }
-              }
-              currentAsset = { ...currentAsset, status: animationIsComplete(currentAsset) ? 'success' : currentAsset.status }
-            } else {
-              const liveSpec = { ...baseSpec!, assets: baseSpec!.assets.map((candidate) => workingAssets.get(candidate.id) || candidate) }
-              const generated = await requestAsset(liveSpec, currentAsset, controller.signal, undefined, generationTarget)
-              currentAsset = { ...currentAsset, ...generated, status: 'success', error: undefined }
-              if (currentAsset.url) await cacheAssetUrl(DRAFT_PROJECT_ID, currentAsset.id, currentAsset.url)
-              finished += 1
-              setGenerationProgress(Math.round(finished / Math.max(1, totalJobs) * 100))
-              setLoadingMessage(`动作与素材生成进度 ${finished}/${totalJobs}`)
-            }
-            results.set(asset.id, currentAsset)
-            workingAssets.set(asset.id, currentAsset)
-            updateAsset(asset.id, currentAsset)
-          } catch (error) {
-            const cancelled = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
-            const failedAsset = { ...currentAsset, status: cancelled ? 'cancelled' as const : 'failed' as const, error: cancelled ? 'Generation cancelled.' : error instanceof Error ? error.message : 'Generation failed.' }
-            results.set(asset.id, failedAsset)
-            workingAssets.set(asset.id, failedAsset)
-            updateAsset(asset.id, failedAsset)
-            if (currentAsset.kind !== 'spriteSheet') {
-              finished += 1
-              setGenerationProgress(Math.round(finished / Math.max(1, totalJobs) * 100))
-              setLoadingMessage(`动作与素材生成进度 ${finished}/${totalJobs}`)
-            }
+      const finishJob = () => {
+        finished += 1
+        setGenerationProgress(Math.round(finished / Math.max(1, totalJobs) * 100))
+        setLoadingMessage(`动作与素材生成进度 ${finished}/${totalJobs}`)
+      }
+      const patchJob = (job: AssetGenerationJob, patch: Partial<AssetDefinition>, clipPatch?: Partial<AnimationClipSpec>) => {
+        const current = workingAssets.get(job.assetId)!
+        if (!job.pose) return updateAsset(job.assetId, { ...current, ...patch })
+        const animation = current.animation?.layoutVersion === 3 ? normalizeAnimationSpec(current.animation) : createActionStripAnimation()
+        const updatedClip = { ...animation.clips?.[job.pose]!, ...clipPatch }
+        const clips = updatedClip.status === 'success'
+          ? replaceAnimationClip(current, job.pose, updatedClip).animation!.clips!
+          : { ...animation.clips, [job.pose]: updatedClip }
+        const statuses = Object.values(clips).filter(clip => clip?.enabled !== false).map(clip => clip?.status)
+        const next = { ...current, ...patch, animation: { ...animation, clips }, url: clips.idle?.url }
+        next.status = statuses.includes('generating') ? 'generating' : statuses.includes('failed') ? 'failed' : statuses.includes('cancelled') ? 'cancelled' : animationIsComplete(next) ? 'success' : 'pending'
+        updateAsset(job.assetId, next)
+      }
+      await runGenerationJobs(jobs, concurrency, async (job) => {
+        const current = workingAssets.get(job.assetId)!
+        patchJob(job, { status: 'generating', error: undefined }, { status: 'generating', error: undefined })
+        try {
+          const liveSpec = { ...baseSpec!, assets: baseSpec!.assets.map(asset => workingAssets.get(asset.id) || asset) }
+          const generated = await requestAsset(liveSpec, current, controller.signal, job.pose, generationTarget)
+          if (job.pose) {
+            const clip = normalizeAnimationSpec(generated.animation).clips?.[job.pose]!
+            if (job.pose === 'idle' && current.animation?.clips?.idle?.url && current.animation.clips.idle.url !== clip.url) await removeCachedAssetClips(DRAFT_PROJECT_ID, job.assetId)
+            if (clip.url) await cacheAssetUrl(DRAFT_PROJECT_ID, `${job.assetId}:clip:${job.pose}`, clip.url)
+            if (job.pose === 'idle' && clip.url) await cacheAssetUrl(DRAFT_PROJECT_ID, job.assetId, clip.url)
+            patchJob(job, { error: undefined }, clip)
+          } else {
+            if (generated.url) await cacheAssetUrl(DRAFT_PROJECT_ID, job.assetId, generated.url)
+            patchJob(job, { ...generated, status: 'success', error: undefined })
           }
-        }
-      }
-        await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(1, phaseTasks.length)) }, () => worker()))
-      }
+        } catch (error) {
+          const cancelled = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
+          const detail = cancelled ? '生成已取消。' : error instanceof Error ? error.message : '生成失败。'
+          patchJob(job, { error: detail, status: cancelled ? 'cancelled' : 'failed' }, { status: cancelled ? 'cancelled' : 'failed', error: detail })
+          throw error
+        } finally { finishJob() }
+      }, (job, reason) => {
+        const status = controller.signal.aborted ? 'cancelled' : 'failed'
+        patchJob(job, { status, error: reason }, { status, error: reason })
+        finishJob()
+      }, controller.signal)
 
-      // Weapons, projectiles and effects must exist before attack strips are
-      // generated so those exact project assets can be supplied as references.
-      await runPhase(tasks.filter((asset) => asset.kind !== 'spriteSheet'))
-      await runPhase(tasks.filter((asset) => asset.kind === 'spriteSheet'))
-
-      const finalAssets = baseSpec.assets.map((asset) => results.get(asset.id) || asset)
+      const finalAssets = baseSpec.assets.map((asset) => workingAssets.get(asset.id) || asset)
       const finalSpec = { ...baseSpec, assets: finalAssets }
       const gameData = buildGameDataFromSpec(finalSpec)
       const firstLevel = gameData.data?.levels[0]
@@ -815,7 +748,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
           <div className="agent-studio-shell" hidden={creationMode !== 'agent'}><AgentStudio
             embedded
             projectId={DRAFT_PROJECT_ID}
-            sourcePrompt={composeProjectPrompt(customThemeName, customStory, customPrompt, levelCount)}
+            sourcePrompt={composeProjectPrompt(customThemeName, customStory, customPrompt === optimizedInputRef.current?.generated ? optimizedInputRef.current.source : customPrompt, levelCount)}
             projectName={customThemeName}
             briefReady={Boolean(customThemeName.trim() && customStory.trim())}
             levelCount={levelCount}
@@ -852,7 +785,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
           {planningReady && <div className="studio-rail-actions">
             {imageSource === 'builtin' && <Button block size="large" disabled={creationMode === 'agent' && !agentApproved} onClick={() => { void createBuiltinGame() }}>用内置素材创建游戏</Button>}
             {imageSource === 'upload' && <Button block size="large" type="primary" disabled={creationMode === 'agent' && !agentApproved} onClick={() => { void createUploadedGame() }}>用已上传素材创建游戏</Button>}
-            <ActionButtons isThemeCreated={isThemeCreated} isLoading={isLoading} selectedTheme={isPresetTheme(selectedTheme) ? '' : selectedTheme} customPrompt={customPrompt} customThemeName={customThemeName} apiKey={imageSource === 'custom' ? customImage.apiKey : apiKey} allowWithoutApiKey={imageSource !== 'byok' && imageSource !== 'custom'} showCreateButton={imageSource !== 'builtin' && imageSource !== 'upload'} onCreateTheme={() => { void generateSelectedAssets() }} onStartGame={handleStartGame} />
+            <ActionButtons isThemeCreated={isThemeCreated} isLoading={isLoading} selectedTheme={isPresetTheme(selectedTheme) ? '' : selectedTheme} customPrompt={customPrompt || (optimizedSpec ? serializeGameSpec(optimizedSpec) : '')} customThemeName={customThemeName || optimizedSpec?.title || ''} apiKey={imageSource === 'custom' ? customImage.apiKey : apiKey} allowWithoutApiKey={imageSource !== 'byok' && imageSource !== 'custom'} showCreateButton={imageSource !== 'builtin' && imageSource !== 'upload'} onCreateTheme={() => { void generateSelectedAssets() }} onStartGame={handleStartGame} />
           </div>}
         </section>
       </div>

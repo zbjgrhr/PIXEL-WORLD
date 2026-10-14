@@ -1,6 +1,12 @@
 /** Turn raw upstream / API error strings into user-facing messages. */
 export function formatGenerationError(raw: string): string {
   const lower = raw.toLowerCase()
+  if (lower.includes('cloudflare') && (lower.includes('daily free allocation') || lower.includes('10,000 neurons') || lower.includes('10000 neurons'))) {
+    return 'Cloudflare 今日免费 Neurons 已用完。等待额度重置，或在 Cloudflare 开通 Workers Paid；继续点击重试不会恢复额度。'
+  }
+  if (lower.includes('not available in your region') || lower.includes('geo restrictions')) {
+    return '当前服务在你所在地区无法提供这个模型。请选择当前地区可用的模型；重新粘贴 Key 无法解决。'
+  }
 
   if (lower.includes('bytestring') || lower.includes('greater than 255')) {
     return 'API Key 中混入了中文符号、长破折号或隐藏字符。请清空输入框，并从平台控制台重新复制纯 API Key。'
@@ -40,7 +46,7 @@ export function formatGenerationError(raw: string): string {
     return 'OpenAI 账户已达消费硬上限。请到 platform.openai.com → Billing 绑定支付方式并提高 Hard limit，然后重试。'
   }
 
-  if (lower.includes('insufficient_quota') || lower.includes('exceeded your current quota')) {
+  if (lower.includes('insufficient_quota') || lower.includes('credit_balance_exhausted') || lower.includes('exceeded your current quota')) {
     return 'OpenAI 账户额度不足。请到 Billing 充值或检查套餐配额。'
   }
 

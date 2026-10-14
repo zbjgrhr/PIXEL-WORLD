@@ -153,7 +153,7 @@ export function normalizeAnimationSpec(value: unknown): AnimationSpec {
         fps: Number.isFinite(rawFps) ? Math.max(1, Math.min(12, rawFps)) : defaults.fps,
         loop: pose === 'walk',
         enabled: typeof clip.enabled === 'boolean' ? clip.enabled : defaults.enabled,
-        status: clip.url ? 'success' : ['generating', 'failed', 'cancelled'].includes(String(clip.status)) ? clip.status as AnimationClipSpec['status'] : 'pending',
+        status: ['generating', 'failed', 'cancelled'].includes(String(clip.status)) ? clip.status as AnimationClipSpec['status'] : clip.url ? 'success' : 'pending',
         url: typeof clip.url === 'string' && clip.url ? clip.url : undefined,
         error: typeof clip.error === 'string' && clip.error ? clip.error : undefined,
       }]
@@ -209,11 +209,27 @@ export function animationClipPoses(asset: AssetDefinition): AnimationClipPose[] 
   return ANIMATION_CLIP_POSES.filter((pose) => animation.clips?.[pose]?.enabled !== false)
 }
 
+/** A new identity cannot reuse actions drawn from the previous identity. */
+export function replaceAnimationClip(asset: AssetDefinition, pose: AnimationClipPose, clip: AnimationClipSpec): AssetDefinition {
+  const animation = asset.animation?.layoutVersion === 3 ? normalizeAnimationSpec(asset.animation) : createActionStripAnimation()
+  const previousIdentity = animation.clips?.idle?.url
+  const clips = { ...animation.clips }
+  if (pose === 'idle' && previousIdentity && previousIdentity !== clip.url) {
+    for (const action of ANIMATION_CLIP_POSES) {
+      const previous = clips[action]
+      if (action !== 'idle' && previous) clips[action] = { ...previous, url: undefined, status: 'pending', error: undefined }
+    }
+  }
+  clips[pose] = clip
+  const next = { ...asset, animation: { ...animation, clips }, url: clips.idle?.url, error: undefined }
+  return { ...next, status: animationIsComplete(next) ? 'success' : 'pending' }
+}
+
 export function animationIsComplete(asset: AssetDefinition): boolean {
   if (asset.kind !== 'spriteSheet') return Boolean(asset.url)
   const animation = normalizeAnimationSpec(asset.animation)
   if (animation.layoutVersion !== 3 || !animation.clips) return Boolean(asset.url)
-  return animationClipPoses(asset).every((pose) => Boolean(animation.clips?.[pose]?.url))
+  return animationClipPoses(asset).every((pose) => Boolean(animation.clips?.[pose]?.url && animation.clips[pose]?.status === 'success'))
 }
 
 function soundFor(category: AssetCategory): SoundSpec {
@@ -271,7 +287,7 @@ export function buildStructuredPrompt(levelCount: number): string {
   const levels = Array.from({ length: levelCount }, (_, index) =>
     `关卡 ${index + 1}：\n背景：\n平台类型：\n障碍物：\n出现素材：\n背景音乐：\n天气/滤镜/闪光：`,
   ).join('\n\n')
-  return `游戏标题：\n世界观与故事：\n背景故事：\n整体像素风格：\n\n${fields}\n\n${levels}`
+  return `游戏标题：\n世界观与故事：\n背景故事：\n整体像素风格：\n主角目标（可选）：\n难度偏好（可选）：\n叙事节奏（可选）：\n角色一致性要求（可选）：\n\n${fields}\n\n${levels}`
 }
 
 export function isStructuredPromptBlank(prompt: string): boolean {

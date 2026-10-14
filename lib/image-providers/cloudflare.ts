@@ -5,6 +5,7 @@ import {
   ProviderValidationError,
   UpstreamApiError,
 } from '@/lib/image-providers/types'
+import sharp from 'sharp'
 
 interface CloudflareResponse {
   success?: boolean
@@ -29,14 +30,16 @@ function parseCredentials(value: string): { accountId: string; token: string } {
 async function referenceToBlob(reference: string): Promise<Blob | null> {
   const dataMatch = reference.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\r\n]+)$/i)
   if (dataMatch) {
-    return new Blob([Buffer.from(dataMatch[2], 'base64')], { type: dataMatch[1] })
+    const bytes = await sharp(Buffer.from(dataMatch[2], 'base64')).resize({ width: 511, height: 511, fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+    return new Blob([new Uint8Array(bytes)], { type: 'image/png' })
   }
   if (!/^https:\/\//i.test(reference)) return null
-  const response = await fetch(reference, { cache: 'no-store' })
+  const response = await fetch(reference, { cache: 'no-store', signal: AbortSignal.timeout(10_000) })
   if (!response.ok) return null
   const contentType = response.headers.get('content-type') || 'image/png'
   if (!contentType.startsWith('image/')) return null
-  return new Blob([await response.arrayBuffer()], { type: contentType })
+  const bytes = await sharp(Buffer.from(await response.arrayBuffer())).resize({ width: 511, height: 511, fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+  return new Blob([new Uint8Array(bytes)], { type: 'image/png' })
 }
 
 async function parseResponse(response: Response, model: string): Promise<string> {
@@ -67,6 +70,7 @@ export const cloudflareProvider: ImageProvider = {
     if (params.model.endsWith('/flux-1-schnell')) {
       const response = await fetch(endpoint, {
         method: 'POST',
+        signal: params.signal ? AbortSignal.any([params.signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000),
         headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: prompt.slice(0, 2048), steps: 4 }),
       })
@@ -83,7 +87,7 @@ export const cloudflareProvider: ImageProvider = {
       const blob = await referenceToBlob(reference)
       if (blob) form.append(`input_image_${index}`, blob, `reference-${index + 1}.png`)
     }
-    const response = await fetch(endpoint, { method: 'POST', headers, body: form })
+    const response = await fetch(endpoint, { method: 'POST', headers, body: form, signal: params.signal ? AbortSignal.any([params.signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000) })
     return parseResponse(response, params.model)
   },
 }

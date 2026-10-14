@@ -15,7 +15,9 @@ export function animationReferenceUrls(
   pose: AnimationClipPose,
 ): string[] {
   if (pose === 'idle') return []
-  const urls: Array<string | undefined> = [normalizeAnimationSpec(asset.animation).clips?.idle?.url || asset.url]
+  const identity = normalizeAnimationSpec(asset.animation).clips?.idle?.url || asset.url
+  if (!identity) return []
+  const urls: Array<string | undefined> = [identity]
 
   if (asset.category === 'hero' && pose === 'meleeAttack') {
     urls.push(firstEnabledAssetUrl(spec, 'meleeWeapon'), firstEnabledAssetUrl(spec, 'meleeAttackEffect'))
@@ -36,14 +38,14 @@ export function animationReferenceUrls(
   return [...new Set(urls.filter((url): url is string => Boolean(url)))].slice(0, 4)
 }
 
-async function compactDataImage(url: string): Promise<string | undefined> {
+export async function compactDataImage(url: string): Promise<string | undefined> {
   if (!url.startsWith('data:image/')) return url
   if (typeof document === 'undefined') return url.length <= 3_000_000 ? url : undefined
   try {
     const image = new Image()
     image.src = url
     await image.decode()
-    const scale = Math.min(1, 512 / Math.max(image.naturalWidth, image.naturalHeight))
+    const scale = Math.min(1, 511 / Math.max(image.naturalWidth, image.naturalHeight))
     const canvas = document.createElement('canvas')
     canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
     canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))

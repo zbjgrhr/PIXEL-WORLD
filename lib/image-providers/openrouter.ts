@@ -3,6 +3,7 @@ import {
   type GenerateImageParams,
   type ImageProvider,
   UpstreamApiError,
+  ProviderValidationError,
 } from '@/lib/image-providers/types'
 
 const OPENROUTER_IMAGE_API_URL = 'https://openrouter.ai/api/v1/images'
@@ -73,24 +74,26 @@ function buildImageRequestBody(
     } : {}),
   }
 
-  if (model === OPENROUTER_PRIMARY_IMAGE_MODEL) {
+  if (model === OPENROUTER_PRIMARY_IMAGE_MODEL || model.startsWith('google/gemini-') || model.startsWith('bytedance-seed/')) {
     return {
       ...commonBody,
-      resolution: '2K',
+      // Seedream 4.5 enforces a minimum pixel area despite advertising 1K.
+      resolution: model.startsWith('bytedance-seed/') || params.assetType === 'background' ? '2K' : '1K',
       aspect_ratio: getAspectRatio(params.assetType, params.layout, params.frameCount),
     }
   }
 
-  return commonBody
+  return { ...commonBody, aspect_ratio: getAspectRatio(params.assetType, params.layout, params.frameCount) }
 }
 
-async function modelSupportsReferences(apiKey: string, model: string): Promise<boolean> {
+async function modelSupportsReferences(apiKey: string, model: string, signal?: AbortSignal): Promise<boolean> {
   const cached = referenceCapabilityCache.get(model)
   if (cached !== undefined) return cached
   try {
     const response = await fetch(`${OPENROUTER_IMAGE_API_URL}/models/${model}/endpoints`, {
       headers: { Authorization: `Bearer ${apiKey}`, ...getOpenRouterHeaders() },
       cache: 'no-store',
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
     })
     if (!response.ok) return false
     const result = await response.json() as OpenRouterEndpointsResponse
@@ -117,7 +120,10 @@ async function callOpenRouterImageAPI(
   model: string,
 ): Promise<string> {
   const supportsReferences = Boolean(params.referenceImages?.length)
-    && await modelSupportsReferences(params.apiKey, model)
+    && await modelSupportsReferences(params.apiKey, model, params.signal)
+  if (params.referenceImages?.length && !supportsReferences) {
+    throw new ProviderValidationError('无法确认当前模型的参考图能力，已停止这个动作；请检查连接或更换支持参考图的模型。', 'openrouter')
+  }
   const response = await fetch(OPENROUTER_IMAGE_API_URL, {
     method: 'POST',
     headers: {
@@ -126,6 +132,7 @@ async function callOpenRouterImageAPI(
       ...getOpenRouterHeaders(),
     },
     body: JSON.stringify(buildImageRequestBody(params, model, supportsReferences)),
+    signal: params.signal ? AbortSignal.any([params.signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000),
   })
 
   if (!response.ok) {

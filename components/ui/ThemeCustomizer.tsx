@@ -94,7 +94,7 @@ const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ inspiration, creation
               : '使用已选择的文字模型补全；未配置模型时生成本地草案。补全后可在下方检查，再进入 AI 策划。'}
       </Text>
       <TextArea value={customPrompt} onChange={(event) => onPromptChange(event.target.value)} rows={18} placeholder="请在各字段冒号后填写；不需要的项目可以留空。" style={{ width: '100%', fontSize: 12, lineHeight: 1.7 }} />
-      <div className="prompt-writing-help"><strong>怎么填写</strong><span>在字段冒号后写具体画面或玩法；不确定的留空。</span><small>主角：戴蓝披风的骑士，侧视像素风</small><small>关卡 1 背景：黄昏森林，留出行走区域</small></div>
+      <div className="prompt-writing-help"><strong>怎么填写</strong><span>在字段冒号后写具体画面或玩法；不确定的留空。</span><small>主角：戴蓝披风的骑士，侧视像素风</small><small>关卡 1 背景：黄昏森林，留出行走区域</small><small>可选补充主角目标、难度、叙事节奏和角色外观要求。</small></div>
       <Text type="secondary" style={{ fontSize: 12 }}>{creationMode === 'agent' ? '保留你明确填写的要求；Agent 只补充空白、消除冲突，不会覆盖你的核心设定。' : '保留需要的描述，其余字段留空；一键优化只补全空白或不足的字段。'}</Text>
     </div>
     {optimizedSpec && <Collapse size="small" items={[{

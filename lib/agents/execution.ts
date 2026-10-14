@@ -12,16 +12,16 @@ export interface ChatPayload {
 }
 
 export const ROLE_TOKEN_BUDGET: Record<AgentRole, number> = {
-  director: 1800,
-  narrative: 2400,
-  mechanics: 3200,
-  artDirector: 2800,
-  levelDesigner: 4600,
-  integrator: 4200,
-  consistencyCritic: 2800,
-  engineQa: 2800,
-  revision: 4600,
-  assetCoordinator: 3200,
+  director: 1000,
+  narrative: 1400,
+  mechanics: 2200,
+  artDirector: 1600,
+  levelDesigner: 3200,
+  integrator: 2200,
+  consistencyCritic: 1600,
+  engineQa: 1600,
+  revision: 2400,
+  assetCoordinator: 2400,
   visualQa: 2400,
   playtest: 2400,
   publisher: 1800,
@@ -126,6 +126,27 @@ export function localIntegratorResponse(request: AgentExecuteRequest, error: unk
   }
 }
 
+/** Numeric engine rules and an unchanged revision need no paid model call. */
+export function deterministicAgentResponse(request: AgentExecuteRequest): AgentExecuteResponse | null {
+  if (request.role !== 'engineQa' && !(request.role === 'revision' && !(request.artifacts.reviewIssues || []).some((item) => item.severity !== 'info'))) return null
+  const spec = currentSpec(request)
+  const issues = inspectGameSpec(spec, 'engineQa')
+  return {
+    success: true,
+    data: {
+      role: request.role,
+      artifact: request.role === 'engineQa' ? { issues } : { spec },
+      issues,
+      summary: request.role === 'engineQa'
+        ? `引擎规则已在本地检查，发现 ${countBlockingIssues(issues)} 个阻断项；此步骤未调用文字模型。`
+        : '评审没有需要修订的内容，已保留当前规格；此步骤未调用文字模型。',
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+      provider: request.provider, model: request.model,
+    },
+    timestamp: new Date().toISOString(),
+  }
+}
+
 export function normalizeArtifact(
   request: AgentExecuteRequest,
   parsed: Record<string, unknown>,
@@ -208,6 +229,6 @@ export function prepareAgentRequest(body: AgentExecuteRequest): AgentExecuteRequ
     projectName: String(body.projectName || 'Pixel World').trim().slice(0, 160),
     levelCount: Math.min(10, Math.max(1, Math.round(Number(body.levelCount) || 1))),
     artifacts: sanitizeSharedArtifacts(body.artifacts),
-    imageUrls: Array.isArray(body.imageUrls) ? body.imageUrls.filter((url) => typeof url === 'string' && /^https:\/\//i.test(url)).slice(0, 6) : undefined,
+    imageUrls: Array.isArray(body.imageUrls) ? body.imageUrls.filter((url) => typeof url === 'string' && (/^https:\/\//i.test(url) || (url.length <= 1_000_000 && /^data:image\/(?:png|jpeg|webp);base64,/i.test(url)))).slice(0, 6) : undefined,
   }
 }

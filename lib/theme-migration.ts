@@ -1,7 +1,15 @@
 import { createFallbackGameSpec, normalizeGameSpec } from '@/lib/game-spec'
+import { stripLargeAssetUrls } from '@/lib/asset-db'
 import type { Theme } from '@/types'
 
 const DEFAULT_LEVEL_COUNT = 3
+
+export function compactThemeForStorage(theme: Theme): Theme {
+  const result = { ...theme, spec: theme.spec ? stripLargeAssetUrls(theme.spec) : undefined }
+  const fields = ['characterImage', 'backgroundImage', 'groundImage', 'obstacleImage', 'enemyImage', 'weaponImage', 'projectileImage', 'attackEffectImage', 'collectibleImage', 'bossImage'] as const
+  for (const field of fields) if (/^(?:data:|blob:)/.test(result[field] || '')) result[field] = ''
+  return result
+}
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''

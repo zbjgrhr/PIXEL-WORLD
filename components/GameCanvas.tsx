@@ -161,8 +161,10 @@ function plannedSprite(
 ) {
   const animation = asset?.kind === 'spriteSheet' && asset.animation ? normalizeAnimationSpec(asset.animation) : undefined
   const clipPose: AnimationClipPose = state === 'attack' ? 'meleeAttack' : state
-  const clip = animation?.layoutVersion === 3 ? animation.clips?.[clipPose] : undefined
-  const spriteUrl = clip?.url || (animation?.layoutVersion === 3 ? animation.clips?.idle?.url : undefined) || url
+  const requestedClip = animation?.layoutVersion === 3 ? animation.clips?.[clipPose] : undefined
+  const clip = requestedClip?.status === 'success' ? requestedClip : undefined
+  const idle = animation?.clips?.idle
+  const spriteUrl = clip?.url || (animation?.layoutVersion === 3 ? idle?.status === 'success' ? idle.url : undefined : url)
   if (!spriteUrl) return fallback
   if (!animation) {
     return <img src={spriteUrl} alt={alt} draggable={false} style={{ ...style, imageRendering: 'pixelated', userSelect: 'none', pointerEvents: 'none' }} />

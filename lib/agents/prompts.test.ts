@@ -5,6 +5,14 @@ import { createFallbackGameSpec } from '@/lib/game-spec'
 import type { AgentExecuteRequest } from '@/types'
 
 describe('role-scoped Agent context', () => {
+  it('does not send the asset schema for one-click creative completion', () => {
+    const spec = createFallbackGameSpec('', '星潮群岛', 3)
+    const prompts = buildAgentPrompts({ runId:'prompt-optimize-123', taskId:'integrator', role:'integrator', round:1, provider:'openrouter', model:'test', apiKey:'unused', sourcePrompt:'主角：蓝披风地图师\n地面敌人：\n背景：',projectName:'星潮群岛',levelCount:3,baseSpec:spec,artifacts:{} })
+    expect(prompts.user).toContain('蓝披风地图师')
+    expect(prompts.user).not.toContain('地面敌人：')
+    expect(prompts.user).not.toContain('frameCount')
+    expect(prompts.system).toContain('local compiler')
+  })
   it('does not repeat unrelated history for the asset coordinator', () => {
     const template = PROMPT_TEMPLATES[0]
     const spec = createFallbackGameSpec(template.prompt, template.themeName, 5)

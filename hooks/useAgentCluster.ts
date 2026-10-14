@@ -7,9 +7,11 @@ import { digestAgentInput } from '@/lib/agents/hash'
 import { countBlockingIssues, dedupeIssues, inspectGameSpec } from '@/lib/agents/validation'
 import { inspectSelectedInspirations } from '@/lib/agents/inspiration-review'
 import { stabilizeGameSpec } from '@/lib/game-spec-guardrails'
-import { stripLargeAssetUrls } from '@/lib/asset-db'
+import { assetMetadataForReview, hydrateSpecAssets, stripLargeAssetUrls } from '@/lib/asset-db'
 import { isLocalAgentProvider } from '@/lib/agents/config'
 import { executeLocalAgentTask } from '@/lib/agents/local-client'
+import { deterministicAgentResponse } from '@/lib/agents/execution'
+import { compactDataImage } from '@/lib/animation-references'
 import type {
   AgentArtifacts,
   AgentExecuteRequest,
@@ -87,13 +89,13 @@ function artifactForRole(artifacts: AgentArtifacts, role: AgentRole, artifact: R
   return artifacts
 }
 
-function imageUrls(spec?: GameSpec): string[] {
+async function imageUrls(spec?: GameSpec): Promise<string[]> {
   if (!spec) return []
-  const urls = spec.assets.flatMap((asset) => {
-    const clips = asset.animation?.clips ? Object.values(asset.animation.clips).map((clip) => clip?.url) : []
-    return [asset.url, ...clips]
-  })
-  return [...new Set(urls.filter((url): url is string => Boolean(url && /^https:\/\//i.test(url))))].slice(0, 6)
+  const characters = spec.assets.filter((asset) => asset.enabled && asset.kind === 'spriteSheet').sort((a, b) => (a.category === 'hero' ? 0 : a.category === 'boss' ? 1 : 2) - (b.category === 'hero' ? 0 : b.category === 'boss' ? 1 : 2))
+  const urls = characters.flatMap((asset) => [asset.animation?.clips?.idle?.url || asset.url, asset.animation?.clips?.walk?.url])
+  if (!urls.length) urls.push(...spec.assets.filter((asset) => asset.enabled).map((asset) => asset.url))
+  const candidates = [...new Set(urls.filter((url): url is string => Boolean(url && (/^https:\/\//i.test(url) || url.startsWith('data:image/')))))].slice(0, 6)
+  return (await Promise.all(candidates.map(compactDataImage))).filter((url): url is string => Boolean(url))
 }
 
 function stripArtifactAssets(artifacts: AgentArtifacts): AgentArtifacts {
@@ -212,7 +214,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
 
     let lastError = 'Agent execution failed.'
     let recoverable = false
-    const maxAttempts = 3
+    const maxAttempts = 2
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
         const body: AgentExecuteRequest = {
@@ -227,16 +229,17 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
           sourcePrompt: current.sourcePrompt,
           projectName: current.projectName,
           levelCount: current.levelCount,
-          baseSpec: baseSpec ? stripLargeAssetUrls(baseSpec) : undefined,
+          baseSpec: baseSpec ? task.phase === 'quality' ? assetMetadataForReview(baseSpec) : stripLargeAssetUrls(baseSpec) : undefined,
           artifacts: artifactsForRole(task.role, current.artifacts),
-          imageUrls: task.role === 'visualQa' ? imageUrls(baseSpec) : undefined,
+          imageUrls: task.role === 'visualQa' ? await imageUrls(baseSpec) : undefined,
         }
-        const result = isLocalAgentProvider(body.provider)
+        const deterministic = deterministicAgentResponse(body)
+        const result = deterministic || (isLocalAgentProvider(body.provider)
           ? await executeLocalAgentTask(body, control.current.controller?.signal)
           : await fetch('/api/agents/execute', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            signal: control.current.controller?.signal, body: JSON.stringify(body),
-          }).then(async (response) => (await response.json().catch(() => null) || { success: false, error: `HTTP ${response.status}` }) as AgentExecuteResponse)
+            signal: control.current.controller ? AbortSignal.any([control.current.controller.signal, AbortSignal.timeout(100_000)]) : AbortSignal.timeout(100_000), body: JSON.stringify(body),
+          }).then(async (response) => (await response.json().catch(() => null) || { success: false, error: `HTTP ${response.status}` }) as AgentExecuteResponse))
         if (!result?.success || !result.data) {
           lastError = result?.error || 'Agent request failed.'
           recoverable = Boolean(result?.recoverable)
@@ -449,10 +452,11 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
         artifacts: clearArtifactsForRoles(run.artifacts, new Set(selected.role === 'publisher' ? ['publisher'] : [selected.role, 'publisher'])),
       }
       qualityRun = await publish(qualityRun)
-      qualityRun = await executeBatch(qualityRun, [id], apiKey, qualityRun.artifacts.productionSpec)
+      const qualitySpec = qualityRun.artifacts.productionSpec ? await hydrateSpecAssets(options.projectId, qualityRun.artifacts.productionSpec) : undefined
+      qualityRun = await executeBatch(qualityRun, [id], apiKey, qualitySpec)
       const checksReady = qualityRun.tasks.filter((task) => task.phase === 'quality' && task.role !== 'publisher').every((task) => task.status === 'completed' || task.status === 'needs-review')
       if (selected.role !== 'publisher' && !checksReady) return qualityRun
-      qualityRun = await executeBatch(qualityRun, [taskId('publisher', selected.round)], apiKey, qualityRun.artifacts.productionSpec)
+      qualityRun = await executeBatch(qualityRun, [taskId('publisher', selected.round)], apiKey, qualitySpec)
       return publish({ ...qualityRun, status: qualityRun.artifacts.releaseReport?.ready ? 'ready' : 'awaiting_approval', updatedAt: Date.now() })
     }
 
@@ -471,7 +475,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
       updatedAt: Date.now(),
     }
     return drivePlanning(await publish(reset), apiKey)
-  }, [drivePlanning, executeBatch, publish, run])
+  }, [drivePlanning, executeBatch, publish, run, options.projectId])
 
   const approve = useCallback(async () => {
     if (!run) return null

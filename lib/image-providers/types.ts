@@ -32,6 +32,7 @@ export interface GenerateImageParams {
   size?: string
   layout?: 'single' | 'sprite-sheet' | 'animation-strip'
   frameCount?: number
+  signal?: AbortSignal
 }
 
 export interface ImageProvider {

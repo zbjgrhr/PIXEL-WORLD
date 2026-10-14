@@ -330,6 +330,7 @@ export interface LevelSpec {
 }
 
 export interface GameSpec {
+  creativeBrief?: { heroGoal?: string; difficulty?: string; pacing?: string; identityRules?: string }
   version: 3
   title: string
   world: string
@@ -497,6 +498,7 @@ export interface ThemePreviewProps {
   onUpdateAsset?: (themeId: string, assetId: string, patch: Partial<AssetDefinition>) => void
   onUploadAsset?: (themeId: string, assetId: string, file: File, pose?: AnimationClipPose) => Promise<void>
   onDeleteTheme?: (themeId: string) => void
+  onStartGame?: () => void
 }
 
 export interface GameCanvasProps {

@@ -26,7 +26,8 @@ function isCheckerboardPixel(r: number, g: number, b: number): boolean {
 
 function isChromaGreenPixel(r: number, g: number, b: number): boolean {
   // Primary chroma key #00FF00 and common model variants
-  if (g > 180 && g > r * 1.6 && g > b * 1.6 && r < 120 && b < 120) return true
+  if (g > 70 && g > r * 2.2 && g > b * 2.2 && r < 85 && b < 85) return true
+  if (g > 180 && g > r * 1.25 && g > b * 1.4 && r < 200 && b < 160) return true
   return colorDistance(r, g, b, { r: 0, g: 255, b: 0 }) < 90
 }
 
@@ -39,6 +40,68 @@ function applyAlphaMask(
 ): Buffer {
   const pixelCount = width * height
   const processedData = Buffer.alloc(pixelCount * 4)
+  // Only remove background connected to the canvas edges. Removing every
+  // white/green pixel also erased eyes, metallic highlights and costume detail.
+  const background = new Uint8Array(pixelCount)
+  const queue = new Int32Array(pixelCount)
+  let head = 0, tail = 0
+  const enqueue = (index: number) => {
+    if (background[index]) return
+    const offset = index * channels
+    if (!isBackground(data[offset], data[offset + 1], data[offset + 2]) && !(channels === 4 && data[offset + 3] < 16)) return
+    background[index] = 1
+    queue[tail++] = index
+  }
+  for (let x = 0; x < width; x++) { enqueue(x); enqueue((height - 1) * width + x) }
+  for (let y = 0; y < height; y++) { enqueue(y * width); enqueue(y * width + width - 1) }
+  while (head < tail) {
+    const index = queue[head++], x = index % width
+    if (x > 0) enqueue(index - 1)
+    if (x < width - 1) enqueue(index + 1)
+    if (index >= width) enqueue(index - width)
+    if (index < pixelCount - width) enqueue(index + width)
+  }
+
+  // Large flat key-color pockets between legs/claws can be enclosed by the
+  // sprite's outline. Match the actual edge key, keeping small costume details.
+  if (isBackground === isChromaGreenPixel) {
+    let red = 0, green = 0, blue = 0, count = 0
+    for (let x = 0; x < width; x += Math.max(1, Math.floor(width / 32))) {
+      for (const y of [0, height - 1]) {
+        const offset = (y * width + x) * channels
+        if (isBackground(data[offset], data[offset + 1], data[offset + 2])) { red += data[offset]; green += data[offset + 1]; blue += data[offset + 2]; count++ }
+      }
+    }
+    const key = count ? { r: red / count, g: green / count, b: blue / count } : { r: 0, g: 255, b: 0 }
+    const visited = new Uint8Array(pixelCount)
+    const candidate = (index: number) => {
+      const offset = index * channels
+      return !background[index] && isBackground(data[offset], data[offset + 1], data[offset + 2]) && colorDistance(data[offset], data[offset + 1], data[offset + 2], key) < 55
+    }
+    for (let start = 0; start < pixelCount; start++) {
+      if (visited[start] || !candidate(start)) continue
+      head = 0; tail = 0; queue[tail++] = start; visited[start] = 1
+      const visit = (index: number) => { if (!visited[index] && candidate(index)) { visited[index] = 1; queue[tail++] = index } }
+      while (head < tail) {
+        const index = queue[head++], x = index % width
+        if (x > 0) visit(index - 1)
+        if (x < width - 1) visit(index + 1)
+        if (index >= width) visit(index - width)
+        if (index < pixelCount - width) visit(index + width)
+      }
+      if (tail > Math.max(1024, pixelCount * .002)) for (let i = 0; i < tail; i++) background[queue[i]] = 1
+    }
+    // Newly opened pockets also expose darker key-color fringes and shadows.
+    head = 0; tail = 0
+    for (let index = 0; index < pixelCount; index++) if (background[index]) queue[tail++] = index
+    while (head < tail) {
+      const index = queue[head++], x = index % width
+      if (x > 0) enqueue(index - 1)
+      if (x < width - 1) enqueue(index + 1)
+      if (index >= width) enqueue(index - width)
+      if (index < pixelCount - width) enqueue(index + width)
+    }
+  }
 
   for (let i = 0; i < pixelCount; i++) {
     const srcOffset = i * channels
@@ -49,7 +112,7 @@ function applyAlphaMask(
     const b = data[srcOffset + 2]
     const a = channels === 4 ? data[srcOffset + 3] : 255
 
-    if (isBackground(r, g, b)) {
+    if (background[i]) {
       processedData[dstOffset] = r
       processedData[dstOffset + 1] = g
       processedData[dstOffset + 2] = b

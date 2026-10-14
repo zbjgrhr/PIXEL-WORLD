@@ -227,7 +227,7 @@ export async function exportGameZip(spec: GameSpec): Promise<void> {
     if (asset.kind !== 'spriteSheet') return asset.url ? [] : [asset.title]
     const animation = normalizeAnimationSpec(asset.animation)
     if (animation.layoutVersion !== 3 || !animation.clips) return asset.url ? [] : [asset.title]
-    return animationClipPoses(asset).filter((pose) => !animation.clips?.[pose]?.url).map((pose) => `${asset.title} · ${pose}`)
+    return animationClipPoses(asset).filter((pose) => !animation.clips?.[pose]?.url || animation.clips[pose]?.status !== 'success').map((pose) => `${asset.title} · ${pose}`)
   })
   if (missing.length) throw new ExportValidationError(missing)
   const exported: GameSpec = JSON.parse(JSON.stringify(spec)) as GameSpec

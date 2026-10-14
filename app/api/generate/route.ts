@@ -14,6 +14,8 @@ import {
 import { ASSET_TYPES } from '@/types'
 import type { AnimationClipPose, AssetDefinition, AssetType, GameSpec, LevelData, ProviderId, SpawnPoint } from '@/types'
 import { CustomEndpointError, validateCustomBaseUrl } from '@/lib/custom-endpoint.server'
+import { ImageQualityError, inspectSpriteImage, processGeneratedImage, readGeneratedImage } from '@/lib/image-quality.server'
+import { getProviderConfig } from '@/configs/image-providers'
 
 interface GenerateRequest {
   theme: string
@@ -47,22 +49,10 @@ async function processImageCutout(
   gridRows = 1,
 ): Promise<string> {
   const cutoutMode = getCutoutMode(providerId, type, model)
-  if (!cutoutMode) return imageUrl
-
-  try {
-    const response = await fetch(
-      `${baseUrl}/api/process-image`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrl, type, cutoutMode, preserveCanvas, gridColumns, gridRows }),
-      },
-    )
-    const result = await response.json()
-    return result.success ? result.data.processedUrl : imageUrl
-  } catch {
-    return imageUrl
-  }
+  return processGeneratedImage(imageUrl, {
+    cutout: cutoutMode, isolated: type !== 'background' && type !== 'ground',
+    preserveCanvas, frameCount: gridColumns, gridRows,
+  })
 }
 
 async function generateAsset(
@@ -75,6 +65,7 @@ async function generateAsset(
   levelIndex: number,
   baseUrl: string,
   customBaseUrl?: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   const provider = getImageProvider(providerId)
   const prompt = buildGamePrompt(type, theme, spec, levelIndex, providerId, model)
@@ -85,11 +76,13 @@ async function generateAsset(
     apiKey,
     model,
     baseUrl: customBaseUrl,
+    signal,
   })
   return processImageCutout(originalUrl, type, providerId, model, baseUrl)
 }
 
 function isRetryable(error: unknown): boolean {
+  if (error instanceof Error && /daily free allocation|insufficient_quota|credit_balance_exhausted|insufficient credits|not available in your region/i.test(error.message)) return false
   return error instanceof UpstreamApiError && (
     error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500
   )
@@ -110,32 +103,6 @@ function isModerationError(error: unknown): boolean {
   )
 }
 
-async function validateGeneratedImage(url: string, providerId: ProviderId, model: string): Promise<void> {
-  const dataMatch = url.match(/^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\r\n]+)$/i)
-  if (dataMatch) {
-    const bytes = Buffer.from(dataMatch[2], 'base64')
-    if (bytes.length < 1024) throw new UpstreamApiError(providerId, model, 502, 'The provider returned empty or truncated image data.')
-    if (dataMatch[1].toLowerCase() === 'image/png' && bytes.length >= 24) {
-      const signature = bytes.subarray(0, 8).toString('hex')
-      const width = bytes.readUInt32BE(16)
-      const height = bytes.readUInt32BE(20)
-      if (signature !== '89504e470d0a1a0a' || width < 64 || height < 64) {
-        throw new UpstreamApiError(providerId, model, 502, `Invalid PNG result (${width}x${height}).`)
-      }
-    }
-    return
-  }
-  if (!/^https?:\/\//i.test(url)) throw new UpstreamApiError(providerId, model, 502, 'The provider returned an invalid image URL.')
-  let response = await fetch(url, { headers: { Range: 'bytes=0-2047' }, cache: 'no-store' })
-  if (!response.ok) response = await fetch(url, { cache: 'no-store' })
-  if (!response.ok) throw new UpstreamApiError(providerId, model, 502, `The generated image is not accessible (${response.status}).`)
-  const contentType = response.headers.get('content-type') || ''
-  const bytes = new Uint8Array(await response.arrayBuffer())
-  if (!contentType.startsWith('image/') || bytes.length < 64) {
-    throw new UpstreamApiError(providerId, model, 502, 'The generated URL did not return valid image data.')
-  }
-}
-
 async function generatePlannedAsset(
   providerId: ProviderId,
   model: string,
@@ -149,6 +116,7 @@ async function generatePlannedAsset(
   referenceImages: string[] = [],
   onAttempt?: () => Promise<void>,
   customBaseUrl?: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   const type = generationTypeForAsset(asset)
   if (!type || (asset.kind !== 'image' && asset.kind !== 'spriteSheet')) {
@@ -170,13 +138,20 @@ async function generatePlannedAsset(
   const safeReferenceImages = referenceImages.filter((url) => (
     /^https?:\/\//i.test(url) || /^data:image\/(?:png|jpe?g|webp);base64,/i.test(url)
   )).slice(0, 4)
+  if (animationPose && animationPose !== 'idle') {
+    if (!safeReferenceImages.length) throw new ProviderValidationError('先生成并检查站立图，再生成其他动作；这样才能保持同一个角色。', providerId)
+    if (!getProviderConfig(providerId)?.models.find((candidate) => candidate.id === model)?.supportsReferenceImages) {
+      throw new ProviderValidationError('当前图片模型不支持角色参考图。请选支持参考图的模型，或上传动作帧条、使用内置素材。', providerId)
+    }
+    await inspectSpriteImage(await readGeneratedImage(safeReferenceImages[0]), 1)
+  }
   const referenceGuidance = safeReferenceImages.length
     ? ` Reference image 1 is the exact character identity and proportions. ${safeReferenceImages.length > 1 ? 'The remaining references are exact project-made weapon, projectile or effect assets; reproduce and physically align them with the character, do not redesign them.' : 'Keep this exact identity in the new action strip.'}`
     : ''
   prompt += referenceGuidance
   let usedModerationRewrite = false
   let lastError: unknown
-  for (let attempt = 0; attempt < (onAttempt ? 1 : 3); attempt++) {
+  for (let attempt = 0; attempt < (onAttempt ? 1 : 2); attempt++) {
     try {
       if (onAttempt) await onAttempt()
       const originalUrl = await provider.generateImage({
@@ -189,14 +164,13 @@ async function generatePlannedAsset(
         layout: animationPose ? 'animation-strip' : asset.kind === 'spriteSheet' ? 'sprite-sheet' : 'single',
         frameCount,
         referenceImages: safeReferenceImages,
+        signal,
       })
-      await validateGeneratedImage(originalUrl, providerId, model)
       const processedUrl = await processImageCutout(
         originalUrl, type, providerId, model, baseUrl, asset.kind === 'spriteSheet',
         animationPose ? frameCount : asset.kind === 'spriteSheet' ? 6 : undefined,
         animationPose ? 1 : asset.kind === 'spriteSheet' ? 6 : 1,
       )
-      if (processedUrl !== originalUrl) await validateGeneratedImage(processedUrl, providerId, model)
       return processedUrl
     } catch (error) {
       lastError = error
@@ -207,7 +181,7 @@ async function generatePlannedAsset(
         usedModerationRewrite = true
         continue
       }
-      if (!isRetryable(error) || onAttempt || attempt === 2) throw error
+      if (!isRetryable(error) || onAttempt || attempt === 1) throw error
       await new Promise((resolve) => setTimeout(resolve, 700 * 2 ** attempt))
     }
   }
@@ -239,6 +213,8 @@ function generateObstacleLayout(levelId: string, levelIndex: number) {
 }
 
 function errorResponse(error: unknown, provider?: ProviderId, model?: string) {
+  if (error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name)) return NextResponse.json({ success: false, error: '图片服务未在限定时间内返回，已停止等待；成功素材会保留，可稍后单独重试。', provider, model }, { status: 504 })
+  if (error instanceof ImageQualityError) return NextResponse.json({ success: false, error: error.message, provider, model }, { status: 422 })
   if (error instanceof CustomEndpointError) return NextResponse.json({ success: false, error: error.message, provider, model }, { status: error.status >= 400 && error.status < 600 ? error.status : 502 })
   if (error instanceof ProviderApiKeyError || error instanceof ProviderValidationError) {
     return NextResponse.json(
@@ -306,6 +282,7 @@ export async function POST(request: NextRequest) {
         providerId, modelId, apiKey, asset, theme, spec, levelIndex, baseUrl, animationPose, body.referenceImages,
         undefined,
         customBaseUrl,
+        AbortSignal.any([request.signal, AbortSignal.timeout(95_000)]),
       )
       const animation = asset.kind === 'spriteSheet' ? (
         normalizeAnimationSpec(asset.animation).layoutVersion === 3

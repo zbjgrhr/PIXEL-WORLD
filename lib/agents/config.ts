@@ -4,6 +4,7 @@ export interface AgentTextModelConfig {
   id: string
   label: string
   supportsVision?: boolean
+  supportsTemperature?: boolean
 }
 
 export interface AgentProviderConfig {
@@ -21,6 +22,9 @@ export const AGENT_PROVIDERS: AgentProviderConfig[] = [
     envKey: 'OPENROUTER_API_KEY',
     keyHint: 'OpenRouter API Key',
     models: [
+      { id: 'qwen/qwen3.8-flash', label: 'Qwen 3.8 Flash（快速中文策划）', supportsVision: true },
+      { id: 'google/gemini-3.8-flash', label: 'Gemini 3.8 Flash（快速策划）', supportsVision: true },
+      { id: 'anthropic/claude-sonnet-5.5', label: 'Claude Sonnet 5.5（细致策划）', supportsVision: true, supportsTemperature: false },
       { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', supportsVision: true },
       { id: 'openai/gpt-4.1-mini', label: 'GPT-4.1 Mini', supportsVision: true },
     ],

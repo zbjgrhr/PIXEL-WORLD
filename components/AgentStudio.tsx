@@ -504,7 +504,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
           <Title level={5} style={{ marginTop: 0 }}>发布检查</Title>
           <Paragraph style={{ marginBottom: 0 }}>{String(cluster.run.artifacts.releaseReport.summary || (cluster.run.artifacts.releaseReport.ready ? '所有阻断项已通过。' : '仍有需要处理的阻断项。'))}</Paragraph>
         </Card>}
-      </> : <div className="agent-review-empty"><strong>等待开始策划</strong><span>先在“游戏构想”填写名称和故事，再到左栏选择文字模型、补全提示词并启动 Agent 集群。</span></div>}</div>, reviewTarget)}
+      </> : <div className="agent-review-empty"><strong>等待开始策划</strong><span>先在“写故事”填写名称和故事，再到左栏选择文字模型、补全提示词并启动 Agent 集群。</span></div>}</div>, reviewTarget)}
     </Space>
   </Card>
 }

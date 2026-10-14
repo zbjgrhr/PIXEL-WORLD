@@ -6,6 +6,7 @@ import { isLocalAgentProvider } from '@/lib/agents/config'
 import { localIntegratorResponse, normalizeArtifact, prepareAgentRequest, parseJsonObject, responseText, ROLE_TOKEN_BUDGET } from '@/lib/agents/execution'
 import type { ChatPayload } from '@/lib/agents/execution'
 import { CustomEndpointError, customJsonRequest, validateCustomBaseUrl } from '@/lib/custom-endpoint.server'
+import { formatGenerationError } from '@/lib/format-generation-error'
 import type {
   AgentExecuteRequest,
   AgentExecuteResponse,
@@ -21,7 +22,7 @@ const VALID_ROLES = new Set<AgentRole>([
   'consistencyCritic', 'engineQa', 'revision', 'assetCoordinator', 'visualQa', 'playtest', 'publisher',
 ])
 
-const MODEL_TIMEOUT_MS = 32_000
+const MODEL_TIMEOUT_MS = 45_000
 
 class AgentUpstreamError extends Error {
   constructor(readonly status: number, message: string, readonly recoverable: boolean) {
@@ -36,7 +37,7 @@ function endpoint(provider: AgentProviderId): string {
 }
 
 function imageContent(text: string, urls: string[]) {
-  const safeUrls = urls.filter((url) => /^https:\/\//i.test(url)).slice(0, 6)
+  const safeUrls = urls.filter((url) => /^https:\/\//i.test(url) || (url.length <= 1_000_000 && /^data:image\/(?:png|jpeg|webp);base64,/i.test(url))).slice(0, 6)
   if (!safeUrls.length) return text
   return [
     { type: 'text', text },
@@ -90,8 +91,11 @@ async function callModel(
       },
       body: JSON.stringify({
         model: request.model,
-        temperature: request.role === 'consistencyCritic' || request.role === 'engineQa' ? 0.1 : 0.25,
-        max_tokens: ROLE_TOKEN_BUDGET[request.role],
+        ...(getAgentProvider(request.provider).models.find((item) => item.id === request.model)?.supportsTemperature === false ? {} : { temperature: request.role === 'consistencyCritic' || request.role === 'engineQa' ? 0.1 : 0.35 }),
+        max_tokens: request.runId.startsWith('prompt-optimize-') ? 1800 : ROLE_TOKEN_BUDGET[request.role],
+        ...(request.provider === 'openrouter' && request.model === 'qwen/qwen3.8-flash' ? {
+          reasoning: { enabled: false },
+        } : {}),
         ...(responseFormat ? { response_format: { type: 'json_object' } } : {}),
         messages: [
           { role: 'system', content: system },
@@ -103,22 +107,27 @@ async function callModel(
       }),
     })
   } catch (error) {
+    clearTimeout(timer)
     if (error instanceof Error && error.name === 'AbortError') {
       throw new AgentUpstreamError(504, `Agent model timed out after ${MODEL_TIMEOUT_MS / 1000} seconds.`, true)
     }
     throw error
-  } finally {
-    clearTimeout(timer)
   }
-  if (!response.ok) {
-    const detail = (await response.text()).slice(0, 1000)
-    if (response.status === 400 && responseFormat && /response.format|response_format|json.object/i.test(detail)) {
-      return callModel(request, apiKey, system, user, false, onAttempt)
+  try {
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0, 1000)
+      if (response.status === 400 && responseFormat && /response.format|response_format|json.object/i.test(detail)) {
+        clearTimeout(timer)
+        return callModel(request, apiKey, system, user, false, onAttempt)
+      }
+      const recoverable = !/daily free allocation|insufficient_quota|credit_balance_exhausted|not available in your region|insufficient credits/i.test(detail) && (response.status === 429 || response.status === 503)
+      throw new AgentUpstreamError(response.status, `Agent API failed (${response.status}): ${detail}`, recoverable)
     }
-    const recoverable = response.status === 408 || response.status === 429 || response.status >= 500
-    throw new AgentUpstreamError(response.status, `Agent API failed (${response.status}): ${detail}`, recoverable)
-  }
-  return response.json() as Promise<ChatPayload>
+    return await response.json() as ChatPayload
+  } catch (error) {
+    if (controller.signal.aborted) throw new AgentUpstreamError(504, '文字模型在45秒内未完整返回；可重试或使用当前草案继续。', false)
+    throw error
+  } finally { clearTimeout(timer) }
 }
 
 async function callAndParse(request: AgentExecuteRequest, apiKey: string, onAttempt?: () => Promise<void>): Promise<{ parsed: Record<string, unknown>; usage: AgentUsage }> {
@@ -126,6 +135,7 @@ async function callAndParse(request: AgentExecuteRequest, apiKey: string, onAtte
   const first = await callModel(request, apiKey, prompts.system, prompts.user, !onAttempt, onAttempt)
   let parsed: Record<string, unknown>
   let payload = first
+  const calls = [first]
   try {
     parsed = parseJsonObject(responseText(first))
   } catch {
@@ -133,22 +143,23 @@ async function callAndParse(request: AgentExecuteRequest, apiKey: string, onAtte
     const repairSystem = 'Return valid JSON only. Preserve the supplied content without adding executable code or explanations.'
     const repairUser = `Repair this malformed Agent response into {"summary":string,"artifact":object,"issues":array}:\n${responseText(first).slice(0, 30000)}`
     payload = await callModel(request, apiKey, repairSystem, repairUser, true)
+    calls.push(payload)
     parsed = parseJsonObject(responseText(payload))
   }
-  const usage = payload.usage || {}
+  const usage = calls.reduce((total, response) => {
+    const u = response.usage || {}
+    const prompt = Number(u.prompt_tokens) || 0, completion = Number(u.completion_tokens) || 0
+    return { promptTokens: total.promptTokens + prompt, completionTokens: total.completionTokens + completion, totalTokens: total.totalTokens + (Number(u.total_tokens) || prompt + completion) }
+  }, { promptTokens: 0, completionTokens: 0, totalTokens: 0 })
   return {
     parsed,
-    usage: {
-      promptTokens: Number(usage.prompt_tokens) || 0,
-      completionTokens: Number(usage.completion_tokens) || 0,
-      totalTokens: Number(usage.total_tokens) || (Number(usage.prompt_tokens) || 0) + (Number(usage.completion_tokens) || 0),
-    },
+    usage,
   }
 }
 
 function errorStatus(error: unknown): number {
   if (error instanceof CustomEndpointError) return error.status === 401 || error.status === 403 ? 401 : error.status === 429 ? 429 : error.status >= 500 ? 502 : 400
-  if (error instanceof AgentUpstreamError) return error.status === 401 || error.status === 403 ? 401 : error.status === 429 ? 429 : error.status >= 500 ? 502 : 400
+  if (error instanceof AgentUpstreamError) return error.status === 401 || error.status === 403 ? error.status : error.status === 429 ? 429 : error.status >= 500 ? 502 : 400
   return 500
 }
 
@@ -203,7 +214,7 @@ export async function POST(nextRequest: NextRequest) {
     } satisfies AgentExecuteResponse)
     return result
   } catch (error) {
-    const upstreamRejectedPermanently = error instanceof AgentUpstreamError && !error.recoverable
+    const upstreamRejectedPermanently = error instanceof AgentUpstreamError && !error.recoverable && error.status < 500
     if (body && body.provider !== 'custom' && (body.role === 'integrator' || body.role === 'revision') && !upstreamRejectedPermanently) {
       return NextResponse.json(localIntegratorResponse(body, error))
     }
@@ -212,7 +223,7 @@ export async function POST(nextRequest: NextRequest) {
       : error instanceof Error && /fetch|network|socket|ECONN|ENOTFOUND|timeout/i.test(error.message)
     const result = NextResponse.json({
       success: false,
-      error: error instanceof Error ? error.message : 'Agent execution failed.',
+      error: error instanceof Error ? formatGenerationError(error.message) : 'Agent execution failed.',
       recoverable,
       timestamp: new Date().toISOString(),
     } satisfies AgentExecuteResponse, { status: errorStatus(error) })

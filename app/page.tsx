@@ -5,7 +5,7 @@ import { message } from 'antd'
 import { useGameStore } from '@/lib/store'
 import { buildVirtualGameData } from '@/lib/virtual-levels'
 import { buildGameDataFromSpec } from '@/lib/virtual-levels'
-import { ensureThemeSpec, getThemeSourcePrompt, isStoredTheme } from '@/lib/theme-migration'
+import { compactThemeForStorage, ensureThemeSpec, getThemeSourcePrompt, isStoredTheme } from '@/lib/theme-migration'
 import { GameCanvas, Guidebook, ProjectHeader, SideMenu, ThemePreview } from '@/components/ui'
 import GameCoverMenu from '@/components/GameCoverMenu'
 import { PRESET_THEMES } from '@/configs'
@@ -14,7 +14,7 @@ import { formatGenerationError } from '@/lib/format-generation-error'
 import { loadImageApiPrefs, loadProviderApiKey, saveImageApiPrefs } from '@/lib/image-api-prefs'
 import { cacheAssetUrl, removeCachedAssetClips, stripLargeAssetUrls } from '@/lib/asset-db'
 import { prepareAnimationReferenceImages } from '@/lib/animation-references'
-import { animationClipDefaults, animationIsComplete, createActionStripAnimation, normalizeAnimationSpec } from '@/lib/asset-catalog'
+import { animationClipDefaults, animationIsComplete, createActionStripAnimation, normalizeAnimationSpec, replaceAnimationClip } from '@/lib/asset-catalog'
 import { ASSET_TYPES } from '@/types'
 import { buildBuiltinGameSpec } from '@/lib/builtin-game'
 import { DEFAULT_COMFY_SETTINGS, generateComfyImage, type ComfySettings } from '@/lib/comfyui-client'
@@ -176,7 +176,7 @@ export default function Home() {
 
   const persistThemes = (nextThemes: Theme[]) => {
     try {
-      localStorage.setItem('pixel-seed-themes', JSON.stringify(nextThemes))
+      localStorage.setItem('pixel-seed-themes', JSON.stringify(nextThemes.filter((theme) => !theme.isLoading).map(compactThemeForStorage)))
     } catch (error) {
       console.error('Failed to save themes:', error)
     }
@@ -200,7 +200,7 @@ export default function Home() {
     try {
       const stored = localStorage.getItem('pixel-seed-themes')
       const parsed = stored ? JSON.parse(stored) : []
-      const storedThemes = Array.isArray(parsed) ? parsed.filter(isStoredTheme) : []
+      const storedThemes = Array.isArray(parsed) ? parsed.filter(isStoredTheme).filter((theme) => !theme.isLoading) : []
       const storedById = new Map(storedThemes.map((theme) => [theme.id, theme]))
       const presetIds = new Set(PRESET_THEMES.map((theme) => theme.id))
       const combinedThemes = [
@@ -217,6 +217,11 @@ export default function Home() {
         ...storedThemes.filter((theme) => !presetIds.has(theme.id)),
       ]
       const savedGameData = useGameStore.getState().gameDataByTheme
+      for (const [id, game] of Object.entries(savedGameData)) {
+        const spec = game.data?.spec
+        if (!id.startsWith('custom-') || !spec || combinedThemes.some((theme) => theme.id === id)) continue
+        combinedThemes.push({ id: id as GameTheme, name: spec.title, description: spec.backgroundStory, spec, characterImage: '', backgroundImage: '', groundImage: '', obstacleImage: '' })
+      }
       const migratedThemes = combinedThemes.map((theme) => ensureThemeSpec(
         theme,
         savedGameData[theme.id]?.data?.levels?.length,
@@ -372,6 +377,7 @@ export default function Home() {
     const spec = current.data?.spec || theme?.spec
     const asset = spec?.assets.find((item) => item.id === assetId)
     if (!theme || !spec || !asset) return void message.error('没有找到需要重新生成的素材。')
+    if (regeneratingAssetIds.some((id) => id === assetId || id.startsWith(`${assetId}:`))) return void message.info('这个角色正在生成，请完成后再重试其他动作。')
     if (activeImageSource === 'byok' && !key.trim()) return void message.error('请先填写 API Key。')
     if (activeImageSource === 'custom' && (!customImageConnection.baseUrl.trim() || !customImageConnection.model.trim() || !customImageConnection.apiKey.trim())) return void message.error('手动接入需要接口地址、模型 ID 和 API Key。')
     if (activeImageSource === 'upload') return void message.info('请在素材卡片上传或替换图片。')
@@ -400,6 +406,7 @@ export default function Home() {
         : []
       const response = await fetch('/api/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(110_000),
         body: JSON.stringify({ theme: spec.title, prompt: asset.prompt, ...(activeImageSource === 'custom' ? { provider: 'custom', model: customImageConnection.model.trim(), apiKey: customImageConnection.apiKey.trim(), customBaseUrl: customImageConnection.baseUrl.trim() } : { provider: selectedProvider, model: selectedModel, apiKey: key.trim() }), levelCount: spec.levels.length, spec: stripLargeAssetUrls(spec), asset: stripLargeAssetUrls({ ...spec, assets: [asset] }).assets[0], levelIndex, animationPose, referenceImages }),
       })
       const result = await response.json().catch(() => null)
@@ -408,19 +415,12 @@ export default function Home() {
       if (!response.ok || !result?.success || (!animationPose && !generatedAsset?.url) || (animationPose && !generatedClip?.url)) throw new Error(formatGenerationError(result?.error || `HTTP ${response.status}`))
       let completedAsset: AssetDefinition
       if (animationPose) {
-        const currentAnimation = asset.animation?.layoutVersion === 3 ? normalizeAnimationSpec(asset.animation) : createActionStripAnimation()
-        completedAsset = {
-          ...asset,
-          ...generatedAsset!,
-          animation: { ...currentAnimation, clips: { ...currentAnimation.clips, [animationPose]: generatedClip } },
-          url: animationPose === 'idle' ? generatedClip?.url : asset.url,
-          error: undefined,
-        }
-        completedAsset.status = animationIsComplete(completedAsset) ? 'success' : 'pending'
+        completedAsset = replaceAnimationClip(asset, animationPose, generatedClip!)
       } else {
         completedAsset = { ...generatedAsset!, status: 'success', error: undefined }
       }
       try {
+        if (animationPose === 'idle' && asset.animation?.clips?.idle?.url && asset.animation.clips.idle.url !== generatedClip?.url) await removeCachedAssetClips(themeId, assetId)
         const cacheKey = animationPose ? `${assetId}:clip:${animationPose}` : assetId
         await cacheAssetUrl(themeId, cacheKey, animationPose ? generatedClip?.url || '' : completedAsset.url || '')
         if (animationPose === 'idle' && generatedClip?.url) await cacheAssetUrl(themeId, assetId, generatedClip.url)
@@ -430,6 +430,7 @@ export default function Home() {
       }
       handleUpdateAsset(themeId, assetId, completedAsset)
       message.success(`${asset.title}${animationPose ? ` · ${animationPose}` : ''} 已重新生成。`)
+      if (animationPose === 'idle' && asset.animation?.clips?.idle?.url) message.info('站立图已更换，其他动作需要重新生成或上传，以保持同一个角色。')
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Generation failed.'
       if (animationPose && asset.animation?.layoutVersion === 3) {
@@ -577,6 +578,7 @@ export default function Home() {
                     onUpdateAsset={handleUpdateAsset}
                     onUploadAsset={handleUploadAsset}
                     onDeleteTheme={handleDeleteTheme}
+                    onStartGame={openGameCover}
                   />
                 </div>
               </div>

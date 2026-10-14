@@ -182,6 +182,13 @@ function customizeAssetPrompts(
 
 export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel World', requestedLevelCount = 3): GameSpec {
   const prompt = sourcePrompt.trim()
+  const creativeFields = parseStructuredFields(prompt)
+  const creativeBrief = {
+    heroGoal: creativeFields.get(normalizeFieldLabel('主角目标（可选）')) || structuredField(prompt, ['主角目标']),
+    difficulty: creativeFields.get(normalizeFieldLabel('难度偏好（可选）')) || structuredField(prompt, ['难度偏好']),
+    pacing: creativeFields.get(normalizeFieldLabel('叙事节奏（可选）')) || structuredField(prompt, ['叙事节奏']),
+    identityRules: creativeFields.get(normalizeFieldLabel('角色一致性要求（可选）')) || structuredField(prompt, ['角色一致性要求']),
+  }
   const hasStructuredFieldSyntax = prompt.split(/\r?\n/).some((line) =>
     /^(?:游戏标题|世界观与故事|背景故事|整体像素风格|主角\s*\/|地面敌人\s*\/|空中敌人\s*\/|水中敌人\s*\/|BOSS|关卡\s*\d+)\s*[:：]/i.test(line.trim()),
   )
@@ -307,6 +314,7 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
       lighting: 'Clear luminous light from the upper left with crisp silhouettes, sparkling highlights and readable depth in every scene.',
       pixelScale: 'Consistent 2x pixel scale and side-view orthographic camera.',
     },
+    creativeBrief,
     hero: { name: storyAnchors.hero || 'Hero', appearance: heroAppearance, maxHealth: 100, moveSpeed: 5, jumpPower: 15 },
     weapon: { name: 'Seedblade', appearance: weaponAppearance, mode: 'hybrid', meleeDamage: 24, rangedDamage: 16, cooldownMs: 420, projectileSpeed: 10 },
     enemies: [{ name: 'World Stalker', appearance: enemyAppearance, health: 48, damage: 12, speed: 1.4, behavior: 'chase' }],
@@ -442,13 +450,27 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
   const knownLevels = new Set(levels.map((level) => level.id))
   const assets: AssetDefinition[] = rawAssets.map((rawAsset, index) => {
     const asset = rawAsset as Partial<AssetDefinition>
+    const explicitlyProvided = providedAssets.some((item) => item.id === asset.id && Boolean(item.prompt?.trim()))
+    let derivedPrompt = asset.prompt
+    if (!explicitlyProvided && !asset.url) {
+      if (asset.category === 'hero' && hero?.appearance) derivedPrompt = hero.appearance
+      else if (asset.category === 'boss' && boss?.appearance) derivedPrompt = boss.appearance
+      else if (asset.category === 'collectible' && collectible?.appearance) derivedPrompt = collectible.appearance
+      else if (asset.category === 'groundEnemy' && input.enemies?.[0]?.appearance) derivedPrompt = input.enemies[0].appearance
+      else if (asset.category === 'rangedProjectile' && input.projectile) derivedPrompt = input.projectile
+      else if (asset.category === 'meleeAttackEffect' && input.attackEffect) derivedPrompt = input.attackEffect
+      else if (asset.category === 'levelBackground') {
+        const level = levels.find((item) => asset.levelIds?.includes(item.id))
+        if (level) derivedPrompt = level.environment
+      }
+    }
     const base = defaultAssets.find((item) => item.category === asset.category) || defaultAssets[index % defaultAssets.length]
     const validLevelIds = Array.isArray(asset.levelIds) ? asset.levelIds.filter((id): id is string => typeof id === 'string' && knownLevels.has(id)) : base.levelIds
     const url = text(asset.url, '')
     const kind = ['image', 'spriteSheet', 'audio', 'runtime'].includes(String(asset.kind)) ? asset.kind as AssetDefinition['kind'] : base.kind
     const animation = kind === 'spriteSheet' ? normalizeAnimationSpec(asset.animation || base.animation) : undefined
     const animationComplete = animation?.layoutVersion === 3 && animation.clips
-      ? ANIMATION_CLIP_POSES.filter((pose) => animation.clips?.[pose]?.enabled !== false).every((pose) => Boolean(animation.clips?.[pose]?.url))
+      ? ANIMATION_CLIP_POSES.filter((pose) => animation.clips?.[pose]?.enabled !== false).every((pose) => Boolean(animation.clips?.[pose]?.url && animation.clips[pose]?.status === 'success'))
       : Boolean(url)
     const requestedStatus = String(asset.status)
     const status: AssetDefinition['status'] = animationComplete
@@ -462,7 +484,7 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
       ...base,
       id: text(asset.id, `${base.category}-${index + 1}`),
       title: text(asset.title, base.title),
-      prompt: text(asset.prompt, base.prompt),
+      prompt: text(derivedPrompt, base.prompt),
       enabled: typeof asset.enabled === 'boolean' ? asset.enabled : base.enabled,
       levelIds: validLevelIds.length ? validLevelIds : base.levelIds,
       kind,
@@ -478,6 +500,12 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
   return {
     version: 3,
     title: text(input.title, fallback.title),
+    creativeBrief: {
+      heroGoal: text(fallback.creativeBrief?.heroGoal, text(input.creativeBrief?.heroGoal, '')),
+      difficulty: text(fallback.creativeBrief?.difficulty, text(input.creativeBrief?.difficulty, '')),
+      pacing: text(fallback.creativeBrief?.pacing, text(input.creativeBrief?.pacing, '')),
+      identityRules: text(fallback.creativeBrief?.identityRules, text(input.creativeBrief?.identityRules, '')),
+    },
     world: text(input.world, fallback.world),
     backgroundStory: text(input.backgroundStory, fallback.backgroundStory),
     visualStyle: {
@@ -517,5 +545,7 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
 export function serializeGameSpec(spec: GameSpec): string {
   const assets = spec.assets.map((asset) => `${asset.title}：${asset.prompt}`).join('\n')
   const levels = spec.levels.map((level, index) => `关卡 ${index + 1}：${level.name}\n背景：${level.environment}\n平台类型：${level.platformMode}\n障碍物：${level.obstacle}\n敌人数：${level.enemyCount}\n收集品数：${level.collectibleCount}\n背景音乐：${level.music.tempo} BPM\n天气/滤镜/闪光：${level.effects.weather} / ${level.effects.filter} / ${level.effects.flash ? 'yes' : 'no'}\nBOSS：${level.hasBoss ? 'yes' : 'no'}`).join('\n\n')
-  return `游戏标题：${spec.title}\n世界观与故事：${spec.world}\n背景故事：${spec.backgroundStory}\n整体像素风格：${spec.visualStyle.artDirection} ${spec.visualStyle.palette} ${spec.visualStyle.lighting} ${spec.visualStyle.pixelScale}\n主角：${spec.hero.name} — ${spec.hero.appearance}\n近战/远程武器：${spec.weapon.name} — ${spec.weapon.appearance}\n\n${assets}\n\n${levels}`
+  const brief = spec.creativeBrief
+  const optional = brief ? `\n主角目标（可选）：${brief.heroGoal || ''}\n难度偏好（可选）：${brief.difficulty || ''}\n叙事节奏（可选）：${brief.pacing || ''}\n角色一致性要求（可选）：${brief.identityRules || ''}` : ''
+  return `游戏标题：${spec.title}\n世界观与故事：${spec.world}\n背景故事：${spec.backgroundStory}\n整体像素风格：${spec.visualStyle.artDirection} ${spec.visualStyle.palette} ${spec.visualStyle.lighting} ${spec.visualStyle.pixelScale}${optional}\n主角：${spec.hero.name} — ${spec.hero.appearance}\n近战/远程武器：${spec.weapon.name} — ${spec.weapon.appearance}\n\n${assets}\n\n${levels}`
 }

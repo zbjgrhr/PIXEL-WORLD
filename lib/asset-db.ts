@@ -99,9 +99,12 @@ export async function hydrateSpecAssets(projectId: string, spec: GameSpec): Prom
         const clips = { ...animation.clips }
         for (const pose of animationClipPoses(asset)) {
           const cachedUrl = urls[`${asset.id}:clip:${pose}`]
-          clips[pose] = { ...clips[pose]!, url: clips[pose]?.url || cachedUrl, status: clips[pose]?.url || cachedUrl ? 'success' : clips[pose]?.status || 'pending' }
+          const previous = clips[pose]!
+          const url = previous.url || cachedUrl
+          const invalid = ['failed', 'cancelled', 'generating'].includes(previous.status)
+          clips[pose] = { ...previous, url, status: invalid ? previous.status : url ? 'success' : 'pending' }
         }
-        const complete = animationClipPoses(asset).every((pose) => Boolean(clips[pose]?.url))
+        const complete = animationClipPoses(asset).every((pose) => Boolean(clips[pose]?.url) && clips[pose]?.status === 'success')
         return { ...asset, animation: { ...animation, clips }, url: clips.idle?.url || asset.url || urls[asset.id], status: complete ? 'success' : asset.status, error: complete ? undefined : asset.error }
       }
       return asset.url || !urls[asset.id] ? asset : { ...asset, url: urls[asset.id], status: 'success', error: undefined }
@@ -120,6 +123,21 @@ export function stripLargeAssetUrls(spec: GameSpec): GameSpec {
       } : asset.animation
       return { ...asset, url: strip(asset.url), animation }
     }),
+  }
+}
+
+/** Review readiness without sending cached binary images as text or exceeding request limits. */
+export function assetMetadataForReview(spec: GameSpec): GameSpec {
+  return {
+    ...spec,
+    assets: spec.assets.map((asset) => ({
+      ...asset,
+      url: asset.url ? `cached-image:${asset.id}` : undefined,
+      animation: asset.animation?.clips ? {
+        ...asset.animation,
+        clips: Object.fromEntries(Object.entries(asset.animation.clips).map(([pose, clip]) => [pose, clip ? { ...clip, url: clip.url ? `cached-image:${asset.id}:${pose}` : undefined } : clip])),
+      } : asset.animation,
+    })),
   }
 }
 

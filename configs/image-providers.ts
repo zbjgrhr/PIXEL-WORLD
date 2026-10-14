@@ -55,18 +55,21 @@ export const IMAGE_PROVIDERS: ProviderConfig[] = [
         label: 'GPT Image 2',
         supportsNegativePrompt: false,
         endpointKind: 'images',
+        supportsReferenceImages: true,
       },
       {
         id: 'gpt-image-1.5',
         label: 'GPT Image 1.5',
         supportsNegativePrompt: false,
         endpointKind: 'images',
+        supportsReferenceImages: true,
       },
       {
         id: 'gpt-image-1-mini',
         label: 'GPT Image 1 Mini',
         supportsNegativePrompt: false,
         endpointKind: 'images',
+        supportsReferenceImages: true,
       },
     ],
   },
@@ -80,6 +83,20 @@ export const IMAGE_PROVIDERS: ProviderConfig[] = [
     setupUrl: 'https://openrouter.ai/settings/keys',
     noteZh: '整套素材只使用当前所选模型；不会自动切换到其他模型。',
     models: [
+      {
+        id: 'google/gemini-nano-banana-2.1',
+        label: 'Nano Banana 2.1（参考图与动作）',
+        supportsNegativePrompt: false,
+        endpointKind: 'openrouter-images',
+        supportsReferenceImages: true,
+      },
+      {
+        id: 'bytedance-seed/seedream-5-0-flash',
+        label: 'Seedream 5.0 Flash（快速参考图）',
+        supportsNegativePrompt: false,
+        endpointKind: 'openrouter-images',
+        supportsReferenceImages: true,
+      },
       {
         id: OPENROUTER_PRIMARY_IMAGE_MODEL,
         label: 'Seedream 4.5（默认）',
@@ -283,6 +300,7 @@ export function getDefaultProvider(): ProviderId {
 }
 
 export function getDefaultModel(providerId: ProviderId): string {
+  if (providerId === 'openrouter') return OPENROUTER_PRIMARY_IMAGE_MODEL
   return getProviderConfig(providerId)?.models[0]?.id ?? 'qwen-image'
 }
 

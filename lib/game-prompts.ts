@@ -29,6 +29,7 @@ function usesChromaKey(providerId: ProviderId, model?: string): boolean {
 }
 
 function isolationBackground(providerId: ProviderId, model?: string): string {
+  if (providerId === 'openai' && /gpt-image/i.test(model || '')) return 'genuinely transparent alpha background, no colored backdrop, no checkerboard, no cast shadow'
   return usesChromaKey(providerId, model)
     ? 'single uniform bright green chroma-key background #00FF00, edge-to-edge flat green, no checkerboard, no shadow on background'
     : 'plain light-gray and white checkerboard transparency background only, no shadow on background'
@@ -45,6 +46,7 @@ export function getCutoutMode(
   model?: string,
 ): CutoutMode | null {
   if (type === 'background' || type === 'ground') return null
+  if (providerId === 'openai' && /gpt-image/i.test(model || '')) return null
   return usesChromaKey(providerId, model) ? 'chroma-green' : 'checkerboard'
 }
 
@@ -173,7 +175,7 @@ function animationActionInstruction(pose: AnimationClipPose, asset: AssetDefinit
     : undefined
   switch (pose) {
     case 'idle': return 'One neutral standing pose. The character is balanced, relaxed, completely motionless, and not attacking.'
-    case 'walk': return 'Three ordered walk-cycle poses: contact, passing, opposite contact. Feet and arms change naturally while the torso identity stays stable.'
+    case 'walk': return 'Three visibly different walk-cycle poses. Frame 1: left foot/leading limbs forward, right foot/trailing limbs back. Frame 2: feet/limbs pass directly beneath the body, one knee raised. Frame 3: right foot/previous trailing limbs forward, left foot/previous leading limbs back. Counter-swing the arms. Do not copy the same stride three times. Keep the torso identity stable.'
     case 'jump': return 'Two ordered jump poses: upward takeoff/ascent, then controlled descent with legs prepared to land.'
     case 'meleeAttack': return asset.category === 'hero'
       ? `Three ordered melee poses: wind-up, strike, recovery. In every frame the character visibly grips and uses the same melee weapon described as: ${melee}. The weapon must connect naturally to the hands.`
@@ -199,7 +201,7 @@ export function buildAnimationClipPrompt(
   const frameLayout = clip.frameCount === 1
     ? 'Create exactly one frame on one canvas.'
     : `Create one horizontal animation strip containing exactly ${clip.frameCount} equal-width frames in one row, ordered from left to right.`
-  return `${COMMON_STYLE}. ${COLOR_CONTRACT}. ${ORIGINALITY}. Theme label: ${theme}. Shared visual contract: ${style(spec)}. Character identity only: ${requestedAsset}. Action: ${animationActionInstruction(pose, asset, spec)} ${frameLayout} Use ${isolationBackground(providerId, model)}. Every frame must show the same complete character from the highest point of the head, hair, horns or wings to the lowest point of both feet, with generous safe margin on all four sides. Keep identical face, anatomy, costume, colors, side-view direction, camera scale, canvas alignment and ground baseline. Each frame occupies its own equal panel. No portrait crop, close-up, missing body part, panel border, text, label, scenery, ground, unrelated weapon, extra character, duplicate body, motion smear across panels, or content crossing a panel boundary.`
+  return `ANIMATION ASSET, not an illustration or scene. ${frameLayout} Character identity: ${requestedAsset}. Action: ${animationActionInstruction(pose, asset, spec)} Background: ${isolationBackground(providerId, model)}. Same complete head-to-feet character in every cell, facing right, same scale, costume and baseline, empty margin on every side. The reference fixes appearance only: re-pose the limbs for each requested action, never duplicate an unchanged reference pose. No scene, floor, grass below the feet, text, grid lines, panels or unrelated creatures. ${COMMON_STYLE}. ${ORIGINALITY}. Shared palette and rendering: ${style(spec)}.`
 }
 
 export function buildModerationSafeAnimationClipPrompt(

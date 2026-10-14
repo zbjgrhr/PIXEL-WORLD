@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { PROMPT_TEMPLATES } from '@/configs/prompt-templates'
 import { createFallbackGameSpec } from '@/lib/game-spec'
-import { inspectGameSpec } from './validation'
+import { inspectGameSpec, sanitizeIssues } from './validation'
 
 describe('Agent GameSpec validation', () => {
+  it('does not downgrade an unknown review severity to ignorable advice', () => {
+    expect(sanitizeIssues([{severity:'critical',message:'Cannot play'}, {severity:'medium',message:'Needs repair'}, {severity:'info',message:'Optional'}], 'consistencyCritic').map(issue => issue.severity)).toEqual(['blocking', 'warning', 'info'])
+  })
   it('accepts the complete Dragon Castle five-level template without blocking omissions', () => {
     const template = PROMPT_TEMPLATES.find((item) => item.id === 'pixel-world-odyssey') || PROMPT_TEMPLATES[0]
     const spec = createFallbackGameSpec(template.prompt, template.themeName, template.levelCount)

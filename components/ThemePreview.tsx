@@ -48,7 +48,7 @@ function AnimatedSpritePreview({ asset, meleeWeaponUrl, rangedWeaponUrl, loading
     }), 1000 / fps)
     return () => window.clearInterval(timer)
   }, [fps, frameCount, playNonce, pose, shouldLoop])
-  const previewUrl = animation.layoutVersion === 3 ? clip?.url : asset.url
+  const previewUrl = animation.layoutVersion === 3 ? clip?.status === 'success' ? clip.url : undefined : asset.url
   const legacyPose: AnimationPose = pose === 'meleeAttack' || pose === 'rangedAttack' ? 'attack' : pose
   const x = frameCount > 1 ? frame / (frameCount - 1) * 100 : 0
   const row = Math.max(0, Math.min(animation.rows - 1, animation.states[legacyPose]))
@@ -90,7 +90,7 @@ function PlannedAssetCard({ asset, levelOptions, loading, loadingPose, meleeWeap
   </Card>
 }
 
-const ThemePreview: React.FC<ThemePreviewProps> = ({ isLoading, loadingMessage, gameData, selectedTheme, themes, apiKey = '', regeneratingAssetIds = [], onRegenerateAsset, onUpdateAsset, onUploadAsset, onDeleteTheme }) => {
+const ThemePreview: React.FC<ThemePreviewProps> = ({ isLoading, loadingMessage, gameData, selectedTheme, themes, apiKey = '', regeneratingAssetIds = [], onRegenerateAsset, onUpdateAsset, onUploadAsset, onDeleteTheme, onStartGame }) => {
   const [isExporting, setIsExporting] = useState(false)
   const selected = themes.find((theme) => theme.id === selectedTheme)
   const data = gameData?.data
@@ -140,7 +140,7 @@ const ThemePreview: React.FC<ThemePreviewProps> = ({ isLoading, loadingMessage, 
     </div>
   </Card>
 
-  return <Card className="theme-preview-card glass-card" style={{ flex: 1, overflow: 'visible', height: 'fit-content' }} extra={<Space><Button type="primary" icon={<Download size={15} />} loading={isExporting} disabled={!spec} onClick={() => { void exportGame() }}>导出游戏 ZIP</Button>{selectedTheme.startsWith('custom-') && onDeleteTheme ? <Button danger icon={<Trash2 size={15} />} onClick={() => onDeleteTheme(selectedTheme)}>删除游戏</Button> : null}</Space>}>
+  return <Card className="theme-preview-card glass-card" style={{ flex: 1, overflow: 'visible', height: 'fit-content' }} extra={<Space wrap>{onStartGame && <Button disabled={!data?.characterUrl} onClick={onStartGame}>试玩游戏</Button>}<Button type="primary" icon={<Download size={15} />} loading={isExporting} disabled={!spec} onClick={() => { void exportGame() }}>导出游戏 ZIP</Button>{selectedTheme.startsWith('custom-') && onDeleteTheme ? <Button danger icon={<Trash2 size={15} />} onClick={() => onDeleteTheme(selectedTheme)}>删除游戏</Button> : null}</Space>}>
     {spec ? <>
       <Card size="small" style={{ marginBottom: 20, background: '#f6f9ff' }}>
         <Space wrap><Tag color="blue">{spec.levels.length} 关</Tag><Tag color="purple">{spec.assets.filter((asset) => asset.enabled).length} 项素材</Tag><Tag color="green">{spec.assets.reduce((count, asset) => count + (asset.kind === 'spriteSheet' && asset.animation?.layoutVersion === 3 ? animationClipPoses(asset).filter((pose) => normalizeAnimationSpec(asset.animation).clips?.[pose]?.url).length : asset.url ? 1 : 0), 0)} 张图片</Tag></Space>
