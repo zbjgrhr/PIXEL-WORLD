@@ -35,6 +35,7 @@ interface AgentStudioProps {
   onSpecReady: (spec: GameSpec) => void
   onApproved: (spec: GameSpec) => void
   onApprovedRestored?: (spec: GameSpec) => void
+  onBusyChange?: (busy: boolean) => void
   onTextConnectionChange?: (connection: { provider?: AgentProviderId; model?: string; apiKey: string; baseUrl?: string }) => void
   reviewTarget?: HTMLDivElement | null
   inputRevision?: number
@@ -69,7 +70,7 @@ function artifactPreview(output?: Record<string, unknown>): string {
   return json.length > 20000 ? `${json.slice(0, 20000)}\n…（内容过长，已在界面截断）` : json
 }
 
-export default function AgentStudio({ embedded = false, projectId, sourcePrompt, projectName, briefReady, levelCount, baseSpec, onOptimizePrompt, isOptimizing = false, onSpecReady, onApproved, onApprovedRestored, onTextConnectionChange, reviewTarget, inputRevision = 0 }: AgentStudioProps) {
+export default function AgentStudio({ embedded = false, projectId, sourcePrompt, projectName, briefReady, levelCount, baseSpec, onOptimizePrompt, isOptimizing = false, onSpecReady, onApproved, onApprovedRestored, onBusyChange, onTextConnectionChange, reviewTarget, inputRevision = 0 }: AgentStudioProps) {
   const [provider, setProvider] = useState<AgentProviderId>('openrouter')
   const [accessMode, setAccessMode] = useState<AiAccessMode>('ready')
   const [readyProvider, setReadyProvider] = useState<AgentProviderId | null>(null)
@@ -144,6 +145,12 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
   }, [cluster.run?.currentRound, tasks])
   const blocking = countBlockingIssues(issues)
   const locked = Boolean(cluster.run && !['draft', 'cancelled'].includes(cluster.run.status))
+  const busy = cluster.restoring || Boolean(cluster.run && (
+    ['planning', 'reviewing', 'quality_check'].includes(cluster.run.status)
+    || cluster.run.tasks.some((task) => task.status === 'running')
+  ))
+  useEffect(() => { onBusyChange?.(busy) }, [busy, onBusyChange])
+  useEffect(() => () => { onBusyChange?.(false) }, [onBusyChange])
   useEffect(() => {
     if (!locked || !cluster.run) return
     const lock = cluster.run.modelLock
@@ -312,6 +319,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
   }
 
   const start = async () => {
+    if (isOptimizing) return
     if (!selected) return void message.error('请先选择一个可用的文字 Agent 工具。')
     if (provider === 'custom') { const issue = customConnectionError(customAgent); if (issue) return void message.error(issue) }
     if (!isLocalAgentProvider(provider) && !activeKey) return void message.error('请先填写文字 Agent API Key。')
@@ -332,6 +340,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
   }
 
   const runAgentAction = async (action: () => Promise<unknown>) => {
+    if (isOptimizing) return
     try {
       if (legacyManagedRun) throw new Error('这个历史运行使用已移除的站点云端服务；请新建运行并选择文字工具。')
       await action()
@@ -419,8 +428,8 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
 
       <div className="agent-workflow-action">
         <Text strong>{provider === 'webllm' ? '先补全灵感，再检查本地草案' : '先补全构想，再启动 Agent 评审'}</Text>
-        <Text type="secondary">{!briefReady ? '请先在游戏构想中填写名称和故事。' : provider === 'webllm' && webLlmSetup.state !== 'ready' ? '先准备浏览器模型。准备完成后，WebLLM 会轻量补全创意，本地规则会生成完整规格。' : provider === 'webllm' && baseSpec ? '草案已建立。下一步会检查本地草案并进入你的人工审核，不运行完整 Agent 集群。' : baseSpec ? '草案已建立，可以检查后启动 Agent 集群；重新补全会更新草案。' : selected ? '已选择文字工具。补全会调用当前模型；云端服务可能收费。' : '未选择文字工具时会生成本地草案；运行 Agent 前还需选择模型。'}</Text>
-        <Button type="primary" icon={<Sparkles size={14} />} loading={isOptimizing} disabled={!briefReady || locked || legacyManagedRun || (provider === 'webllm' && webLlmSetup.state !== 'ready')} onClick={() => { void onOptimizePrompt?.() }}>
+        <Text type="secondary">{!briefReady ? '请先在写故事中填写名称和故事。' : busy ? 'Agent 正在处理任务，请等待结束后再补全设定。' : provider === 'webllm' && webLlmSetup.state !== 'ready' ? 'WebLLM 尚未准备，补全会先生成本地草案。准备模型后可再次补充创意。' : provider === 'webllm' && baseSpec ? '草案已建立。下一步会检查本地草案并进入你的人工审核，不运行完整 Agent 集群。' : baseSpec ? '草案已建立，可以检查后启动 Agent 集群；重新补全后需要重新审核。' : selected ? '已选择文字工具。补全会调用当前模型；云端服务可能收费。' : '未选择文字工具时会生成本地草案；运行 Agent 前还需选择模型。'}</Text>
+        <Button type="primary" icon={<Sparkles size={14} />} loading={isOptimizing} disabled={!briefReady || busy || isOptimizing || legacyManagedRun} onClick={() => { void onOptimizePrompt?.() }}>
           一键补全并优化提示词
         </Button>
       </div>
@@ -428,17 +437,17 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
         <Button icon={<FlaskConical size={14} />} disabled={!selected || legacyManagedRun || (provider === 'webllm' && webLlmSetup.state !== 'ready')} loading={testing} onClick={() => { void testAgentApi() }}>{!selected ? '选择工具后测试' : provider === 'custom' ? '测试连接' : isLocalAgentProvider(provider) ? '测试文字模型' : '测试 Agent API'}</Button>
         {(!cluster.run || ['draft', 'failed', 'cancelled'].includes(cluster.run.status)) && <Button type="primary" disabled={!selected || !baseSpec || isOptimizing || legacyManagedRun || (provider === 'webllm' && webLlmSetup.state !== 'ready')} icon={<Play size={14} />} onClick={() => { void start() }}>{provider === 'webllm' ? '检查草案并进入审核' : '启动 Agent 集群'}</Button>}
         {cluster.run && ['planning', 'reviewing'].includes(cluster.run.status) && <Button icon={<Pause size={14} />} onClick={cluster.pause}>暂停</Button>}
-        {cluster.run?.status === 'paused' && <Button type="primary" disabled={legacyManagedRun} icon={<Play size={14} />} onClick={() => { void runAgentAction(() => cluster.resume(activeKey)) }}>继续</Button>}
+        {cluster.run?.status === 'paused' && <Button type="primary" disabled={isOptimizing || legacyManagedRun} icon={<Play size={14} />} onClick={() => { void runAgentAction(() => cluster.resume(activeKey)) }}>继续</Button>}
         {cluster.run && ['planning', 'reviewing', 'paused'].includes(cluster.run.status) && <Button danger icon={<CircleStop size={14} />} onClick={cluster.cancel}>取消</Button>}
-        {cluster.run && <Button icon={<RotateCcw size={14} />} onClick={() => { void cluster.reset() }}>新建运行</Button>}
-        {cluster.run?.status === 'awaiting_approval' && cluster.run.artifacts.productionSpec && blocking === 0 && <Button type="primary" icon={<CheckCircle2 size={14} />} onClick={() => { void cluster.approve() }}>批准规格并开放生图</Button>}
-        {cluster.run?.approved && hasImages && <Button icon={<ShieldCheck size={14} />} disabled={legacyManagedRun} onClick={() => baseSpec && void runAgentAction(() => cluster.runQualityChecks(baseSpec, activeKey))}>运行生成后检查</Button>}
+        {cluster.run && <Button disabled={isOptimizing} icon={<RotateCcw size={14} />} onClick={() => { void cluster.reset() }}>新建运行</Button>}
+        {cluster.run?.status === 'awaiting_approval' && cluster.run.artifacts.productionSpec && blocking === 0 && <Button type="primary" disabled={isOptimizing} icon={<CheckCircle2 size={14} />} onClick={() => { void cluster.approve() }}>批准规格并开放生图</Button>}
+        {cluster.run?.approved && hasImages && <Button icon={<ShieldCheck size={14} />} disabled={isOptimizing || legacyManagedRun} onClick={() => baseSpec && void runAgentAction(() => cluster.runQualityChecks(baseSpec, activeKey))}>运行生成后检查</Button>}
       </Space>
 
       {selected && isLocalAgentProvider(provider) && baseSpec && !cluster.run?.approved && (!cluster.run || ['draft', 'failed', 'cancelled'].includes(cluster.run.status)) && <div className="local-draft-review-option">
         <strong>本机模型做不出完整规格？</strong>
         <span>可以用已补全的本地草案继续。系统先查关卡和素材是否可用，所选灵感会列出供你核对；仍需你批准后才能制作素材。</span>
-        <Button onClick={() => { void cluster.reviewLocalDraft(baseSpec, { provider, model: model.trim() || '本地规则草案', baseUrl: activeBaseUrl }) }}>检查本地草案并继续</Button>
+        <Button disabled={isOptimizing} onClick={() => { void cluster.reviewLocalDraft(baseSpec, { provider, model: model.trim() || '本地规则草案', baseUrl: activeBaseUrl }) }}>检查本地草案并继续</Button>
       </div>}
 
       {reviewTarget && createPortal(<div className="agent-review-content">{cluster.run ? <>
@@ -485,7 +494,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
                 {task.error && <Alert type="error" showIcon message={task.error} />}
                 <Space>
                   {task.usage && <Text type="secondary">Token: {task.usage.totalTokens}</Text>}
-                  {(task.status === 'failed' || task.status === 'completed' || task.status === 'needs-review') && <Button size="small" disabled={legacyManagedRun} icon={<RotateCcw size={12} />} onClick={() => { void runAgentAction(() => cluster.retryTask(task.id, activeKey)) }}>{task.status === 'failed' ? '重试该 Agent' : '重新运行该 Agent'}</Button>}
+                  {(task.status === 'failed' || task.status === 'completed' || task.status === 'needs-review') && <Button size="small" disabled={isOptimizing || legacyManagedRun} icon={<RotateCcw size={12} />} onClick={() => { void runAgentAction(() => cluster.retryTask(task.id, activeKey)) }}>{task.status === 'failed' ? '重试该 Agent' : '重新运行该 Agent'}</Button>}
                 </Space>
               </Space>,
             }

@@ -456,6 +456,7 @@ export interface ThemeCustomizerProps {
   onOptimizePrompt?: () => void
   onCompleteIdea?: () => void
   isOptimizing?: boolean
+  isAgentBusy?: boolean
   optimizedSpec?: GameSpec | null
   hasSavedDraft?: boolean
   onRestoreDraft?: () => void

@@ -151,6 +151,8 @@ const SideMenu: React.FC<SideMenuProps> = ({
   const [comfyDetecting, setComfyDetecting] = useState(false)
   const [agentApproved, setAgentApproved] = useState(false)
   const [isOptimizing, setIsOptimizing] = useState(false)
+  const optimizationInFlight = useRef(false)
+  const [isAgentBusy, setIsAgentBusy] = useState(false)
   const [textOptimizer, setTextOptimizer] = useState<{ provider?: AgentProviderId; model?: string; apiKey: string; baseUrl?: string }>({ apiKey: '' })
   const [generationProgress, setGenerationProgress] = useState(0)
   const [isTesting, setIsTesting] = useState(false)
@@ -321,6 +323,11 @@ const SideMenu: React.FC<SideMenuProps> = ({
   }
 
   const optimizePrompt = async (quiet = false, promptOverride?: string, themeOverride?: string): Promise<GameSpec | null> => {
+    if (optimizationInFlight.current) return null
+    if (isAgentBusy) {
+      if (!quiet) message.info('Agent 正在处理任务，请等待结束后再补全设定。')
+      return null
+    }
     const projectName = themeOverride?.trim() || customThemeName.trim()
     const story = customStory.trim()
     if (!projectName || !story) {
@@ -333,6 +340,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
       ? optimizedInputRef.current.source
       : currentPrompt).trim()
     const prompt = rawPrompt || buildStructuredPrompt(levelCount)
+    optimizationInFlight.current = true
     setIsOptimizing(true)
     try {
       const response = await fetch('/api/optimize-prompt', {
@@ -404,13 +412,14 @@ const SideMenu: React.FC<SideMenuProps> = ({
       optimizedInputRef.current = { source: rawPrompt, generated: generatedPrompt }
       updateSpec(spec, generatedPrompt)
       setCustomPrompt(generatedPrompt)
-      if (!quiet && activeStage === 'idea') onStageChange(creationMode === 'classic' ? 'assets' : 'agents')
+      setAgentApproved(false)
+      setInputRevision((value) => value + 1)
       if (!quiet) {
         message.success(usedModel
           ? '所选文字模型已围绕名称和故事补全游戏设定。'
           : result.data.source === 'template'
-            ? '完整模板已转换为稳定的 V3 素材规划。'
-            : '已根据名称和故事整理本地草案；请检查主角与关卡，文字 Agent 可继续细化。')
+            ? '完整模板已整理为本地草案；请检查设定后再进入 AI 策划。'
+            : '已根据名称和故事生成本地草案，未使用文字模型；请检查设定后再进入 AI 策划。')
         if (modelWarning) message.warning(modelWarning, 6)
       }
       return spec
@@ -418,6 +427,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
       if (!quiet) message.error(error instanceof Error ? error.message : '提示词优化失败。')
       return null
     } finally {
+      optimizationInFlight.current = false
       setIsOptimizing(false)
     }
   }
@@ -802,7 +812,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
           <Button type="link" onClick={() => document.getElementById('game-idea')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>前往中栏填写与检查 →</Button>
         </div>}
         <section id="agent-studio" className="studio-control-content section-anchor" hidden={activeStage !== 'agents'}>
-          {creationMode === 'agent' ? <div className="agent-studio-shell"><AgentStudio
+          <div className="agent-studio-shell" hidden={creationMode !== 'agent'}><AgentStudio
             embedded
             projectId={DRAFT_PROJECT_ID}
             sourcePrompt={composeProjectPrompt(customThemeName, customStory, customPrompt, levelCount)}
@@ -815,10 +825,12 @@ const SideMenu: React.FC<SideMenuProps> = ({
             onSpecReady={(spec) => { updateSpec(spec); setAgentApproved(false) }}
             onApproved={(spec) => { updateSpec(spec); setAgentApproved(true); onStageChange('assets'); message.success('Agent 规格已批准，现在可以检查素材卡片并开始生成。') }}
             onApprovedRestored={(spec) => { updateSpec(spec); setAgentApproved(true) }}
+            onBusyChange={setIsAgentBusy}
             onTextConnectionChange={setTextOptimizer}
-            reviewTarget={activeStage === 'agents' ? agentReviewTarget : null}
+            reviewTarget={creationMode === 'agent' && activeStage === 'agents' ? agentReviewTarget : null}
             inputRevision={inputRevision}
-          /></div> : <div className="nav-section-placeholder">
+          /></div>
+          {creationMode === 'classic' && <div className="nav-section-placeholder">
             <p>传统模式使用本地草案。切换到 Agent 集群后，可让多个 Agent 策划、评审并修正规格。</p>
             <Button onClick={() => { setCreationMode('agent'); setAgentApproved(false); onStageChange('agents') }}>启用 Agent 集群</Button>
           </div>}
@@ -862,7 +874,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
           customStory={customStory} onStoryChange={(value) => { briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); resetGeneratedPromptOnBriefEdit(); setCustomStory(value); setOptimizedSpec(null); setAgentApproved(false) }}
           customPrompt={customPrompt} onPromptChange={(value) => { briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); optimizedInputRef.current = null; setCustomPrompt(value); setOptimizedSpec(null); setAgentApproved(false) }}
           levelCount={levelCount} onLevelCountChange={(count) => { briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); setLevelCount(count); setOptimizedSpec(null); setAgentApproved(false); if (isStructuredPromptBlank(customPrompt)) setCustomPrompt(buildStructuredPrompt(count)) }}
-          onOptimizePrompt={() => { void optimizePrompt(false) }} isOptimizing={isOptimizing} optimizedSpec={optimizedSpec}
+          onOptimizePrompt={() => { void optimizePrompt(false) }} isOptimizing={isOptimizing} isAgentBusy={isAgentBusy} optimizedSpec={optimizedSpec}
           onCompleteIdea={() => onStageChange('agents')}
           hasSavedDraft={Boolean(savedDraft)} onRestoreDraft={restoreSavedDraft}
         />

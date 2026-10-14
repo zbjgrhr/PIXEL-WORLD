@@ -13,7 +13,7 @@ function templateStory(prompt: string): string {
   return prompt.match(/^背景故事：\s*(.+)$/m)?.[1]?.trim() || ''
 }
 
-const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ inspiration, creationMode = 'agent', onCreationModeChange, customThemeName, onThemeNameChange, customStory, onStoryChange, customPrompt, onPromptChange, levelCount = 3, onLevelCountChange, onOptimizePrompt, onCompleteIdea, isOptimizing = false, optimizedSpec, hasSavedDraft = false, onRestoreDraft }) => {
+const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ inspiration, creationMode = 'agent', onCreationModeChange, customThemeName, onThemeNameChange, customStory, onStoryChange, customPrompt, onPromptChange, levelCount = 3, onLevelCountChange, onOptimizePrompt, onCompleteIdea, isOptimizing = false, isAgentBusy = false, optimizedSpec, hasSavedDraft = false, onRestoreDraft }) => {
   const handleTemplateSelect = (templateId: string) => {
     const template = PROMPT_TEMPLATES.find((item) => item.id === templateId)
     if (!template) return
@@ -54,6 +54,7 @@ const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ inspiration, creation
       <Segmented
         block
         value={creationMode}
+        disabled={isAgentBusy || isOptimizing}
         onChange={(value) => onCreationModeChange?.(value as 'agent' | 'classic')}
         options={[
           { value: 'agent', label: 'Agent 集群（推荐）' },
@@ -70,21 +71,28 @@ const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ inspiration, creation
           <Button size="small" icon={<ListRestart size={14} />} onClick={() => onPromptChange(buildStructuredPrompt(levelCount))}>恢复完整字段</Button>
         </Space>
       </div>
-      {creationMode === 'classic' ? <>
-        <Button
-          className="prompt-optimize-button"
-          type="primary"
-          ghost
-          block
-          icon={<Sparkles size={15} />}
-          onClick={onOptimizePrompt}
-          loading={isOptimizing}
-          title="补全空白字段并建立 GameSpec V3"
-        >
-          一键补全并优化提示词
-        </Button>
-        <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 11 }}>先填写名称和故事；传统模式会在本地建立游戏草案。</Text>
-      </> : <Text type="secondary" style={{ display: 'block', marginBottom: 8, fontSize: 11 }}>这里可以补充自己的要求。接下来到“文字策划”选择模型，再一键补全；也可不选模型，先生成本地草案。</Text>}
+      <Button
+        className="prompt-optimize-button"
+        type="primary"
+        ghost
+        block
+        icon={<Sparkles size={15} />}
+        onClick={onOptimizePrompt}
+        loading={isOptimizing}
+        disabled={!customThemeName.trim() || !customStory.trim() || isAgentBusy || isOptimizing}
+        title="补全空白字段并建立 GameSpec V3"
+      >
+        一键补全并优化提示词
+      </Button>
+      <Text type="secondary" role="status" style={{ display: 'block', marginBottom: 8, fontSize: 11 }}>
+        {!customThemeName.trim() || !customStory.trim()
+          ? '请先填写游戏名称和故事。'
+          : isAgentBusy
+            ? 'Agent 正在处理任务，请等待结束后再补全设定。'
+            : isOptimizing
+              ? '正在补全设定，完成后会显示在下方。'
+              : '使用已选择的文字模型补全；未配置模型时生成本地草案。补全后可在下方检查，再进入 AI 策划。'}
+      </Text>
       <TextArea value={customPrompt} onChange={(event) => onPromptChange(event.target.value)} rows={18} placeholder="请在各字段冒号后填写；不需要的项目可以留空。" style={{ width: '100%', fontSize: 12, lineHeight: 1.7 }} />
       <div className="prompt-writing-help"><strong>怎么填写</strong><span>在字段冒号后写具体画面或玩法；不确定的留空。</span><small>主角：戴蓝披风的骑士，侧视像素风</small><small>关卡 1 背景：黄昏森林，留出行走区域</small></div>
       <Text type="secondary" style={{ fontSize: 12 }}>{creationMode === 'agent' ? '保留你明确填写的要求；Agent 只补充空白、消除冲突，不会覆盖你的核心设定。' : '保留需要的描述，其余字段留空；一键优化只补全空白或不足的字段。'}</Text>
