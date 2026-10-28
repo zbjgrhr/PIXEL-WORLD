@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { loadLatestAgentRun, saveAgentRun } from '@/lib/agent-db'
-import { createPlanningTasks, createQualityTasks, taskId } from '@/lib/agents/graph'
+import { createPlanningTasks, createQualityTasks, finalReviewTaskId, taskId } from '@/lib/agents/graph'
+import { latestPlanningIssues } from '@/lib/agents/review-status'
 import { digestAgentInput } from '@/lib/agents/hash'
 import { countBlockingIssues, dedupeIssues, inspectGameSpec } from '@/lib/agents/validation'
 import { inspectSelectedInspirations } from '@/lib/agents/inspiration-review'
@@ -12,6 +13,10 @@ import { isLocalAgentProvider } from '@/lib/agents/config'
 import { executeLocalAgentTask } from '@/lib/agents/local-client'
 import { deterministicAgentResponse } from '@/lib/agents/execution'
 import { compactDataImage } from '@/lib/animation-references'
+import { readPlaytestEvidence } from '@/lib/playtest-evidence'
+import { pendingNarrativeSuggestions } from '@/lib/narrative-suggestions'
+import { updateRunNarrativeDecisions } from '@/lib/agents/narrative-decisions'
+import { changedDraftGroups, clearArtifactsForRoles, currentRunSpec, preservePlanningMedia, retryPlanningRun, reviseAgentDraft } from '@/lib/agents/draft-revision'
 import type {
   AgentArtifacts,
   AgentExecuteRequest,
@@ -65,6 +70,7 @@ function createRun(options: UseAgentClusterOptions, modelLock: AgentModelLock): 
     reviewMode: 'agent',
     tasks: createPlanningTasks(1),
     artifacts: {},
+    planningSpec: options.baseSpec ? stripLargeAssetUrls(options.baseSpec) : undefined,
     createdAt: now,
     updatedAt: now,
   }
@@ -89,13 +95,14 @@ function artifactForRole(artifacts: AgentArtifacts, role: AgentRole, artifact: R
   return artifacts
 }
 
-async function imageUrls(spec?: GameSpec): Promise<string[]> {
+async function reviewImages(spec?: GameSpec): Promise<Array<{url: string; label: string}>> {
   if (!spec) return []
   const characters = spec.assets.filter((asset) => asset.enabled && asset.kind === 'spriteSheet').sort((a, b) => (a.category === 'hero' ? 0 : a.category === 'boss' ? 1 : 2) - (b.category === 'hero' ? 0 : b.category === 'boss' ? 1 : 2))
-  const urls = characters.flatMap((asset) => [asset.animation?.clips?.idle?.url || asset.url, asset.animation?.clips?.walk?.url])
-  if (!urls.length) urls.push(...spec.assets.filter((asset) => asset.enabled).map((asset) => asset.url))
-  const candidates = [...new Set(urls.filter((url): url is string => Boolean(url && (/^https:\/\//i.test(url) || url.startsWith('data:image/')))))].slice(0, 6)
-  return (await Promise.all(candidates.map(compactDataImage))).filter((url): url is string => Boolean(url))
+  const urls = characters.flatMap(asset => [{ url: asset.animation?.clips?.idle?.url || asset.url, label: `${asset.id}:idle` }, { url: asset.animation?.clips?.walk?.url, label: `${asset.id}:walk` }])
+  urls.push(...spec.assets.filter(asset => asset.enabled && asset.kind === 'image').map(asset => ({ url: asset.url, label: asset.id })))
+  const candidates = urls.filter((item, index) => item.url && (/^https:\/\//i.test(item.url) || item.url.startsWith('data:image/')) && urls.findIndex(other => other.url === item.url) === index).slice(0, 6)
+  const samples = await Promise.all(candidates.map(async item => ({ url: await compactDataImage(item.url!), label: item.label })))
+  return samples.filter((item): item is {url:string;label:string} => Boolean(item.url))
 }
 
 function stripArtifactAssets(artifacts: AgentArtifacts): AgentArtifacts {
@@ -110,7 +117,8 @@ function stripArtifactAssets(artifacts: AgentArtifacts): AgentArtifacts {
 function artifactsForRole(role: AgentRole, artifacts: AgentArtifacts): AgentArtifacts {
   const a = stripArtifactAssets(artifacts)
   if (role === 'director') return {}
-  if (role === 'narrative' || role === 'mechanics' || role === 'artDirector') return { brief: a.brief }
+  if (role === 'narrative') return { brief: a.brief }
+  if (role === 'mechanics' || role === 'artDirector') return { brief: a.brief, narrative: a.narrative }
   if (role === 'levelDesigner') return { brief: a.brief, narrative: a.narrative, mechanics: a.mechanics, artDirection: a.artDirection }
   if (role === 'integrator') return { brief: a.brief, narrative: a.narrative, mechanics: a.mechanics, artDirection: a.artDirection, levelPlan: a.levelPlan }
   if (role === 'consistencyCritic') return { brief: a.brief, narrative: a.narrative, artDirection: a.artDirection }
@@ -123,55 +131,29 @@ function artifactsForRole(role: AgentRole, artifacts: AgentArtifacts): AgentArti
 }
 
 function blockingIssues(run: AgentRun): AgentIssue[] {
-  const currentTasks = run.tasks.filter((task) => task.round === run.currentRound)
-  const latestCompleted = currentTasks.find((task) => task.role === 'assetCoordinator' && task.status === 'completed')
-    || currentTasks.find((task) => task.role === 'revision' && (task.status === 'completed' || task.status === 'needs-review'))
-  const latestReview = latestCompleted
-    ? latestCompleted.issues || []
-    : currentTasks.filter((task) => REVIEW_ROLES.includes(task.role)).flatMap((task) => task.issues || [])
-  return dedupeIssues(latestReview).filter((item) => item.severity === 'blocking')
-}
-
-function invalidatedTaskIds(tasks: AgentTask[], rootId: string): Set<string> {
-  const invalidated = new Set([rootId])
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const task of tasks) {
-      if (!invalidated.has(task.id) && task.dependencies.some((dependency) => invalidated.has(dependency))) {
-        invalidated.add(task.id)
-        changed = true
-      }
-    }
-  }
-  return invalidated
-}
-
-function clearArtifactsForRoles(artifacts: AgentArtifacts, roles: Set<AgentRole>): AgentArtifacts {
-  const next = { ...artifacts }
-  if (roles.has('director')) delete next.brief
-  if (roles.has('narrative')) delete next.narrative
-  if (roles.has('mechanics')) delete next.mechanics
-  if (roles.has('artDirector')) delete next.artDirection
-  if (roles.has('levelDesigner')) delete next.levelPlan
-  if (roles.has('integrator')) delete next.mergedSpec
-  if (roles.has('revision')) delete next.revisedSpec
-  if (roles.has('assetCoordinator')) delete next.productionSpec
-  if (roles.has('visualQa')) delete next.visualReport
-  if (roles.has('playtest')) delete next.playtestReport
-  if (roles.has('publisher')) delete next.releaseReport
-  if ([...roles].some((role) => REVIEW_ROLES.includes(role) || role === 'revision' || role === 'integrator')) delete next.reviewIssues
-  return next
+  return latestPlanningIssues(run).filter(item => item.severity === 'blocking')
 }
 
 export function useAgentCluster(options: UseAgentClusterOptions) {
   const [run, setRunState] = useState<AgentRun | null>(null)
   const [restoring, setRestoring] = useState(true)
+  const [savedRun, setSavedRun] = useState<AgentRun | null>(null)
+  const [approving, setApproving] = useState(false)
+  const approvalInFlight = useRef(false)
+  const liveRun = useRef(run)
+  const liveOptions = useRef(options)
+  liveRun.current = run
+  liveOptions.current = options
   const control = useRef<{ paused: boolean; cancelled: boolean; controller?: AbortController }>({ paused: false, cancelled: false })
+  const saveQueue = useRef<Promise<void>>(Promise.resolve())
 
   const publish = useCallback(async (next: AgentRun) => {
+    liveRun.current = next
     setRunState(next)
-    await saveAgentRun(next)
+    // Typing may publish several revisions before IndexedDB opens. Preserve write order.
+    const saved = saveQueue.current.catch(() => undefined).then(() => saveAgentRun(next))
+    saveQueue.current = saved
+    await saved
     return next
   }, [])
 
@@ -188,14 +170,29 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
       } : stored
       if (recovered && interrupted) await saveAgentRun(recovered)
       if (!active) return
+      // A shared project id must not attach approval from a different story.
+      const matches = Boolean(recovered && options.projectName.trim() && recovered.sourcePrompt === options.sourcePrompt && recovered.levelCount === options.levelCount)
+      setSavedRun(matches ? null : recovered)
+      if (!matches) return
       setRunState(recovered)
       if (recovered?.artifacts.productionSpec) {
-        options.onSpecReady?.(recovered.artifacts.productionSpec)
-        if (recovered.approved) options.onApprovedRestored?.(recovered.artifacts.productionSpec)
+        const restoredSpec = await hydrateSpecAssets(options.projectId, recovered.artifacts.productionSpec)
+        if (!active) return
+        options.onSpecReady?.(restoredSpec)
+        if (recovered.approved) options.onApprovedRestored?.(restoredSpec)
       }
     }).finally(() => active && setRestoring(false))
     return () => { active = false }
   }, [options.projectId])
+
+  useEffect(() => {
+    if (restoring || run || !savedRun || !options.baseSpec || savedRun.sourcePrompt !== options.sourcePrompt || savedRun.projectName !== options.projectName || savedRun.levelCount !== options.levelCount) return
+    const previous = currentRunSpec(savedRun)
+    if (!previous || changedDraftGroups(previous, options.baseSpec).length) return
+    setRunState(savedRun)
+    setSavedRun(null)
+    if (savedRun.approved) options.onApprovedRestored?.(options.baseSpec)
+  }, [restoring, run, savedRun, options.baseSpec, options.sourcePrompt, options.projectName, options.levelCount, options.onApprovedRestored])
 
   const callTask = useCallback(async (current: AgentRun, task: AgentTask, apiKey: string, baseSpec?: GameSpec): Promise<AgentCallResult> => {
     if (current.modelLock.provider === 'managed') return { task: { ...task, status: 'failed', error: '站点云端体验已移除；请新建运行并选择其他文字工具。' }, error: '站点云端体验已移除。', recoverable: false }
@@ -208,6 +205,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
       modelLock: current.modelLock,
       artifacts: artifactsForRole(task.role, current.artifacts),
       baseSpec: baseSpec ? stripLargeAssetUrls(baseSpec) : undefined,
+      playtestEvidence: task.role === 'playtest' && baseSpec ? readPlaytestEvidence(baseSpec) : undefined,
     }
     const digest = digestAgentInput(requestData)
     if ((task.status === 'completed' || task.status === 'needs-review') && task.inputDigest === digest) return { task }
@@ -217,6 +215,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
     const maxAttempts = 2
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
+        const samples = task.role === 'visualQa' ? await reviewImages(baseSpec) : []
         const body: AgentExecuteRequest = {
           runId: current.id,
           taskId: task.id,
@@ -231,7 +230,9 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
           levelCount: current.levelCount,
           baseSpec: baseSpec ? task.phase === 'quality' ? assetMetadataForReview(baseSpec) : stripLargeAssetUrls(baseSpec) : undefined,
           artifacts: artifactsForRole(task.role, current.artifacts),
-          imageUrls: task.role === 'visualQa' ? await imageUrls(baseSpec) : undefined,
+          imageUrls: samples.map(sample => sample.url),
+          imageLabels: samples.map(sample => sample.label),
+          playtestEvidence: task.role === 'playtest' && baseSpec ? readPlaytestEvidence(baseSpec) : undefined,
         }
         const deterministic = deterministicAgentResponse(body)
         const result = deterministic || (isLocalAgentProvider(body.provider)
@@ -299,7 +300,9 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
         artifacts: artifactForRole(working.artifacts, result.task.role, response.artifact),
         updatedAt: Date.now(),
       }
-      if (REVIEW_ROLES.includes(result.task.role)) {
+      if (result.task.role === 'revision' || result.task.role === 'assetCoordinator') {
+        working.artifacts = { ...working.artifacts, reviewIssues: dedupeIssues(response.issues) }
+      } else if (REVIEW_ROLES.includes(result.task.role)) {
         working.artifacts = { ...working.artifacts, reviewIssues: dedupeIssues([...(working.artifacts.reviewIssues || []), ...response.issues]) }
       }
     }
@@ -308,7 +311,8 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
 
   const drivePlanning = useCallback(async (initial: AgentRun, apiKey: string, baseSpecOverride?: GameSpec): Promise<AgentRun> => {
     let working: AgentRun = { ...initial, status: 'planning', error: undefined, updatedAt: Date.now() }
-    const planningBaseSpec = baseSpecOverride || options.baseSpec || undefined
+    const seed = baseSpecOverride || initial.planningSpec || options.baseSpec || undefined
+    const planningBaseSpec = seed ? await hydrateSpecAssets(options.projectId, seed) : undefined
     control.current.controller = new AbortController()
     working = await publish(working)
     const stopIfNeeded = async () => {
@@ -332,7 +336,9 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
 
     working = await executeBatch(working, [taskId('director', 1)], apiKey, planningBaseSpec)
     if (await stopIfNeeded()) return working
-    working = await executeBatch(working, [taskId('narrative', 1), taskId('mechanics', 1), taskId('artDirector', 1)], apiKey, planningBaseSpec)
+    working = await executeBatch(working, [taskId('narrative', 1)], apiKey, planningBaseSpec)
+    if (await stopIfNeeded()) return working
+    working = await executeBatch(working, [taskId('mechanics', 1), taskId('artDirector', 1)], apiKey, planningBaseSpec)
     if (await stopIfNeeded()) return working
     working = await executeBatch(working, [taskId('levelDesigner', 1)], apiKey, planningBaseSpec)
     if (await stopIfNeeded()) return working
@@ -341,15 +347,19 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
     working = { ...working, status: 'reviewing' }
     working = await executeBatch(working, [taskId('consistencyCritic', 1), taskId('engineQa', 1)], apiKey, working.artifacts.mergedSpec)
     if (await stopIfNeeded()) return working
+    const firstReviewHadBlocking = blockingIssues(working).length > 0
     working = await executeBatch(working, [taskId('revision', 1)], apiKey, working.artifacts.mergedSpec)
     if (await stopIfNeeded()) return working
 
-    if (blockingIssues(working).length && working.currentRound < working.maxReviewRounds) {
+    // A claimed fix needs another independent review; the revising model cannot
+    // mark its own corrections as verified by returning an empty issues array.
+    if (firstReviewHadBlocking && working.currentRound < working.maxReviewRounds) {
       const round = 2
       const secondTasks: AgentTask[] = [
         { id: taskId('consistencyCritic', round), role: 'consistencyCritic', phase: 'review', round, dependencies: [taskId('revision', 1)], status: 'waiting', attempts: 0 },
         { id: taskId('engineQa', round), role: 'engineQa', phase: 'review', round, dependencies: [taskId('revision', 1)], status: 'waiting', attempts: 0 },
         { id: taskId('revision', round), role: 'revision', phase: 'review', round, dependencies: [taskId('consistencyCritic', round), taskId('engineQa', round)], status: 'waiting', attempts: 0 },
+        { id: finalReviewTaskId(round), role: 'consistencyCritic', phase: 'review', round, dependencies: [taskId('revision', round)], status: 'waiting', attempts: 0 },
       ]
       working = {
         ...working,
@@ -364,12 +374,17 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
       if (await stopIfNeeded()) return working
       working = await executeBatch(working, [taskId('revision', round)], apiKey, working.artifacts.revisedSpec)
       if (await stopIfNeeded()) return working
+      // A revised narrative needs a reader other than the reviser before
+      // approval. This last review can request player edits, but starts no
+      // unbounded third revision loop.
+      working = await executeBatch(working, [finalReviewTaskId(round)], apiKey, working.artifacts.revisedSpec)
+      if (await stopIfNeeded()) return working
     }
 
     if (blockingIssues(working).length) {
       const unresolvedSpec = working.artifacts.revisedSpec || working.artifacts.mergedSpec
       working = await publish({ ...working, status: 'awaiting_approval', approved: false, error: '两轮评审后仍有阻断项。请修改原始要求或相关规格，再重新运行对应 Agent。', updatedAt: Date.now() })
-      if (unresolvedSpec) options.onSpecReady?.(unresolvedSpec)
+      if (unresolvedSpec) options.onSpecReady?.(preservePlanningMedia(unresolvedSpec, planningBaseSpec))
       return working
     }
 
@@ -378,11 +393,11 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
     if (await stopIfNeeded()) return working
     const finalSpec = working.artifacts.productionSpec || working.artifacts.revisedSpec || working.artifacts.mergedSpec
     const productionBlocked = blockingIssues(working).length > 0
-    working = { ...working, status: 'awaiting_approval', approved: false, error: productionBlocked ? '素材统筹后仍有阻断项，请修正后再批准生图。' : undefined, updatedAt: Date.now() }
+    working = { ...working, pendingRevision: undefined, status: 'awaiting_approval', approved: false, error: productionBlocked ? '素材统筹后仍有阻断项，请修正后再批准生图。' : undefined, updatedAt: Date.now() }
     working = await publish(working)
-    if (finalSpec) options.onSpecReady?.(finalSpec)
+    if (finalSpec) options.onSpecReady?.(preservePlanningMedia(finalSpec, planningBaseSpec))
     return working
-  }, [executeBatch, options.baseSpec, options.onSpecReady, publish])
+  }, [executeBatch, options.baseSpec, options.onSpecReady, options.projectId, publish])
 
   const start = useCallback(async (modelLock: AgentModelLock, apiKey: string, initialSpec?: GameSpec) => {
     control.current = { paused: false, cancelled: false }
@@ -400,8 +415,11 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
       ...inspectSelectedInspirations(options.sourcePrompt, spec),
     ])
     const now = Date.now()
+    if (run && run.reviewMode !== 'local-draft' && run.tasks.some(task => task.output)) setSavedRun(run)
     const next: AgentRun = {
       ...createRun(options, modelLock),
+      archivedTasks: run?.reviewMode !== 'local-draft' ? [...(run?.archivedTasks || []), ...(run?.tasks.filter(task => task.status === 'completed' || task.status === 'needs-review') || [])].slice(-150) : run.archivedTasks,
+      ...(run?.reviewMode === 'local-draft' && run.sourcePrompt === options.sourcePrompt ? { id: run.id, createdAt: run.createdAt, archivedTasks: run.archivedTasks } : {}),
       status: 'awaiting_approval',
       reviewMode: 'local-draft',
       tasks: [{ id: taskId('engineQa', 1), role: 'engineQa', phase: 'review', round: 1, dependencies: [],
@@ -410,10 +428,10 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
       artifacts: { productionSpec: spec, reviewIssues: issues },
       updatedAt: now,
     }
-    await publish(next)
     options.onSpecReady?.(spec)
+    await publish(next)
     return next
-  }, [options, publish])
+  }, [options, publish, run])
 
   const pause = useCallback(() => {
     control.current.paused = true
@@ -457,38 +475,38 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
       const checksReady = qualityRun.tasks.filter((task) => task.phase === 'quality' && task.role !== 'publisher').every((task) => task.status === 'completed' || task.status === 'needs-review')
       if (selected.role !== 'publisher' && !checksReady) return qualityRun
       qualityRun = await executeBatch(qualityRun, [taskId('publisher', selected.round)], apiKey, qualitySpec)
-      return publish({ ...qualityRun, status: qualityRun.artifacts.releaseReport?.ready ? 'ready' : 'awaiting_approval', updatedAt: Date.now() })
+      return publish({ ...qualityRun, status: qualityRun.artifacts.releaseReport?.ready ? 'ready' : 'producing', updatedAt: Date.now() })
     }
 
-    const firstRoundId = selected.round > 1 ? taskId(selected.role, 1) : selected.id
-    const roundOneTasks = run.tasks.filter((task) => task.round === 1)
-    const resetIds = invalidatedTaskIds(roundOneTasks, firstRoundId)
-    const resetRoles = new Set(roundOneTasks.filter((task) => resetIds.has(task.id)).map((task) => task.role))
-    const reset: AgentRun = {
-      ...run,
-      status: 'planning',
-      currentRound: 1,
-      approved: false,
-      error: undefined,
-      tasks: roundOneTasks.map((task) => resetIds.has(task.id) ? { ...task, status: 'waiting', error: undefined, output: undefined, summary: undefined, issues: undefined, usage: undefined, inputDigest: undefined } : task),
-      artifacts: clearArtifactsForRoles(run.artifacts, resetRoles),
-      updatedAt: Date.now(),
-    }
+    const reset = retryPlanningRun(run, selected.id)
     return drivePlanning(await publish(reset), apiKey)
   }, [drivePlanning, executeBatch, publish, run, options.projectId])
 
   const approve = useCallback(async () => {
-    if (!run) return null
+    if (!run || run.status !== 'awaiting_approval' || approvalInFlight.current) return null
     if (blockingIssues(run).length) return null
     const spec = run.artifacts.productionSpec || run.artifacts.revisedSpec || run.artifacts.mergedSpec
-    if (!spec) return null
-    const next = await publish({ ...run, approved: true, status: 'producing', updatedAt: Date.now() })
-    options.onApproved?.(spec)
-    return next
-  }, [options.onApproved, publish, run])
+    if (!spec || pendingNarrativeSuggestions(spec).length) return null
+    const inputsMatch = () => {
+      const current = liveOptions.current
+      return current.baseSpec && run.sourcePrompt === current.sourcePrompt && run.projectName === current.projectName && run.levelCount === current.levelCount && !changedDraftGroups(spec, current.baseSpec).length
+    }
+    if (!inputsMatch()) throw new Error('草案与本次审核的输入不一致，请重新点击“检查草案并进入审核”后再批准。')
+    approvalInFlight.current = true
+    setApproving(true)
+    try {
+      const approvedSpec = preservePlanningMedia(await hydrateSpecAssets(options.projectId, spec), options.baseSpec || undefined)
+      if (liveRun.current !== run || !inputsMatch()) throw new Error('读取素材时草案或审核状态发生了变化，本次没有批准。请检查当前草案后重试。')
+      const approvedRun: AgentRun = { ...run, approved: true, status: 'producing', updatedAt: Date.now() }
+      await publish(approvedRun)
+      if (liveRun.current !== approvedRun || !inputsMatch()) throw new Error('保存批准结果时草案或审核状态发生了变化，请重新检查当前草案。')
+      options.onApproved?.(approvedSpec)
+      return approvedRun
+    } finally { approvalInFlight.current = false; setApproving(false) }
+  }, [options.baseSpec, options.sourcePrompt, options.projectName, options.levelCount, options.projectId, options.onApproved, publish, run])
 
   const runQualityChecks = useCallback(async (spec: GameSpec, apiKey: string) => {
-    if (!run) return null
+    if (!run?.approved) return null
     control.current = { paused: false, cancelled: false, controller: new AbortController() }
     let working: AgentRun = {
       ...run,
@@ -503,7 +521,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
     if (working.tasks.some((task) => task.phase === 'quality' && task.status === 'failed')) return publish({ ...working, status: 'failed', error: '生成后检查失败，可单独重试。' })
     working = await executeBatch(working, [taskId('publisher', 1)], apiKey, spec)
     const ready = Boolean(working.artifacts.releaseReport?.ready)
-    return publish({ ...working, status: ready ? 'ready' : 'awaiting_approval', updatedAt: Date.now() })
+    return publish({ ...working, status: ready ? 'ready' : 'producing', updatedAt: Date.now() })
   }, [executeBatch, publish, run])
 
   const reset = useCallback(async () => {
@@ -514,5 +532,26 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
     return next
   }, [options, publish, run?.modelLock])
 
-  return { run, restoring, start, reviewLocalDraft, pause, cancel, resume, retryTask, approve, runQualityChecks, reset }
+  const updateSuggestionDecisions = useCallback(async (spec: GameSpec) => {
+    if (!run) return null
+    const next = updateRunNarrativeDecisions(run, spec)
+    return next === run ? run : publish(next)
+  }, [run, publish])
+
+  const reconcileInputs = useCallback(async () => {
+    if (!run) return null
+    if (['planning', 'reviewing', 'quality_check'].includes(run.status) || run.tasks.some(task => task.status === 'running')) return run
+    if (!options.baseSpec) {
+      if (run.tasks.some(task => task.output)) setSavedRun(run)
+      return publish(createRun(options, run.modelLock))
+    }
+    const next = reviseAgentDraft(run, stripLargeAssetUrls(options.baseSpec), { sourcePrompt: options.sourcePrompt, projectName: options.projectName, levelCount: options.levelCount })
+    if (next === run) {
+      if (run.approved) options.onApprovedRestored?.(options.baseSpec)
+      return run
+    }
+    return publish(next)
+  }, [run, options, publish])
+
+  return { run, savedRun, restoring, approving, start, reviewLocalDraft, pause, cancel, resume, retryTask, approve, runQualityChecks, reset, updateSuggestionDecisions, reconcileInputs }
 }

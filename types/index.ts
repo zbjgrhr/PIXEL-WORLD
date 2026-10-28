@@ -124,7 +124,16 @@ export interface AgentRun {
   createdAt: number
   updatedAt: number
   error?: string
+  planningSpec?: GameSpec
+  pendingRevision?: {
+    groups: AgentDraftChangeGroup[]
+    invalidatedRoles: AgentRole[]
+    retainedTaskIds: string[]
+  }
+  archivedTasks?: AgentTask[]
 }
+
+export type AgentDraftChangeGroup = 'requirements' | 'story' | 'characters' | 'gameplay' | 'chapters' | 'art' | 'assets' | 'locks'
 
 export interface AgentExecuteRequest {
   runId: string
@@ -142,6 +151,8 @@ export interface AgentExecuteRequest {
   baseSpec?: GameSpec
   artifacts: AgentArtifacts
   imageUrls?: string[]
+  imageLabels?: string[]
+  playtestEvidence?: import('@/lib/playtest-evidence').PlaytestEvidence
 }
 
 export interface AgentExecuteResponse {
@@ -297,6 +308,8 @@ export interface EnemySpec {
   damage: number
   speed: number
   behavior: 'patrol' | 'chase' | 'ranged'
+  category?: 'groundEnemy' | 'airEnemy' | 'waterEnemy'
+  assetId?: string
 }
 
 export interface BossSpec {
@@ -329,7 +342,71 @@ export interface LevelSpec {
   effects: LevelEffectSpec
 }
 
+export interface StoryObjective {
+  id: string
+  kind: 'collect' | 'defeat' | 'boss' | 'reach' | 'interact'
+  target: string
+  count: number
+  description: string
+  feedback: string
+  prerequisites: string[]
+}
+
+export interface StoryPoint {
+  id: string
+  name: string
+  description: string
+  position: number
+  kind: 'reach' | 'interact'
+}
+
+export interface StoryChapter {
+  levelId: string
+  title: string
+  arrival: string
+  departure: string
+  bossBefore: string
+  bossAfter: string
+  points: StoryPoint[]
+  objectives: StoryObjective[]
+}
+
+export interface NarrativeSuggestion {
+  id: string
+  path: string
+  label: string
+  before: string
+  after: string
+  reason: string
+  status: 'pending' | 'accepted' | 'dismissed' | 'stale'
+}
+
+export interface NarrativeSpec {
+  version: 1
+  suggestions?: NarrativeSuggestion[]
+  source: {
+    originalTitle: string
+    originalStory: string
+    playerFields: Record<string, string>
+    lockedFields: Record<string, string>
+    generatedFields: string[]
+    origin: 'rules' | 'model' | 'player'
+  }
+  premise: string
+  incitingIncident: string
+  motivation: string
+  conflict: string
+  bossRelation: string
+  resolution: string
+  opening: string
+  ending: string
+  characters: Array<{ id: string; name: string; role: string; motivation: string; relationship: string }>
+  clues: Array<{ id: string; setup: string; payoff: string; levelId: string; payoffLevelId: string }>
+  chapters: StoryChapter[]
+}
+
 export interface GameSpec {
+  narrative?: NarrativeSpec
   creativeBrief?: { heroGoal?: string; difficulty?: string; pacing?: string; identityRules?: string }
   version: 3
   title: string
@@ -418,6 +495,7 @@ export interface ProjectHeaderProps {
 }
 
 export interface ModelSelectorProps {
+  disabled?: boolean
   hideProviderSelector?: boolean
   selectedProvider: ProviderId
   onProviderChange: (provider: ProviderId) => void
@@ -444,8 +522,6 @@ export interface GenerateImageRequest {
 
 export interface ThemeCustomizerProps {
   inspiration?: ReactNode
-  creationMode?: 'agent' | 'classic'
-  onCreationModeChange?: (mode: 'agent' | 'classic') => void
   customThemeName: string
   onThemeNameChange: (name: string) => void
   customStory: string
@@ -454,6 +530,7 @@ export interface ThemeCustomizerProps {
   onPromptChange: (prompt: string) => void
   levelCount?: number
   onLevelCountChange?: (count: number) => void
+  completionNotice?: ReactNode
   onOptimizePrompt?: () => void
   onCompleteIdea?: () => void
   isOptimizing?: boolean

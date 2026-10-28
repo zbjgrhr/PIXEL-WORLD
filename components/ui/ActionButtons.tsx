@@ -20,7 +20,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
       {showCreateButton && <Button
-        type="default"
+        type={isThemeCreated ? 'default' : 'primary'}
         size="large"
         icon={!isThemeCreated ? <Sparkles size={16} /> : <RotateCcw size={16} />}
         onClick={onCreateTheme}
@@ -36,7 +36,7 @@ const ActionButtons: React.FC<ActionButtonsProps> = ({
         {!isThemeCreated ? '生成所选素材' : '重新生成所选素材'}
       </Button>}
       <Button
-        type="primary"
+        type={isThemeCreated ? 'primary' : 'default'}
         size="large"
         icon={<PlayCircleOutlined />}
         onClick={onStartGame}

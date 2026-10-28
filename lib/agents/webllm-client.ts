@@ -1,5 +1,5 @@
 import type { ChatPayload } from '@/lib/agents/execution'
-import { buildWebLlmCreativeRequest, parseWebLlmCreativePatch, type WebLlmCreativePatch } from '@/lib/agents/webllm-lite'
+import { buildWebLlmCreativeRequest, estimateWebLlmPromptTokens, parseWebLlmCreativePatch, type WebLlmCreativePatch } from '@/lib/agents/webllm-lite'
 
 type WebLlmEngine = Awaited<ReturnType<typeof import('@mlc-ai/web-llm')['CreateMLCEngine']>>
 
@@ -54,9 +54,13 @@ export async function prepareWebLlm(model: string, onProgress?: (progress: WebLl
 }
 
 export async function webLlmCompletion(model: string, system: string, user: string, maxTokens: number, onProgress?: (progress: WebLlmProgress) => void): Promise<ChatPayload> {
+  if (estimateWebLlmPromptTokens(system, user) + maxTokens + 256 > 4096) throw new Error('此浏览器模型只适合轻量补全，当前内容超出保守上下文预算。已保留本地草案；完整策划请使用更大上下文的本机模型或自己的文字服务。')
   const engine = await prepareWebLlm(model, onProgress)
-  const response = await engine.chat.completions.create({ messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-    max_tokens: maxTokens, temperature: 0.2, stream: false })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const response = await Promise.race([
+    engine.chat.completions.create({ messages: [{ role: 'system', content: system }, { role: 'user', content: user }], max_tokens: maxTokens, temperature: 0.2, stream: false }),
+    new Promise<never>((_, reject) => { timer = setTimeout(() => { void engine.interruptGenerate().catch(() => {}); reject(new Error('浏览器模型在 30 秒内未完成补全，已停止等待并保留本地草案。可以继续审核，或更换文字模型。')) }, 30_000) }),
+  ]).finally(() => { if (timer) clearTimeout(timer) })
   return { choices: [{ message: { content: response.choices[0]?.message?.content || '' } }],
     usage: { prompt_tokens: response.usage?.prompt_tokens || 0, completion_tokens: response.usage?.completion_tokens || 0, total_tokens: response.usage?.total_tokens || 0 } }
 }

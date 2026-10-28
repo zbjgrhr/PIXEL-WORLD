@@ -1,4 +1,9 @@
 'use client'
+import NarrativeOverlay from './ui/NarrativeOverlay'
+import { narrativeEngine, type StoryProgress, type StoryEntry } from '@/lib/narrative-runtime'
+import { enemyCombatRules } from '@/lib/enemy-combat'
+import { enemySpecForAsset } from '@/lib/enemy-identity'
+import { readCampaign, writeCampaign, clearCampaign, type CampaignSave } from '@/lib/campaign-save'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
@@ -12,7 +17,6 @@ import {
   loadGameSettings,
   saveGameSettings,
 } from '@/lib/game-settings'
-import { loadImageApiPrefs } from '@/lib/image-api-prefs'
 import { normalizeAnimationSpec } from '@/lib/asset-catalog'
 import type { DisplaySize, GameSettings } from '@/lib/game-settings'
 import type { AnimationClipPose, AnimationPose, AssetCategory, AssetDefinition, AssetType, GameCanvasProps, ObstacleData } from '@/types'
@@ -267,13 +271,62 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
   const [viewportWidth, setViewportWidth] = useState(900)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settings, setSettings] = useState<GameSettings>(DEFAULT_GAME_SETTINGS)
-  const [storyLoading, setStoryLoading] = useState(false)
+  const storyRef = useRef<StoryProgress | null>(null)
+  const storyQueueRef = useRef<StoryEntry[]>([])
+  const storyBlockedRef = useRef(false)
+  const restoredCampaignRef = useRef<CampaignSave | null | undefined>(undefined)
+  const initializedWorldRef = useRef<{ storyKey: string; levelId: string; groundTop: number } | null>(null)
+  const levelScoreRef = useRef(0)
+  const [storyQueue, setStoryQueue] = useState<StoryEntry[]>([])
+  const [storyLogOpen, setStoryLogOpen] = useState(false)
+  const [storyProgress, setStoryProgress] = useState<StoryProgress | null>(null)
+  const setQueue = useCallback((queue: StoryEntry[]) => {
+    storyQueueRef.current = queue
+    storyBlockedRef.current = queue.length > 0
+    keysRef.current.clear()
+    setStoryQueue(queue)
+  }, [])
+  const commitStory = useCallback((next: StoryProgress) => {
+    const previous = storyRef.current
+    if (previous === next) return
+    const added = next.history.filter(entry => !previous?.history.some(old => old.id === entry.id))
+    storyRef.current = next
+    setStoryProgress(next)
+    if (added.length) setQueue([...storyQueueRef.current, ...added])
+  }, [setQueue])
+  const emitStory = useCallback((kind: 'collect' | 'defeat' | 'boss' | 'reach' | 'interact' | 'boss-approach', target: string, id: string) => {
+    if (!spec || !storyRef.current) return
+    commitStory(narrativeEngine.emit(spec, storyRef.current, { kind, target, id, levelId: storyRef.current.levelId }))
+  }, [spec, commitStory])
+  const saveCampaign = useCallback(() => {
+    if (!spec || !storyRef.current || !playerRef.current || playerRef.current.health <= 0) return
+    writeCampaign(selectedTheme, { version: 1, storyKey: narrativeEngine.key(spec), levelIndex: currentLevelIndex, score: scoreRef.current, levelScore: levelScoreRef.current, power: powerRef.current, simulationTime: simulationTimeRef.current, story: storyRef.current, unread: storyQueueRef.current, actors: { player: playerRef.current, enemies: enemiesRef.current, collectibles: collectiblesRef.current } })
+  }, [spec, selectedTheme, currentLevelIndex])
+  useEffect(() => {
+    const timer = window.setInterval(saveCampaign, 750)
+    window.addEventListener('pagehide', saveCampaign)
+    return () => { window.clearInterval(timer); window.removeEventListener('pagehide', saveCampaign); saveCampaign() }
+  }, [saveCampaign])
 
   const setMode = useCallback((next: GameMode) => {
     if (next !== 'playing') keysRef.current.clear()
     modeRef.current = next
     setModeState(next)
   }, [])
+  useEffect(() => {
+    const pauseWhenHidden = () => {
+      if (modeRef.current === 'playing') setMode('paused')
+    }
+    const onVisibilityChange = () => {
+      if (document.hidden) pauseWhenHidden()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('blur', pauseWhenHidden)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      window.removeEventListener('blur', pauseWhenHidden)
+    }
+  }, [setMode])
 
   const processed = getProcessedImagesForTheme(getThemeId(selectedTheme))
   const levelSpec = spec?.levels[currentLevelIndex]
@@ -440,6 +493,26 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
   const initializeLevel = useCallback(() => {
     if (!data || !level || !spec) return
+    const storyKey = narrativeEngine.key(spec)
+    const initialized = initializedWorldRef.current
+    if (initialized?.storyKey === storyKey && initialized.levelId === level.id && playerRef.current) {
+      // Image hydration and viewport changes must not respawn defeated actors
+      // or reset a chapter's score checkpoint while its story state survives.
+      const dy = groundTop - initialized.groundTop
+      playerRef.current.x = Math.min(playerRef.current.x, worldWidth - playerRef.current.width)
+      playerRef.current.y += dy
+      enemiesRef.current.forEach(enemy => { enemy.y += dy; enemy.baseY += dy })
+      collectiblesRef.current.forEach(item => { item.y += dy })
+      obstaclesRef.current.forEach(obstacle => { obstacle.y += dy; if (obstacle.baseY !== undefined) obstacle.baseY += dy })
+      initializedWorldRef.current = { storyKey, levelId: level.id, groundTop }
+      return
+    }
+    if (storyRef.current && storyRef.current.storyKey !== storyKey) { storyRef.current = null; restoredCampaignRef.current = undefined }
+    initializedWorldRef.current = { storyKey, levelId: level.id, groundTop }
+    if (restoredCampaignRef.current === undefined) restoredCampaignRef.current = readCampaign(spec, selectedTheme)
+    const saved = restoredCampaignRef.current?.levelIndex === currentLevelIndex ? restoredCampaignRef.current : null
+    if (!storyRef.current) storyRef.current = saved ? saved.story : narrativeEngine.fresh(spec, level.id)
+    levelScoreRef.current = saved?.levelScore ?? scoreRef.current
     const previousHealth = playerRef.current?.health ?? spec.hero.maxHealth
     const health = currentLevelIndex > 0
       ? Math.min(spec.hero.maxHealth, previousHealth + 15)
@@ -491,10 +564,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         phase: index * 1.3,
       })))
     }
-    const enemySpec = spec.enemies[0]
     const spawns = level.enemySpawns?.length
       ? level.enemySpawns
-      : Array.from({ length: spec.levels[currentLevelIndex]?.enemyCount || 3 }, (_, index) => ({
+      : Array.from({ length: spec.levels[currentLevelIndex]?.enemyCount ?? 3 }, (_, index) => ({
           id: `enemy-${index}`,
           x: 280 + index * 130,
           y: groundTop - ENEMY_HEIGHT,
@@ -503,6 +575,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     enemiesRef.current = spawns.map((spawn, index): EnemyRuntime => {
       const asset = assetById(spawn.kind) || assetFor('groundEnemy', levelSpec?.id)
       const mobility = asset?.motion?.mobility || (asset?.category === 'airEnemy' ? 'air' : asset?.category === 'waterEnemy' ? 'water' : 'ground')
+      const enemySpec = enemySpecForAsset(spec, asset)
       const baseY = mobility === 'air' ? groundTop - 175 - (index % 2) * 45 : mobility === 'water' ? groundTop - 74 : groundTop - ENEMY_HEIGHT
       const healthValue = enemySpec.health + currentLevelIndex * 8
       return {
@@ -519,7 +592,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         patrolMin: Math.max(150, spawn.x - 100),
         patrolMax: Math.min(worldWidth - 100, spawn.x + 100),
         lastShotAt: 0,
-        ranged: enemySpec.behavior === 'ranged' || mobility !== 'ground' || index % 3 === 2,
+        ranged: enemyCombatRules.usesRanged(enemySpec.behavior, mobility, index),
         isBoss: false,
         assetId: asset?.id || spawn.kind,
         mobility,
@@ -572,26 +645,41 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       y: Math.min(groundTop - 42, spawn.y || groundTop - 100),
       collected: false,
     }))
+    if (saved) {
+      playerRef.current = saved.actors.player as PlayerRuntime
+      enemiesRef.current = saved.actors.enemies as EnemyRuntime[]
+      collectiblesRef.current = saved.actors.collectibles as CollectibleRuntime[]
+      scoreRef.current = saved.score
+      powerRef.current = saved.power
+      storyRef.current = saved.story
+      setQueue(saved.unread)
+      setStoryProgress(saved.story)
+      restoredCampaignRef.current = null
+    }
     projectilesRef.current = []
     effectsRef.current = []
     keysRef.current.clear()
-    simulationTimeRef.current = 0
+    simulationTimeRef.current = saved?.simulationTime || 0
     transitionRef.current = false
     setBanner(`LEVEL ${currentLevelIndex + 1} — ${spec.levels[currentLevelIndex]?.name || ''}`)
     setMode('playing')
+    commitStory(narrativeEngine.begin(spec, storyRef.current!, level.id))
     const timer = window.setTimeout(() => setBanner(''), 1500)
     setRenderTick(0)
     return () => window.clearTimeout(timer)
-  }, [assetById, assetFor, currentLevelIndex, data, exitX, groundTop, level, levelSpec, setMode, spec, worldWidth])
+  }, [assetById, assetFor, currentLevelIndex, data, exitX, groundTop, level, levelSpec, setMode, spec, worldWidth, selectedTheme, commitStory, setQueue])
 
   useEffect(() => initializeLevel(), [initializeLevel])
 
   const awardEnemy = useCallback((enemy: EnemyRuntime) => {
     scoreRef.current += enemy.isBoss ? 1000 : 150
-  }, [])
+    if (enemy.isBoss) emitStory('boss-approach', 'boss', 'approach')
+    emitStory(enemy.isBoss ? 'boss' : 'defeat', enemy.isBoss ? 'boss' : 'enemies', enemy.id)
+  }, [emitStory, ])
 
   const damageEnemy = useCallback((enemy: EnemyRuntime, damage: number) => {
     if (enemy.health <= 0) return
+    if (enemy.isBoss && spec && storyRef.current && narrativeEngine.objectives(spec, storyRef.current).some(task => task.kind === 'boss' && !task.available)) return
     const now = simulationTimeRef.current
     enemy.health -= Math.round(damage * powerRef.current)
     if (enemy.health <= 0) {
@@ -608,7 +696,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     void startMusic()
     const player = playerRef.current
     const currentSpec = gameData.data?.spec
-    if (!player || !currentSpec || modeRef.current !== 'playing') return
+    if (!player || !currentSpec || modeRef.current !== 'playing' || storyBlockedRef.current) return
     const now = simulationTimeRef.current
     if (player.health <= 0 || (player.action === 'hit' && now < player.actionUntil)) return
     if (now < player.meleeReadyAt) return
@@ -638,7 +726,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     void startMusic()
     const player = playerRef.current
     const currentSpec = gameData.data?.spec
-    if (!player || !currentSpec || modeRef.current !== 'playing') return
+    if (!player || !currentSpec || modeRef.current !== 'playing' || storyBlockedRef.current) return
     const now = simulationTimeRef.current
     if (player.health <= 0 || (player.action === 'hit' && now < player.actionUntil)) return
     if (now < player.rangedReadyAt) return
@@ -678,6 +766,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
   const enterExit = useCallback(() => {
     if (transitionRef.current) return
+    if (spec && storyRef.current && spec.narrative) {
+      emitStory('reach', 'exit', 'exit')
+      const finished = narrativeEngine.finish(spec, storyRef.current!)
+      if (!finished.completedLevels.includes(storyRef.current!.levelId)) return
+      commitStory(finished)
+    }
     transitionRef.current = true
     keysRef.current.clear()
     if (currentLevelIndex >= totalLevels - 1) {
@@ -686,31 +780,42 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     }
     setMode('transition')
     setBanner(`LEVEL ${currentLevelIndex + 1} CLEAR`)
-    if (transitionTimerRef.current) window.clearTimeout(transitionTimerRef.current)
-    transitionTimerRef.current = window.setTimeout(() => {
-      const advanced = useGameStore.getState().nextLevel()
-      transitionRef.current = false
-      if (!advanced) setMode('victory')
-    }, 850)
-  }, [currentLevelIndex, setMode, totalLevels])
+  }, [currentLevelIndex, setMode, totalLevels, spec, emitStory, commitStory])
 
-  useEffect(() => () => {
-    if (transitionTimerRef.current) window.clearTimeout(transitionTimerRef.current)
-  }, [])
+  useEffect(() => {
+    if (mode !== 'transition' || storyQueue.length || storyLogOpen) return
+    transitionTimerRef.current = window.setTimeout(() => { setCurrentLevelIndex(currentLevelIndex + 1); setMode('playing') }, 600)
+    return () => { if (transitionTimerRef.current) window.clearTimeout(transitionTimerRef.current) }
+  }, [mode, storyQueue.length, storyLogOpen, currentLevelIndex, setCurrentLevelIndex, setMode])
+
+  const interactStory = useCallback(() => {
+    if (!spec || !levelSpec || !playerRef.current || storyBlockedRef.current || modeRef.current !== 'playing') return
+    const plan = spec.narrative?.chapters.find(c => c.levelId === levelSpec.id)
+    if (!plan || !storyRef.current) return
+    const available = narrativeEngine.objectives(spec, storyRef.current)
+    const playerX = playerRef.current.x
+    const point = plan.points.filter(candidate => candidate.kind === 'interact'
+      && available.some(task => task.target === candidate.id && task.available && !task.complete)
+      && Math.abs(playerX - (120 + (exitX - 220) * candidate.position)) < 95)
+      .sort((left, right) => Math.abs(playerX - (120 + (exitX - 220) * left.position)) - Math.abs(playerX - (120 + (exitX - 220) * right.position)))[0]
+    if (point) emitStory('interact', point.id, point.id)
+  }, [spec, levelSpec, exitX, emitStory])
 
   useEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase()
       if (['arrowleft', 'arrowright', ' ', 'j', 'k', 'escape'].includes(key)) event.preventDefault()
+      if (storyBlockedRef.current) return
       if (key === 'escape') {
         if (modeRef.current === 'playing') setMode('paused')
         else if (modeRef.current === 'paused') setMode('playing')
         return
       }
-      if (modeRef.current !== 'playing') return
+      if (modeRef.current !== 'playing' || storyBlockedRef.current) return
       void startMusic()
       if (event.repeat) return
       keysRef.current.add(key)
+      if (key === 'e') interactStory()
       if (key === 'j') meleeAttack()
       if (key === 'k' || key === 'f') rangedAttack()
     }
@@ -721,7 +826,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       window.removeEventListener('keydown', keyDown)
       window.removeEventListener('keyup', keyUp)
     }
-  }, [meleeAttack, rangedAttack, setMode, startMusic])
+  }, [meleeAttack, rangedAttack, setMode, startMusic, interactStory])
 
   useEffect(() => {
     if (!data || !level || !spec) return
@@ -731,7 +836,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       const elapsedRealMs = Math.min(34, Math.max(0, realNow - lastRealTime))
       lastRealTime = realNow
       const player = playerRef.current
-      if (modeRef.current === 'playing' && player) {
+      if (modeRef.current === 'playing' && player && !storyBlockedRef.current) {
         simulationTimeRef.current += elapsedRealMs
         const now = simulationTimeRef.current
         const delta = Math.min(2, elapsedRealMs / 16.67)
@@ -801,6 +906,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
         enemiesRef.current.forEach((enemy) => {
           if (enemy.health <= 0) return
+          if (enemy.isBoss && storyRef.current && narrativeEngine.objectives(spec, storyRef.current).some(task => task.kind === 'boss' && !task.available)) return
           const distance = player.x - enemy.x
           if (Math.abs(distance) < (enemy.isBoss ? 480 : 300)) enemy.direction = distance >= 0 ? 1 : -1
           else if (enemy.x <= enemy.patrolMin) enemy.direction = 1
@@ -818,7 +924,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           const resting = now < enemy.idleUntil
           if (!reactionLocked && !resting) {
             const speedScale = enemy.mobility === 'water' ? 0.72 : enemy.mobility === 'air' ? 1.12 : 1
-            enemy.x = Math.max(120, Math.min(exitX - enemy.width - 32, enemy.x + enemy.speed * speedScale * enemy.direction * delta))
+            enemy.x = enemyCombatRules.moveWithinPatrol(
+              enemy.x, enemy.direction, enemy.speed * speedScale * delta,
+              enemy.patrolMin, Math.min(enemy.patrolMax, exitX - enemy.width - 32),
+            )
           }
           if (!reactionLocked) {
             if (enemy.mobility === 'air') {
@@ -846,8 +955,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
             }
           }
 
-          const shotDelay = enemy.isBoss ? 1050 : 2200
-          if (!reactionLocked && enemy.ranged && Math.abs(distance) < 520 && now - enemy.lastShotAt > shotDelay) {
+          const verticalOverlap = player.y < enemy.y + enemy.height && player.y + player.height > enemy.y
+          const attackKind = enemyCombatRules.attackKind(enemy.ranged, enemy.isBoss, distance, enemy.width, now - enemy.lastShotAt, reactionLocked, verticalOverlap)
+          if (attackKind === 'ranged') {
             enemy.lastShotAt = now
             setActorAction(enemy, 'rangedAttack', now, ATTACK_POSE_MS)
             projectilesRef.current.push({
@@ -857,7 +967,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
               width: enemy.isBoss ? 28 : 20,
               height: enemy.isBoss ? 22 : 16,
               vx: (distance >= 0 ? 1 : -1) * (enemy.isBoss ? 7 : 5),
-              damage: enemy.isBoss ? Math.round(enemy.damage * 0.75) : Math.round(enemy.damage * 0.6),
+              damage: enemyCombatRules.projectileDamage(enemy.damage, enemy.isBoss),
               hostile: true,
             })
             const category: AssetCategory = enemy.isBoss
@@ -868,7 +978,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
                   ? 'waterEnemyAttackSound'
                   : 'groundEnemyAttackSound'
             playEffectSound(assetFor(category, levelSpec?.id), enemy.isBoss ? 90 : 240)
-          } else if (!reactionLocked && !enemy.ranged && Math.abs(distance) < enemy.width + 24 && now - enemy.lastShotAt > 950) {
+          } else if (attackKind === 'melee') {
             enemy.lastShotAt = now
             setActorAction(enemy, 'meleeAttack', now, ATTACK_POSE_MS)
             damagePlayer(enemy.damage)
@@ -905,18 +1015,25 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
             item.collected = true
             const collectible = spec.collectible
             scoreRef.current += collectible.value
+            emitStory('collect', 'collectible', item.id)
             if (collectible.effect === 'heal') player.health = Math.min(player.maxHealth, player.health + collectible.value)
             if (collectible.effect === 'power') powerRef.current = Math.min(2.5, powerRef.current + 0.15)
           }
         })
 
+        const chapter = spec.narrative?.chapters.find(c => c.levelId === levelSpec?.id)
+        chapter?.points.filter(point => point.kind === 'reach').forEach(point => {
+          if (Math.abs(player.x - (120 + (exitX - 220) * point.position)) < 70) emitStory('reach', point.id, point.id)
+        })
+        const liveBoss = enemiesRef.current.find(enemy => enemy.isBoss && enemy.health > 0)
+        if (liveBoss && Math.abs(player.x - liveBoss.x) < 360) emitStory('boss-approach', 'boss', 'approach')
         const exitTrigger = {
           x: exitX - 16,
           y: exitY,
           width: EXIT_WIDTH + 32,
           height: EXIT_HEIGHT,
         }
-        if (player.health > 0 && enemiesRef.current.length === 0 && intersects(player, exitTrigger)) {
+        if (player.health > 0 && narrativeEngine.exitReady(spec, storyRef.current, enemiesRef.current.length) && !storyBlockedRef.current && intersects(player, exitTrigger)) {
           enterExit()
         }
         setRenderTick(now)
@@ -927,19 +1044,27 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     return () => {
       if (animationRef.current) cancelAnimationFrame(animationRef.current)
     }
-  }, [assetFor, damageEnemy, damagePlayer, data, enterExit, exitX, exitY, groundTop, level, levelSpec?.id, levelSpec?.platformMode, playEffectSound, spec, worldWidth])
+  }, [assetFor, damageEnemy, damagePlayer, data, enterExit, exitX, exitY, groundTop, level, levelSpec?.id, levelSpec?.platformMode, playEffectSound, spec, worldWidth, emitStory])
 
   const restartCampaign = () => {
+    clearCampaign(selectedTheme)
+    restoredCampaignRef.current = null
+    storyRef.current = spec ? narrativeEngine.fresh(spec) : null
+    setStoryProgress(storyRef.current)
+    setQueue([])
+    setStoryLogOpen(false)
+    levelScoreRef.current = 0
     scoreRef.current = 0
     powerRef.current = 1
     playerRef.current = null
     setCurrentLevelIndex(0)
     setMode('playing')
     transitionRef.current = false
-    window.setTimeout(() => initializeLevel(), 0)
+    if (currentLevelIndex === 0) initializeLevel()
   }
 
   const backToMenu = () => {
+    saveCampaign()
     resetGame()
     setGameState('menu')
     onBackToMenu?.()
@@ -947,7 +1072,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
   const pressMovement = (key: string, pressed: boolean) => {
     if (pressed) {
-      if (modeRef.current !== 'playing') return
+      if (modeRef.current !== 'playing' || storyBlockedRef.current) return
       keysRef.current.add(key)
       void startMusic()
     }
@@ -969,65 +1094,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     resumeAfterSettingsRef.current = false
   }
 
-  const generateBackgroundStory = async () => {
-    const currentSpec = useGameStore.getState().gameData.data?.spec
-    if (!currentSpec) return
-    const prefs = loadImageApiPrefs()
-    if (!prefs.apiKey.trim()) {
-      message.error('请先在主菜单配置 API Key，再生成新的 AI 背景故事。')
-      return
-    }
-    setStoryLoading(true)
-    try {
-      const response = await fetch('/api/optimize-prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `Create a new dramatic background story for this game without changing its established world or characters. World: ${currentSpec.world}. Hero: ${currentSpec.hero.name}, ${currentSpec.hero.appearance}. Important collectible: ${currentSpec.collectible.name}. Final boss: ${currentSpec.boss.name}, ${currentSpec.boss.appearance}.`,
-          theme: currentSpec.title,
-          levelCount: currentSpec.levels.length,
-          provider: prefs.provider,
-          apiKey: prefs.apiKey.trim(),
-        }),
-      })
-      const result = await response.json()
-      if (!response.ok || !result.success) throw new Error(result.error || 'AI 背景故事生成失败。')
-      const story = result.data?.spec?.backgroundStory
-      if (typeof story !== 'string' || !story.trim()) throw new Error('没有收到有效的背景故事。')
-      const state = useGameStore.getState()
-      const currentData = state.getGameDataForTheme(selectedTheme)
-      if (!currentData.data) throw new Error('当前主题游戏数据不存在。')
-      state.setGameData({
-        ...currentData,
-        data: {
-          ...currentData.data,
-          spec: { ...currentData.data.spec, backgroundStory: story.trim() },
-        },
-      }, selectedTheme)
-      if (result.data.source === 'ai') message.success('AI 背景故事已生成并保存。')
-      else message.info('当前服务不可用，已保留可靠的本地背景故事。')
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : 'AI 背景故事生成失败。')
-    } finally {
-      setStoryLoading(false)
-    }
-  }
 
-  if (!data || !level || !spec) {
-    return (
-      <Card style={{ height: '100%' }}>
-        <Empty description="No playable game data">
-          <Button onClick={backToMenu}>Back to menu</Button>
-        </Empty>
-      </Card>
-    )
-  }
+  if (!data || !level || !spec) return <Card><Empty description="尚无可试玩的游戏数据"><Button onClick={backToMenu}>返回制作台</Button></Empty></Card>
 
   const player = playerRef.current
   const cameraX = player ? Math.max(0, Math.min(worldWidth - viewportWidth, player.x - viewportWidth * 0.42)) : 0
   const boss = enemiesRef.current.find((enemy) => enemy.isBoss)
   const remaining = enemiesRef.current.length
-  const levelCleared = remaining === 0
+  const levelCleared = Boolean(spec && narrativeEngine.exitReady(spec, storyProgress, remaining))
+  const storyTasks = spec && storyProgress ? narrativeEngine.objectives(spec, storyProgress) : []
+  const storyChapter = spec?.narrative?.chapters.find(chapter => chapter.levelId === levelSpec?.id)
   const playerNearExit = Boolean(player && intersects(player, {
     x: exitX - 54,
     y: exitY - 10,
@@ -1056,7 +1132,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         <Space wrap>
           <Title level={4} style={{ color: '#fff', margin: 0 }}>{spec.title}</Title>
           <Tag color="blue">Level {currentLevelIndex + 1}/{totalLevels}</Tag>
-          <Tag color={remaining ? 'red' : 'green'}>{remaining ? `${remaining} enemies` : 'Exit unlocked'}</Tag>
+          <Tag color={levelCleared ? 'green' : remaining ? 'red' : 'gold'}>{levelCleared ? '出口已开放' : remaining ? `${remaining} 名敌人 · 完成任务后开放出口` : '完成任务后开放出口'}</Tag>
           <Tag color="gold">Score {scoreRef.current}</Tag>
           {powerRef.current > 1 && <Tag color="purple">Power ×{powerRef.current.toFixed(2)}</Tag>}
         </Space>
@@ -1183,7 +1259,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
                 renderTick,
                 enemy.actionStartedAt,
                 enemy.actionUntil,
-                enemy.isBoss ? spec.boss.name : spec.enemies[0].name,
+                enemy.isBoss ? spec.boss.name : enemySpecForAsset(spec, enemyAsset).name,
                 { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${enemy.direction === 1 ? -1 : 1})`, filter: 'drop-shadow(0 5px 3px rgba(0,0,0,.55))' },
                 fallbackSprite(enemy.isBoss ? 'BOSS' : 'ENEMY', enemy.isBoss ? '#8e2145' : '#9b3a32', enemy.width),
                 enemy.vy < 0 || enemy.y < enemy.baseY ? 0 : 1,
@@ -1233,21 +1309,29 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           </div>
         </div>
 
+        {storyChapter?.points.filter(point => storyTasks.some(task => task.target === point.id && (task.available || task.complete))).map(point => {
+          const x = 120 + (exitX - 220) * point.position - cameraX
+          return <button key={point.id} className="narrative-world-point" style={{ left: x, top: groundTop - 85 }} aria-label={point.name} onClick={interactStory}>✦<small>{point.name} · E</small></button>
+        })}
+        {spec?.narrative && <div className="narrative-objectives" aria-label="当前关卡任务"><strong>{storyChapter?.title}</strong>{storyTasks.map(task => <div key={task.id} data-objective={task.id} data-complete={task.complete}>{task.complete ? '✓' : task.available ? '○' : '·'} {task.description} {task.count > 1 ? `${task.current}/${task.count}` : ''}</div>)}<Button size="small" onClick={() => { keysRef.current.clear(); storyBlockedRef.current = true; setStoryLogOpen(true) }}>剧情记录</Button><Button size="small" onClick={interactStory}>交互 E</Button></div>}
+        <NarrativeOverlay queue={storyQueue} history={storyProgress?.history || []} logOpen={storyLogOpen} onNext={() => setQueue(storyQueueRef.current.slice(1))} onSkip={() => setQueue([])} onClose={() => { setStoryLogOpen(false); storyBlockedRef.current = storyQueueRef.current.length > 0; keysRef.current.clear() }} />
         {banner && <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}><div style={{ padding: '14px 28px', color: '#fff', background: 'rgba(5,10,25,.82)', border: '2px solid #61dafb', fontSize: 24, fontWeight: 900, letterSpacing: 2 }}>{banner}</div></div>}
 
         {playerNearExit && (
           <div style={{ position: 'absolute', left: '50%', bottom: 92, transform: 'translateX(-50%)', zIndex: 14, padding: '8px 14px', borderRadius: 8, color: '#fff', background: levelCleared ? 'rgba(5,112,92,.92)' : 'rgba(120,35,45,.9)', border: `1px solid ${levelCleared ? '#66ffd0' : '#ff8792'}`, fontWeight: 700 }}>
-            {levelCleared ? '出口已开启：走入传送门进入下一关' : `出口锁定：还需击败 ${remaining} 个敌人`}
+            {levelCleared ? '出口已开启：走入传送门继续冒险' : `出口锁定：${storyTasks.find(task => !task.complete && task.target !== 'exit')?.description || `还需击败 ${remaining} 个敌人`}`}
           </div>
         )}
 
         {(mode === 'paused' || mode === 'dead' || mode === 'victory' || mode === 'transition') && (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(3,6,16,.68)', zIndex: 20 }}>
             <div style={{ textAlign: 'center', color: '#fff', padding: 28 }}>
-              <Title style={{ color: '#fff' }}>{mode === 'paused' ? 'Paused' : mode === 'dead' ? 'Game Over' : mode === 'victory' ? 'Victory!' : 'Level Clear'}</Title>
-              {mode === 'victory' && <Text style={{ color: '#ffe985', display: 'block', marginBottom: 18 }}>Score: {scoreRef.current} · Boss defeated · All levels cleared</Text>}
+              <Title style={{ color: '#fff' }}>{mode === 'paused' ? '游戏已暂停' : mode === 'dead' ? '主角倒下了' : mode === 'victory' ? '冒险完成' : '本关完成'}</Title>
+              {mode === 'victory' && <Text style={{ color: '#ffe985', display: 'block', marginBottom: 18 }}>得分：{scoreRef.current} · 所有关卡已完成</Text>}
+              {mode === 'dead' && <Button onClick={() => { if (spec && storyRef.current && level) { storyRef.current = narrativeEngine.begin(spec, storyRef.current, level.id, true); setStoryProgress(storyRef.current); setQueue(storyRef.current.history.filter(entry => entry.id === `${level.id}:arrival`)); } scoreRef.current = levelScoreRef.current; playerRef.current = null; restoredCampaignRef.current = null; initializeLevel() }}>重试本关</Button>}
               {mode === 'paused' && <Button type="primary" icon={<Play size={15} />} onClick={() => setMode('playing')}>Resume</Button>}
-              {(mode === 'dead' || mode === 'victory') && <Button type="primary" icon={<RotateCcw size={15} />} onClick={restartCampaign}>Restart campaign</Button>}
+              {(mode === 'dead' || mode === 'victory') && <Button type="primary" icon={<RotateCcw size={15} />} onClick={restartCampaign}>重新开始冒险</Button>}
+              {mode === 'victory' && spec.narrative && <Button style={{ marginLeft: 10 }} onClick={() => { keysRef.current.clear(); storyBlockedRef.current = true; setStoryLogOpen(true) }}>回看故事</Button>}
             </div>
           </div>
         )}
@@ -1289,7 +1373,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           <span>J melee</span>
           <span>K/F ranged</span>
           <span>ESC pause</span>
-          <span>Defeat every enemy to unlock the exit</span>
+          <span>{spec.narrative ? '完成本关任务后，进入出口继续冒险' : '击败所有敌人后，出口开放'}</span>
         </Space>
       </div>
     </Card>
@@ -1351,18 +1435,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
             <Text style={{ color: '#dce5f8' }}><Tag color="volcano">J</Tag>近战攻击</Text>
             <Text style={{ color: '#dce5f8' }}><Tag color="purple">K / F</Tag>远程攻击</Text>
             <Text style={{ color: '#dce5f8' }}><Tag>ESC</Tag>暂停或继续</Text>
-            <Text style={{ color: '#dce5f8' }}>击败当前关卡的全部敌人后，走入右侧发光传送门即可进入下一关。</Text>
+            <Text style={{ color: '#dce5f8' }}>完成当前关卡任务、解除敌人阻拦后，走入右侧传送门继续冒险；靠近线索标记按 E 交互。</Text>
           </Space>
         </section>
 
         <section>
-          <Title level={5} style={{ color: '#fff', marginTop: 0 }}>AI 世界背景故事</Title>
+          <Title level={5} style={{ color: '#fff', marginTop: 0 }}>冒险故事与剧情记录</Title>
           <Card size="small" style={{ background: '#121c33', borderColor: '#2b3b61' }}>
-            <Text style={{ color: '#dce5f8', whiteSpace: 'pre-wrap', lineHeight: 1.75 }}>{spec.backgroundStory}</Text>
+            <Text style={{ color: '#dce5f8', whiteSpace: 'pre-wrap', lineHeight: 1.75 }}>{spec.narrative?.opening || spec.backgroundStory}</Text>
           </Card>
-          <Button type="primary" loading={storyLoading} onClick={() => { void generateBackgroundStory() }} style={{ marginTop: 12 }}>
-            AI 重新生成背景故事
-          </Button>
+          <Button onClick={() => { setSettingsOpen(false); storyBlockedRef.current = true; setStoryLogOpen(true) }} style={{ marginTop: 12 }}>查看已发生的剧情</Button>
         </section>
       </Space>
     </Drawer>

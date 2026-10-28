@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import sharp from 'sharp'
-import { alignSpriteCells, inspectSpriteImage, processGeneratedImage } from './image-quality.server'
+import { alignSpriteCells, inspectSingleCharacterSprite, inspectSpriteImage, processGeneratedImage } from './image-quality.server'
 import { removeChromaGreenBackground } from './image-cutout'
 
 async function fixture(colors: string[], background = '#00ff00') {
@@ -57,5 +57,13 @@ describe('generated sprites use actual image pixels', () => {
     expect(check.width).toBe(1536)
     expect(check.height).toBe(512)
     expect(check.frames.every(frame => frame.borderCoverage === 0)).toBe(true)
+  })
+  it('rejects multiple figures inside one idle frame while accepting a single figure', async () => {
+    const body = await sharp({ create: { width: 80, height: 180, channels: 4, background: '#bb5522' } }).png().toBuffer()
+    const single = await sharp({ create: { width: 512, height: 512, channels: 4, background: '#00000000' } }).composite([{ input: body, left: 100, top: 170 }]).png().toBuffer()
+    const crowded = await sharp(single).composite([{ input: body, left: 330, top: 170 }]).png().toBuffer()
+    await expect(inspectSingleCharacterSprite(single)).resolves.toBeUndefined()
+    await expect(inspectSingleCharacterSprite(crowded)).rejects.toThrow(/多个角色/)
+    await expect(processGeneratedImage('data:image/png;base64,' + crowded.toString('base64'), { cutout: null, isolated: true, preserveCanvas: true, frameCount: 1, strictSingleCharacter: true })).rejects.toThrow(/多个角色/)
   })
 })

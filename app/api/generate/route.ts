@@ -47,11 +47,12 @@ async function processImageCutout(
   preserveCanvas = false,
   gridColumns?: number,
   gridRows = 1,
+  strictSingleCharacter = false,
 ): Promise<string> {
   const cutoutMode = getCutoutMode(providerId, type, model)
   return processGeneratedImage(imageUrl, {
     cutout: cutoutMode, isolated: type !== 'background' && type !== 'ground',
-    preserveCanvas, frameCount: gridColumns, gridRows,
+    preserveCanvas, frameCount: gridColumns, gridRows, strictSingleCharacter,
   })
 }
 
@@ -170,6 +171,7 @@ async function generatePlannedAsset(
         originalUrl, type, providerId, model, baseUrl, asset.kind === 'spriteSheet',
         animationPose ? frameCount : asset.kind === 'spriteSheet' ? 6 : undefined,
         animationPose ? 1 : asset.kind === 'spriteSheet' ? 6 : 1,
+        animationPose === 'idle' && ['hero', 'groundEnemy', 'boss'].includes(asset.category),
       )
       return processedUrl
     } catch (error) {

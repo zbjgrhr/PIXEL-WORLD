@@ -2,10 +2,10 @@ import type { AgentArtifacts, AgentRole } from '@/types'
 
 const ROLE_FIELDS: Record<AgentRole, string[]> = {
   director: ['title', 'playerFantasy', 'audience', 'pillars', 'explicitRequirements', 'constraints', 'levelCount'],
-  narrative: ['world', 'conflict', 'heroGoal', 'collectibleMeaning', 'bossRole', 'backgroundStory'],
+  narrative: ['world', 'conflict', 'heroGoal', 'collectibleMeaning', 'bossRole', 'backgroundStory', 'narrative'],
   mechanics: ['combatMode', 'hero', 'weapon', 'enemies', 'boss', 'collectible', 'difficultyCurve', 'rules'],
   artDirector: ['artDirection', 'palette', 'lighting', 'pixelScale', 'characterRules', 'backgroundRules', 'assetIsolationRules', 'animationRules'],
-  levelDesigner: ['levels', 'progressionNotes'],
+  levelDesigner: ['levels', 'progressionNotes', 'narrative'],
   integrator: [],
   consistencyCritic: ['issues'],
   engineQa: ['issues'],

@@ -15,11 +15,16 @@ export function buildGameDataFromSpec(spec: GameSpec): GameData {
   const globalUrl = (category: AssetCategory) => activeAsset(assets, category)?.url || ''
   const levels = spec.levels.map((level, levelIndex) => {
     const obstacleCategories: AssetCategory[] = ['normalObstacle', 'bounceObstacle', 'deathObstacle']
-    const enabledObstacles = obstacleCategories.filter((category) => activeAsset(assets, category, level.id))
-    const obstacleCount = Math.min(8, 3 + levelIndex)
+    // The Boss encounter already combines regular enemies and a durable target.
+    // Keep instant-death hazards out of that encounter; elsewhere place them
+    // after the enemy group instead of between their spawn points.
+    const enabledObstacles = obstacleCategories.filter((category) => activeAsset(assets, category, level.id) && !(level.hasBoss && category === 'deathObstacle'))
+    const obstacleCount = enabledObstacles.length ? Math.min(8, 3 + levelIndex) : 0
     const obstacles: ObstacleData[] = Array.from({ length: obstacleCount }, (_, index) => ({
       id: `${level.id}-obstacle-${index + 1}`,
-      x: 190 + index * Math.max(75, Math.floor(600 / Math.max(1, obstacleCount))),
+      x: enabledObstacles[index % Math.max(1, enabledObstacles.length)] === 'deathObstacle'
+        ? 810
+        : 190 + index * Math.max(75, Math.floor(600 / Math.max(1, obstacleCount))),
       y: 352,
       width: 48,
       height: 48,
@@ -44,7 +49,7 @@ export function buildGameDataFromSpec(spec: GameSpec): GameData {
         y: index % 2 ? 285 : 325,
         kind: 'collectible',
       })),
-      bossSpawn: level.hasBoss && activeAsset(assets, 'boss', level.id)
+      bossSpawn: level.hasBoss
         ? { id: `${level.id}-boss`, x: 780, y: 310, kind: activeAsset(assets, 'boss', level.id)?.id || 'boss' }
         : undefined,
     }

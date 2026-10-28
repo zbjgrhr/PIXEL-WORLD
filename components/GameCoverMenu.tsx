@@ -104,7 +104,7 @@ export default function GameCoverMenu({
 
       <div className="game-cover-story">
         <span>STORY</span>
-        <p>{spec?.backgroundStory || 'Your adventure begins beyond the horizon.'}</p>
+        <p>{spec?.narrative?.opening || spec?.backgroundStory || '你的冒险，即将在前方展开。'}</p>
       </div>
 
       <Modal

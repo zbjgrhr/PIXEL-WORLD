@@ -47,7 +47,12 @@ async function requestPublicHttps(url: URL, body?: string, apiKey?: string, maxB
   return new Promise((resolve, reject) => {
     const req = httpsRequest(url, {
       method: body === undefined ? 'GET' : 'POST',
-      lookup: (_host, _options, callback) => callback(null, pinnedAddress, 4),
+      lookup: (_host, options, callback) => {
+        // Node's automatic family selection asks for all addresses. Preserve
+        // the validated pin while honoring the DNS callback's requested shape.
+        if (options.all) callback(null, [{ address: pinnedAddress, family: 4 }])
+        else callback(null, pinnedAddress, 4)
+      },
       timeout: timeoutMs,
       headers: {
         ...(body === undefined ? {} : { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }),
@@ -98,6 +103,44 @@ export async function customJsonRequest(baseUrl: string, suffix: '/chat/completi
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('not object')
     return value as Record<string, unknown>
   } catch { throw new CustomEndpointError(502, '接口没有返回兼容的 JSON 数据。') }
+}
+
+/** Assemble a streamed OpenAI-compatible chat response behind the same HTTPS boundary. */
+export async function customChatStream(baseUrl: string, apiKey: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const endpoint = parsePublicHttps(`${validateCustomBaseUrl(baseUrl)}/chat/completions`)
+  const body = JSON.stringify({ ...payload, stream: true, stream_options: { include_usage: true } })
+  if (Buffer.byteLength(body) > 1024 * 1024) throw new CustomEndpointError(400, '发送给模型的内容过大。')
+  const response = await requestPublicHttps(endpoint, body, apiKey, 2 * 1024 * 1024)
+  if (response.status < 200 || response.status >= 300) {
+    const reason = response.status === 401 || response.status === 403 ? '认证失败，请检查 API Key 和模型权限。'
+      : response.status === 404 ? '接口路径不存在，请检查 API 根地址是否正确。'
+        : response.status === 400 || response.status === 422 ? '请求被拒绝，请检查模型 ID 与 OpenAI 风格接口兼容性。'
+          : response.status === 429 ? '调用频率或额度已达到服务商限制。'
+            : '服务商未成功返回结果，请检查其服务状态。'
+    throw new CustomEndpointError(response.status, `自定义接口调用失败（HTTP ${response.status}）：${reason}`)
+  }
+  if (response.contentType.toLowerCase().includes('application/json')) {
+    try { return JSON.parse(response.bytes.toString('utf8')) as Record<string, unknown> }
+    catch { throw new CustomEndpointError(502, '接口没有返回兼容的 JSON 数据。') }
+  }
+  if (!response.contentType.toLowerCase().includes('text/event-stream')) throw new CustomEndpointError(502, '文字接口没有返回兼容的流式数据。')
+  let content = '', finishReason: string | null = null, usage: Record<string, unknown> | undefined, done = false
+  for (const line of response.bytes.toString('utf8').split(/\r?\n/)) {
+    if (!line.startsWith('data:')) continue
+    const data = line.slice(5).trim()
+    if (data === '[DONE]') { done = true; break }
+    let part: Record<string, unknown>
+    try { part = JSON.parse(data) as Record<string, unknown> }
+    catch { throw new CustomEndpointError(502, '文字模型的流式回答包含无效数据。') }
+    if (part.error) throw new CustomEndpointError(502, '文字模型在回答过程中中断。')
+    if (part.usage && typeof part.usage === 'object') usage = part.usage as Record<string, unknown>
+    const choice = Array.isArray(part.choices) ? part.choices[0] as Record<string, unknown> | undefined : undefined
+    const delta = choice?.delta && typeof choice.delta === 'object' ? choice.delta as Record<string, unknown> : undefined
+    if (typeof delta?.content === 'string') content += delta.content
+    if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason
+  }
+  if (!done || !finishReason) throw new CustomEndpointError(502, '文字模型的流式回答未完整结束。')
+  return { choices: [{ finish_reason: finishReason, message: { content } }], ...(usage ? { usage } : {}) }
 }
 
 async function imageDataUrl(bytes: Buffer): Promise<string> {

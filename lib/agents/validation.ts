@@ -1,3 +1,4 @@
+import { narrativeProblems } from '@/lib/narrative'
 import { animationClipPoses, normalizeAnimationSpec } from '@/lib/asset-catalog'
 import type { AgentIssue, AgentRole, AssetCategory, GameSpec } from '@/types'
 
@@ -79,6 +80,7 @@ export function inspectGameSpec(spec: GameSpec, source: AgentRole = 'engineQa'):
   if (spec.weapon.cooldownMs !== 420) {
     issues.push(issue(source, 'warning', 'weapon.cooldownMs', `武器冷却为 ${spec.weapon.cooldownMs}ms，与当前引擎标准420ms不一致。`, '统一设置为420ms，避免提示词、数值和运行时反馈分裂。'))
   }
+  if (spec.narrative) issues.push(...narrativeProblems(spec).map(item => issue(source, item.severity || 'blocking', item.path, item.message, '在故事与任务设定中修正此项，再重新审核。')))
   return dedupeIssues(issues)
 }
 

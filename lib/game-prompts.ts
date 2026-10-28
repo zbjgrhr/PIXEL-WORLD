@@ -58,7 +58,7 @@ export function getPositiveTemplate(
   const isolated = `${COMMON_STYLE}, ${ISOLATED_BASE}, ${isolationBackground(providerId, model)}`
   switch (type) {
     case 'background':
-      return `${COMMON_STYLE}, ${COLOR_CONTRACT}, wide 16:9 parallax-ready environment background, sharp pixel detail from foreground to horizon, clear traversal corridor, colorful layered parallax depth, environment only`
+      return `${COMMON_STYLE}, ${COLOR_CONTRACT}, wide 16:9 parallax-ready orthographic side-view backdrop, sharp pixel detail in distant scenery, clear middle distance behind the player, colorful layered parallax depth, environment only; the playable ground is rendered as a separate layer`
     case 'ground':
       return `${COMMON_STYLE}, seamless tileable side-view ground material texture, texture fills the entire canvas edge-to-edge, one material family only, no empty area`
     case 'character':
@@ -155,11 +155,20 @@ export function buildPlannedAssetPrompt(
   model?: string,
 ): string {
   const sharedStyle = style(spec)
+  // Planning text can describe a full sheet even when this request needs one
+  // isolated image. Keep visual identity without contradictory frame counts.
   const requestedAsset = cleanPromptFragment(asset.prompt)
+    .replace(/\bAll\s+\d+\s+animation\s+states?\s*\([^)]*\)\s*show[^.]*\./gi, '')
+    .replace(/\b(?:sprite\s*sheet|spritesheet|animation\s*sheet)\b/gi, 'character design')
+    .replace(/\b(?:wide readable traversal lane|clear traversal corridor)\b/gi, 'clear middle-distance scenery behind the player')
+    .trim()
   if (asset.kind === 'spriteSheet') {
     return `${COMMON_STYLE}. ${COLOR_CONTRACT}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. This asset only: ${requestedAsset}. Create exactly one neutral standing frame on ${isolationBackground(providerId, model)}. Show the complete character from head to feet at a readable side-view game scale, with generous safe margin and a stable ground baseline. No portrait crop, close-up, missing body part, panel border, text, scenery, separate prop, or extra character.`
   }
   const base = getPositiveTemplate(generationType, providerId, model)
+  if (asset.category === 'levelBackground') {
+    return `${base}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. Distant environment only: ${requestedAsset}. This is a backdrop layer, not a collision surface. Put story landmarks such as bridges and towers far behind the action plane. Keep the lower quarter as uninterrupted distant scenery so a separate horizontal ground layer can cover it. No nearby walkable deck, foreground bridge, diagonal path, floor, platform, character, enemy, pickup, UI or text.`
+  }
   return `${base}. ${COLOR_CONTRACT}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. This asset only: ${requestedAsset}. Generate only this one category and never merge it with a character, scene, weapon, creature, platform, obstacle, projectile, pickup, or effect from another category.`
 }
 
@@ -175,7 +184,7 @@ function animationActionInstruction(pose: AnimationClipPose, asset: AssetDefinit
     : undefined
   switch (pose) {
     case 'idle': return 'One neutral standing pose. The character is balanced, relaxed, completely motionless, and not attacking.'
-    case 'walk': return 'Three visibly different walk-cycle poses. Frame 1: left foot/leading limbs forward, right foot/trailing limbs back. Frame 2: feet/limbs pass directly beneath the body, one knee raised. Frame 3: right foot/previous trailing limbs forward, left foot/previous leading limbs back. Counter-swing the arms. Do not copy the same stride three times. Keep the torso identity stable.'
+    case 'walk': return 'Three visibly distinct side-view walking poses with exaggerated but natural movement. Frame 1: a long contact stride, front boot planted far ahead of the torso and rear boot stretched behind. Frame 2: a high passing pose, one knee clearly lifted in front, rear heel raised, torso slightly higher. Frame 3: the opposite contact stride, previously rear boot now clearly forward and the first boot behind, arms swung to their opposite positions, torso slightly lower. Show separated leg silhouettes and different arm positions in all three cells while keeping the same face, coat, bag, staff, proportions and colors. Do not repeat or mirror an unchanged full-body image.'
     case 'jump': return 'Two ordered jump poses: upward takeoff/ascent, then controlled descent with legs prepared to land.'
     case 'meleeAttack': return asset.category === 'hero'
       ? `Three ordered melee poses: wind-up, strike, recovery. In every frame the character visibly grips and uses the same melee weapon described as: ${melee}. The weapon must connect naturally to the hands.`
@@ -198,10 +207,13 @@ export function buildAnimationClipPrompt(
 ): string {
   const clip = animationClipDefaults(pose)
   const requestedAsset = cleanPromptFragment(asset.prompt)
+    .replace(/\bAll\s+\d+\s+animation\s+states?\s*\([^)]*\)\s*show[^.]*\./gi, '')
+    .replace(/\b(?:sprite\s*sheet|spritesheet|animation\s*sheet)\b/gi, 'character design')
+    .trim()
   const frameLayout = clip.frameCount === 1
     ? 'Create exactly one frame on one canvas.'
     : `Create one horizontal animation strip containing exactly ${clip.frameCount} equal-width frames in one row, ordered from left to right.`
-  return `ANIMATION ASSET, not an illustration or scene. ${frameLayout} Character identity: ${requestedAsset}. Action: ${animationActionInstruction(pose, asset, spec)} Background: ${isolationBackground(providerId, model)}. Same complete head-to-feet character in every cell, facing right, same scale, costume and baseline, empty margin on every side. The reference fixes appearance only: re-pose the limbs for each requested action, never duplicate an unchanged reference pose. No scene, floor, grass below the feet, text, grid lines, panels or unrelated creatures. ${COMMON_STYLE}. ${ORIGINALITY}. Shared palette and rendering: ${style(spec)}.`
+  return `ANIMATION ASSET, not an illustration or scene. ${frameLayout} Character identity only: ${requestedAsset}. Action: ${animationActionInstruction(pose, asset, spec)} Background: ${isolationBackground(providerId, model)}. Draw only the requested action and exactly the requested frame count; ignore any frame-count or all-actions wording in the identity description. Same complete head-to-feet character in every cell, facing right, same scale, costume and baseline, empty margin on every side. The reference fixes appearance only: re-pose the limbs for each requested action, never duplicate an unchanged reference pose. No scene, floor, grass below the feet, sky backdrop, atmospheric graphics, text, grid lines, panels or unrelated creatures. ${COMMON_STYLE}. ${ORIGINALITY}. Shared palette and rendering: ${style(spec)}.`
 }
 
 export function buildModerationSafeAnimationClipPrompt(

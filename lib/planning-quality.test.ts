@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createFallbackGameSpec, normalizeGameSpec, serializeGameSpec } from './game-spec'
+import { createFallbackGameSpec, normalizeGameSpec, preserveExplicitPromptFields, serializeGameSpec } from './game-spec'
 import { deterministicAgentResponse, prepareAgentRequest } from './agents/execution'
 import { replaceAnimationClip } from './asset-catalog'
 import { assetMetadataForReview } from './asset-db'
@@ -9,6 +9,17 @@ import type { Theme } from '@/types'
 import type { AgentExecuteRequest } from '@/types'
 
 describe('planning improvements reach image production', () => {
+  it('preserves short Chinese field labels shown in the writing help through model enrichment', () => {
+    const prompt = '游戏标题：灯塔救援\n主角：戴蓝披风的地图师\n地面敌人：铜壳螃蟹\n整体像素风格：明亮像素风'
+    const base = createFallbackGameSpec(prompt, '灯塔救援', 1)
+    expect(base.hero.appearance).toBe('戴蓝披风的地图师')
+    expect(base.enemies[0].appearance).toBe('铜壳螃蟹')
+    const changed = normalizeGameSpec({ hero: { appearance: 'a different hero' }, enemies: [{ appearance: 'a different enemy' }] }, base)
+    const kept = preserveExplicitPromptFields(changed, base, prompt)
+    expect(kept.hero.appearance).toBe('戴蓝披风的地图师')
+    expect(kept.assets.find(asset => asset.category === 'hero')?.prompt).toBe('戴蓝披风的地图师')
+    expect(kept.enemies[0].appearance).toBe('铜壳螃蟹')
+  })
   it('updates generic asset prompts from improved hero, boss and level fields', () => {
     const base = createFallbackGameSpec('游戏标题：灯塔救援', '灯塔救援', 1)
     const next = normalizeGameSpec({ hero: { appearance: 'A blue-caped mapmaker' }, boss: { appearance: 'A broken brass lighthouse keeper' }, levels: [{ ...base.levels[0], environment: 'A stormy floating lighthouse' }] }, base)

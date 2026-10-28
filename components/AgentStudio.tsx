@@ -5,10 +5,11 @@ import { createPortal } from 'react-dom'
 import { Alert, Button, Card, Collapse, Input, Progress, Select, Space, Tag, Typography, message } from 'antd'
 import { CheckCircle2, CircleStop, FlaskConical, Pause, Play, RotateCcw, ShieldCheck, Sparkles } from 'lucide-react'
 import { loadAgentApiKey, loadAgentApiPrefs, saveAgentApiPrefs } from '@/lib/agent-api-prefs'
-import { AGENT_PROVIDERS, AGENT_ROLE_LABELS, LOCAL_AGENT_PROVIDERS, getAgentProvider, getDefaultAgentModel, isLocalAgentProvider, localProviderConfig } from '@/lib/agents/config'
+import { AGENT_PROVIDERS, AGENT_ROLE_LABELS, LOCAL_AGENT_PROVIDERS, PROFESSIONAL_AGENT_ROLES, SYSTEM_AGENT_ROLES, getAgentProvider, getDefaultAgentModel, isLocalAgentProvider, localProviderConfig } from '@/lib/agents/config'
 import { discoverLocalModels, safeLocalBaseUrl, testLocalAgentConnection } from '@/lib/agents/local-client'
 import { inspectWebLlm, prepareWebLlm } from '@/lib/agents/webllm-client'
 import { countBlockingIssues } from '@/lib/agents/validation'
+import { latestPlanningIssues } from '@/lib/agents/review-status'
 import { useAgentCluster } from '@/hooks/useAgentCluster'
 import type { AgentExecuteRequest, AgentExecuteResponse, AgentProviderId, AgentTaskStatus, GameSpec } from '@/types'
 import ApiPlatformGuide from './ui/ApiPlatformGuide'
@@ -19,6 +20,11 @@ import CustomConnectionFields from './ui/CustomConnectionFields'
 import AiProviderChoice from './ui/AiProviderChoice'
 import ReadyAgentGuide, { READY_AGENT_VISUALS } from './ui/ReadyAgentGuide'
 import StageHeading from './ui/StageHeading'
+import GameSpecSummary from './ui/GameSpecSummary'
+import NarrativeEditor, { type RefinementScope } from './ui/NarrativeEditor'
+import WorkflowNotice, { type WorkflowFeedback } from './ui/WorkflowNotice'
+import { pendingNarrativeSuggestions, sameSpecExceptSuggestions } from '@/lib/narrative-suggestions'
+import { currentRunSpec, DRAFT_CHANGE_LABELS } from '@/lib/agents/draft-revision'
 
 const { Paragraph, Text, Title } = Typography
 
@@ -39,6 +45,12 @@ interface AgentStudioProps {
   onTextConnectionChange?: (connection: { provider?: AgentProviderId; model?: string; apiKey: string; baseUrl?: string }) => void
   reviewTarget?: HTMLDivElement | null
   inputRevision?: number
+  onDraftChange?: (spec: GameSpec, suggestionsOnly?: boolean) => void
+  onRefine?: (scope: RefinementScope) => void
+  completionNotice?: React.ReactNode
+  onEditStory?: () => void
+  onContinueAssets?: () => void
+  onPlanningStateChange?: (state: { label: string; approved: boolean }) => void
 }
 
 const STATUS_COLOR: Record<AgentTaskStatus, string> = {
@@ -47,7 +59,7 @@ const STATUS_COLOR: Record<AgentTaskStatus, string> = {
 
 const RUN_LABELS = {
   draft: '等待启动', planning: '策划中', reviewing: '交叉评审中', awaiting_approval: '等待确认', producing: '已批准，可生成素材',
-  quality_check: '生成后检查中', ready: '可以发布', paused: '已暂停', failed: '需要处理', cancelled: '已取消',
+  quality_check: '生成后检查中', ready: '试玩记录已齐，待人工验收', paused: '已暂停', failed: '需要处理', cancelled: '已取消',
 } as const
 
 function generatedAssetCount(spec?: GameSpec | null): number {
@@ -70,7 +82,7 @@ function artifactPreview(output?: Record<string, unknown>): string {
   return json.length > 20000 ? `${json.slice(0, 20000)}\n…（内容过长，已在界面截断）` : json
 }
 
-export default function AgentStudio({ embedded = false, projectId, sourcePrompt, projectName, briefReady, levelCount, baseSpec, onOptimizePrompt, isOptimizing = false, onSpecReady, onApproved, onApprovedRestored, onBusyChange, onTextConnectionChange, reviewTarget, inputRevision = 0 }: AgentStudioProps) {
+export default function AgentStudio({ embedded = false, projectId, sourcePrompt, projectName, briefReady, levelCount, baseSpec, onOptimizePrompt, isOptimizing = false, onSpecReady, onApproved, onApprovedRestored, onBusyChange, onTextConnectionChange, reviewTarget, inputRevision = 0, onDraftChange, onRefine, completionNotice, onEditStory, onContinueAssets, onPlanningStateChange }: AgentStudioProps) {
   const [provider, setProvider] = useState<AgentProviderId>('openrouter')
   const [accessMode, setAccessMode] = useState<AiAccessMode>('ready')
   const [readyProvider, setReadyProvider] = useState<AgentProviderId | null>(null)
@@ -79,6 +91,9 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
   const [model, setModel] = useState(getDefaultAgentModel('openrouter'))
   const [apiKey, setApiKey] = useState('')
   const [testing, setTesting] = useState(false)
+  const [actionFeedback, setActionFeedback] = useState<WorkflowFeedback | null>(null)
+  const reviewInFlight = useRef(false)
+  const [isCheckingDraft, setIsCheckingDraft] = useState(false)
   const [localModels, setLocalModels] = useState<Array<{ value: string; label: string }>>([])
   const [baseUrl, setBaseUrl] = useState('http://127.0.0.1:11434/v1')
   const [localPassword, setLocalPassword] = useState('')
@@ -90,10 +105,10 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
   const seenInputRevision = useRef(inputRevision)
 
   useEffect(() => {
-    if (!cluster.run || seenInputRevision.current === inputRevision) return
+    if (seenInputRevision.current === inputRevision) return
     seenInputRevision.current = inputRevision
-    if (!['draft', 'cancelled'].includes(cluster.run.status)) void cluster.reset()
-  }, [inputRevision, cluster.run, cluster.reset])
+    if (cluster.run) void cluster.reconcileInputs().catch(error => setActionFeedback({ tone: 'error', title: '修改尚未保存到策划记录', description: '当前草案仍在页面中，请重试检查；此时不会自动调用模型。', detail: error instanceof Error ? error.message : '保存失败。' }))
+  }, [inputRevision, cluster.run, cluster.reconcileInputs])
 
   useEffect(() => {
     const prefs = loadAgentApiPrefs()
@@ -134,18 +149,15 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
   const tasks = cluster.run?.tasks || []
   const completed = tasks.filter((task) => task.status === 'completed' || task.status === 'needs-review').length
   const progress = tasks.length ? Math.round(completed / tasks.length * 100) : 0
-  const totalTokens = tasks.reduce((sum, task) => sum + (task.usage?.totalTokens || 0), 0)
+  const totalTokens = [...tasks, ...(cluster.run?.archivedTasks || [])].reduce((sum, task) => sum + (task.usage?.totalTokens || 0), 0)
   const issues = useMemo(() => {
     const quality = tasks.filter((task) => task.phase === 'quality')
     if (quality.length) return quality.flatMap((task) => task.issues || [])
-    const current = tasks.filter((task) => task.round === cluster.run?.currentRound)
-    const final = current.find((task) => task.role === 'assetCoordinator' && task.status === 'completed')
-      || current.find((task) => task.role === 'revision' && (task.status === 'completed' || task.status === 'needs-review'))
-    return final ? final.issues || [] : current.filter((task) => task.role === 'consistencyCritic' || task.role === 'engineQa').flatMap((task) => task.issues || [])
+    return cluster.run ? latestPlanningIssues(cluster.run) : []
   }, [cluster.run?.currentRound, tasks])
   const blocking = countBlockingIssues(issues)
-  const locked = Boolean(cluster.run && !['draft', 'cancelled'].includes(cluster.run.status))
-  const busy = cluster.restoring || Boolean(cluster.run && (
+  const locked = Boolean(cluster.run && cluster.run.reviewMode !== 'local-draft' && !['draft', 'cancelled'].includes(cluster.run.status))
+  const busy = cluster.restoring || cluster.approving || Boolean(cluster.run && (
     ['planning', 'reviewing', 'quality_check'].includes(cluster.run.status)
     || cluster.run.tasks.some((task) => task.status === 'running')
   ))
@@ -163,8 +175,14 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
     if (lock.baseUrl) setBaseUrl(lock.baseUrl)
     if (isLocalAgentProvider(lock.provider)) setLocalModels([{ value: lock.model, label: lock.model }])
   }, [locked, cluster.run?.modelLock.provider, cluster.run?.modelLock.model, cluster.run?.modelLock.baseUrl])
+  useEffect(() => {
+    onPlanningStateChange?.({ label: cluster.run ? RUN_LABELS[cluster.run.status] : baseSpec ? '草案待检查' : '尚未补全', approved: Boolean(cluster.run?.approved && cluster.run.sourcePrompt === sourcePrompt && cluster.run.levelCount === levelCount) })
+  }, [cluster.run?.status, cluster.run?.approved, cluster.run?.sourcePrompt, cluster.run?.levelCount, sourcePrompt, levelCount, Boolean(baseSpec), onPlanningStateChange])
   const hasImages = generatedAssetCount(baseSpec) > 0
-  const plannedSpec = cluster.run?.artifacts.productionSpec || cluster.run?.artifacts.revisedSpec || cluster.run?.artifacts.mergedSpec
+  const plannedSpec = !busy && baseSpec ? baseSpec : cluster.run ? currentRunSpec(cluster.run) : undefined
+  const pendingRevision = cluster.run?.pendingRevision
+  const inputChanged = seenInputRevision.current !== inputRevision
+  const pendingSuggestions = pendingNarrativeSuggestions(plannedSpec || baseSpec).length
   const plannedJobs = estimatedImageJobs(plannedSpec)
 
   const changeProvider = (value: AgentProviderId) => {
@@ -209,6 +227,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
       setOwnProvider(value)
       localStorage.setItem('pixel-world-agent-own-choice', value)
     }
+    setActionFeedback(null)
     changeProvider(value)
   }
 
@@ -222,6 +241,10 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
   const legacyManagedRun = cluster.run?.modelLock.provider === 'managed'
   const activeKey = provider === 'custom' ? customAgent.apiKey.trim() : isLocalAgentProvider(provider) ? localPassword : apiKey.trim()
   const activeBaseUrl = provider === 'custom' ? customAgent.baseUrl.trim() : isLocalAgentProvider(provider) && provider !== 'webllm' ? safeLocalBaseUrl(baseUrl) : undefined
+  const connectionIssue = !selected ? '内置规则无需测试；选择文字模型后才需要测试连接。'
+    : provider === 'custom' ? customConnectionError(customAgent)
+      : !model.trim() ? '请先检查本机服务或浏览器，再选择模型。'
+        : !isLocalAgentProvider(provider) && !activeKey ? '请先填写自己的文字 API Key。' : null
 
   const testAgentApi = async () => {
     if (!selected) return void message.error('请先选择一个可用的文字 Agent 工具。')
@@ -229,6 +252,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
     if (!isLocalAgentProvider(provider) && !activeKey) return void message.error('请先填写文字 Agent API Key。')
     if (!(provider === 'custom' ? customAgent.model : model).trim()) return void message.error('请先检测并选择模型。')
     setTesting(true)
+    setActionFeedback(null)
     try {
       if (!isLocalAgentProvider(provider) && provider !== 'custom') {
         const body: AgentExecuteRequest = {
@@ -236,7 +260,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
           provider, model, apiKey: apiKey.trim(), sourcePrompt: 'Create a minimal original pixel platform game test brief.',
           projectName: 'Agent API Test', levelCount: 1, artifacts: {},
         }
-        const response = await fetch('/api/agents/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        const response = await fetch('/api/agents/execute', { method: 'POST', signal: AbortSignal.timeout(55_000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         const result = await response.json().catch(() => null) as AgentExecuteResponse | null
         if (!response.ok || !result?.success) throw new Error(result?.error || `HTTP ${response.status}`)
         message.success(`Agent API 可用，锁定模型：${model}`)
@@ -254,13 +278,13 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
         provider, model: customAgent.model.trim(), apiKey: activeKey, baseUrl: activeBaseUrl,
         sourcePrompt: 'Create a minimal original pixel platform game test brief.', projectName: 'Agent API Test', levelCount: 1, artifacts: {},
       }
-      const response = await fetch('/api/agents/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      const response = await fetch('/api/agents/execute', { method: 'POST', signal: AbortSignal.timeout(55_000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const result = await response.json().catch(() => null) as AgentExecuteResponse | null
       if (!response.ok || !result?.success) throw new Error(result?.error || `HTTP ${response.status}`)
       message.success(`自定义文字服务可用，锁定模型：${customAgent.model.trim()}`)
     } catch (error) {
       if (isLocalAgentProvider(provider)) setLocalCheck({ state: 'failed', text: error instanceof Error ? error.message : '本机文字模型测试失败。' })
-      message.error(error instanceof Error ? error.message : 'Agent API 测试失败。')
+      setActionFeedback({ tone: 'error', title: '文字模型测试未通过', description: '请检查模型配置。也可以先用内置规则生成草案，不需要等待模型恢复。', detail: error instanceof Error ? error.message : 'Agent API 测试失败。' })
     } finally {
       setTesting(false)
     }
@@ -335,6 +359,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
     const finished = await cluster.start(modelLock, activeKey, baseSpec)
     if (isLocalAgentProvider(provider) && finished.status === 'failed') {
       await cluster.reviewLocalDraft(baseSpec, modelLock)
+      setActionFeedback({ tone: 'warning', title: '本机模型未完成完整策划', description: '已检查现有草案，你可以在中栏审核后继续制作素材。', detail: finished.error || finished.tasks.find((task) => task.error)?.error })
       message.warning('本机模型无法完成完整 Agent 评审，已切换为可审核的本地草案。')
     }
   }
@@ -344,8 +369,26 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
     try {
       if (legacyManagedRun) throw new Error('这个历史运行使用已移除的站点云端服务；请新建运行并选择文字工具。')
       await action()
-    } catch (error) { message.error(error instanceof Error ? error.message : 'Agent 操作失败。') }
+    } catch (error) { setActionFeedback({ tone: 'error', title: '策划暂时无法继续', description: '可以重试失败步骤，或使用现有草案进入人工审核。', detail: error instanceof Error ? error.message : 'Agent 操作失败。' }) }
   }
+
+  const checkDraft = async () => {
+    if (!baseSpec || busy || isOptimizing || reviewInFlight.current) return
+    reviewInFlight.current = true
+    setIsCheckingDraft(true)
+    setActionFeedback(null)
+    try {
+      // This lock is only a record: local-draft reviews never call a model.
+      await cluster.reviewLocalDraft(baseSpec, { provider: selected ? provider : 'custom', model: selected ? model || customAgent.model : '内置规则（未调用文字模型）', baseUrl: activeBaseUrl })
+    } catch (error) {
+      setActionFeedback({ tone: 'error', title: '草案检查未完成', description: '当前草案已保留，可以重试检查。', detail: error instanceof Error ? error.message : '检查失败。' })
+    } finally {
+      reviewInFlight.current = false
+      setIsCheckingDraft(false)
+    }
+  }
+  const sourceLabel = !selected ? '内置规则整理：无需配置' : provider === 'webllm' ? '浏览器 AI：首次需要下载模型' : isLocalAgentProvider(provider) ? '本机 AI：需要安装并启动' : '使用我的文字 API：按服务商规则计费'
+  const runActive = Boolean(cluster.run && !['draft', 'failed', 'cancelled'].includes(cluster.run.status))
 
   return <Card
     size="small"
@@ -354,20 +397,17 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
     extra={!embedded && cluster.run && <Tag color={cluster.run.status === 'ready' ? 'success' : cluster.run.status === 'failed' ? 'error' : 'blue'}>{RUN_LABELS[cluster.run.status]}</Tag>}
   >
     {embedded && cluster.run && <div className="agent-embedded-status"><span>当前策划进度</span><Tag color={cluster.run.status === 'ready' ? 'success' : cluster.run.status === 'failed' ? 'error' : 'blue'}>{RUN_LABELS[cluster.run.status]}</Tag></div>}
-    <Alert
-      type="info"
-      showIcon
-      message="所有文字 Agent 在本次运行中共用一个锁定模型；所有图片仍使用素材区锁定的图片模型。生图前必须由你批准。"
-      style={{ marginBottom: 12 }}
-    />
     {legacyManagedRun && <div className="ai-ready-empty" role="status"><strong>历史云端运行只供查看</strong><span>站点体验已结束。要继续策划，请新建运行并选择本机工具或自己的 AI 服务。</span></div>}
     <Space direction="vertical" size={10} style={{ width: '100%' }}>
+      <div className="workflow-source-summary"><strong>{sourceLabel}</strong><span>{selected ? `${provider === 'custom' ? customAgent.displayName || '手动接入' : isLocalAgentProvider(provider) ? localProviderConfig(provider).label : getAgentProvider(provider).label} · ${provider === 'custom' ? customAgent.model || '尚未填写模型' : model || '尚未选择模型'}` : '按你的故事生成完整草案；不会调用文字 API。'}</span></div>
+      <Collapse size="small" items={[{ key: 'text-settings', label: '选择文字来源与模型（可选）', children: <Space direction="vertical" size={10} style={{ width: '100%' }}>
       <AiAccessTabs value={accessMode} onChange={changeAccessMode} kind="agent" disabled={locked} />
       <Space direction="vertical" size={10} style={{ width: '100%' }}>
-        <Select<AgentProviderId>
-          value={selected ? provider : undefined}
+        <Select<AgentProviderId | 'builtin'>
+          aria-label="文字来源"
+          value={selected ? provider : 'builtin'}
           disabled={locked}
-          onChange={selectProvider}
+          onChange={(value) => { if (value === 'builtin') { setReadyProvider(null); localStorage.removeItem('pixel-world-agent-ready-choice'); localStorage.removeItem('pixel-local-provider'); setActionFeedback(null) } else selectProvider(value) }}
           placeholder={accessMode === 'ready' ? '选择可用工具' : '选择服务商'}
           style={{ width: '100%' }}
           options={accessMode === 'own' ? [...AGENT_PROVIDERS.map((item) => {
@@ -376,7 +416,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
               value: item.id,
               label: <AiProviderChoice name={item.label} note={guide.strengths[0]} color={guide.accent} />,
             }
-          }), { value: 'custom' as AgentProviderId, label: <AiProviderChoice name="手动接入其他服务" note="自定义接口" color="#317d70" /> }] : LOCAL_AGENT_PROVIDERS.map((item) => ({ value: item.id as AgentProviderId, label: <AiProviderChoice name={item.label} note={READY_AGENT_VISUALS[item.id].note} color={READY_AGENT_VISUALS[item.id].color} /> }))}
+          }), { value: 'custom' as AgentProviderId, label: <AiProviderChoice name="手动接入其他服务" note="自定义接口" color="#317d70" /> }] : [{ value: 'builtin', label: <AiProviderChoice name="内置规则整理" note="无需配置" color="#338a70" /> }, ...LOCAL_AGENT_PROVIDERS.map((item) => ({ value: item.id as AgentProviderId, label: <AiProviderChoice name={item.label} note={READY_AGENT_VISUALS[item.id].note} color={READY_AGENT_VISUALS[item.id].color} /> }))]}
         />
         {selected && provider !== 'custom' && <Select
           value={model || undefined}
@@ -404,13 +444,13 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
         />}
       </Space>
 
-      {accessMode === 'ready' && !readyProvider && <div className="ai-ready-empty" role="status"><strong>先选一个文字 Agent 工具</strong><span>选择后查看安装与测试步骤；本机工具需下载模型，WebLLM 在浏览器下载模型。</span></div>}
+      {accessMode === 'ready' && !readyProvider && <div className="ai-ready-empty" role="status"><strong>当前使用内置规则整理</strong><span>可以直接补全草案。想让 AI 补充创意，再选择本机工具、浏览器模型或自己的 API。</span></div>}
 
       {selected && provider === 'custom' && <CustomConnectionFields kind="agent" value={customAgent} onChange={changeCustomAgent} disabled={locked} />}
       {selected && isLocalAgentProvider(provider) && <>
         <Space wrap style={{ width: '100%' }}>
-          {provider !== 'webllm' && <Input value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); localStorage.setItem(`pixel-local-url-${provider}`, event.target.value) }} placeholder="本地 API 地址" style={{ minWidth: 260, flex: 1 }} />}
-          {provider !== 'webllm' && <Input.Password value={localPassword} onChange={(event) => setLocalPassword(event.target.value)} placeholder={provider === 'jan' ? 'Jan 本地访问密码（仅当前页面）' : '本地服务密码（如有，仅当前页面）'} style={{ minWidth: 240 }} />}
+          {provider !== 'webllm' && <Input value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); localStorage.setItem(`pixel-local-url-${provider}`, event.target.value) }} placeholder="本地 API 地址" style={{ minWidth: 0, width: '100%' }} />}
+          {provider !== 'webllm' && <Input.Password value={localPassword} onChange={(event) => setLocalPassword(event.target.value)} placeholder={provider === 'jan' ? 'Jan 本地访问密码（仅当前页面）' : '本地服务密码（如有，仅当前页面）'} style={{ minWidth: 0, width: '100%' }} />}
           <Button loading={discovering} onClick={() => { void checkLocalTool() }}>{provider === 'webllm' ? '检查浏览器' : '检查本机服务'}</Button>
         </Space>
         {provider === 'webllm' && <div className={`webllm-setup webllm-setup-${webLlmSetup.state}`}>
@@ -426,55 +466,72 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
 
       {selected && provider !== 'custom' && provider !== 'managed' && !isLocalAgentProvider(provider) && <Collapse size="small" items={[{ key: 'api-help', label: '平台接入说明', children: <ApiPlatformGuide selectedId={provider} mode="agent" /> }]} />}
 
+      <Button icon={<FlaskConical size={14} />} disabled={Boolean(connectionIssue) || legacyManagedRun || testing || (provider === 'webllm' && webLlmSetup.state !== 'ready')} loading={testing} onClick={() => { void testAgentApi() }}>测试文字模型</Button>
+      {connectionIssue && <Text type="secondary">{connectionIssue}</Text>}
+      <Text type="secondary">测试、补全与 Agent 策划是独立调用；使用平台 API 可能收费。图片来源在做素材时单独选择。</Text>
+      </Space> }]} />
+      {completionNotice}
+      {actionFeedback && <WorkflowNotice feedback={actionFeedback}><Button size="small" disabled={!baseSpec || busy || isOptimizing} onClick={() => { void checkDraft() }}>检查现有草案</Button><Button size="small" disabled={busy || isOptimizing} onClick={() => { changeAccessMode('ready'); setReadyProvider(null); localStorage.removeItem('pixel-world-agent-ready-choice'); localStorage.removeItem('pixel-local-provider'); setActionFeedback(null) }}>改用内置规则</Button></WorkflowNotice>}
+      {pendingRevision && <WorkflowNotice feedback={{ tone: 'warning', title: '设定已修改，需要重新检查', description: `${pendingRevision.groups.map(group => DRAFT_CHANGE_LABELS[group]).join('、')}已更新。${cluster.run?.reviewMode === 'local-draft' ? '点击检查草案即可继续，不会调用文字模型。' : `保留 ${pendingRevision.retainedTaskIds.length} 项任务成果，更新其余受影响任务时继续使用已锁定模型。`}` }} />}
       <div className="agent-workflow-action">
-        <Text strong>{provider === 'webllm' ? '先补全灵感，再检查本地草案' : '先补全构想，再启动 Agent 评审'}</Text>
-        <Text type="secondary">{!briefReady ? '请先在写故事中填写名称和故事。' : busy ? 'Agent 正在处理任务，请等待结束后再补全设定。' : provider === 'webllm' && webLlmSetup.state !== 'ready' ? 'WebLLM 尚未准备，补全会先生成本地草案。准备模型后可再次补充创意。' : provider === 'webllm' && baseSpec ? '草案已建立。下一步会检查本地草案并进入你的人工审核，不运行完整 Agent 集群。' : baseSpec ? '草案已建立，可以检查后启动 Agent 集群；重新补全后需要重新审核。' : selected ? '已选择文字工具。补全会调用当前模型；云端服务可能收费。' : '未选择文字工具时会生成本地草案；运行 Agent 前还需选择模型。'}</Text>
-        <Button type="primary" icon={<Sparkles size={14} />} loading={isOptimizing} disabled={!briefReady || busy || isOptimizing || legacyManagedRun} onClick={() => { void onOptimizePrompt?.() }}>
-          一键补全并优化提示词
-        </Button>
-      </div>
-      <Space wrap>
-        <Button icon={<FlaskConical size={14} />} disabled={!selected || legacyManagedRun || (provider === 'webllm' && webLlmSetup.state !== 'ready')} loading={testing} onClick={() => { void testAgentApi() }}>{!selected ? '选择工具后测试' : provider === 'custom' ? '测试连接' : isLocalAgentProvider(provider) ? '测试文字模型' : '测试 Agent API'}</Button>
-        {(!cluster.run || ['draft', 'failed', 'cancelled'].includes(cluster.run.status)) && <Button type="primary" disabled={!selected || !baseSpec || isOptimizing || legacyManagedRun || (provider === 'webllm' && webLlmSetup.state !== 'ready')} icon={<Play size={14} />} onClick={() => { void start() }}>{provider === 'webllm' ? '检查草案并进入审核' : '启动 Agent 集群'}</Button>}
+        <Text strong>{busy ? '正在处理，请稍候' : cluster.run?.approved ? '规格已确认' : pendingRevision ? '选择如何重新检查' : cluster.run?.status === 'awaiting_approval' ? '请在中栏确认游戏内容' : baseSpec ? '草案已建立，下一步检查内容' : '先把故事补全为游戏草案'}</Text>
+        <Text type="secondary">{!briefReady ? '请先在中栏填写名称和故事。' : busy ? '切换步骤不会中断任务；需要停止时请点击暂停或取消。' : cluster.run?.approved ? '接下来可用内置素材试玩，也可以选择上传或生成图片。' : pendingRevision ? cluster.run?.reviewMode === 'local-draft' ? '点击检查草案即可继续审核，不会调用文字模型。' : '可以更新受影响的 Agent 任务，也可以直接用本地规则检查当前草案。' : cluster.run?.status === 'awaiting_approval' ? '检查中栏的故事、主角和关卡。批准前不会调用图片 API。' : '补全后可以直接检查草案；想继续细化，可在下方选择完整 Agent 策划。'}</Text>
+        {!runActive && !baseSpec && <Button type="primary" icon={<Sparkles size={14} />} loading={isOptimizing} disabled={!briefReady || busy || isOptimizing || legacyManagedRun} onClick={() => { void onOptimizePrompt?.() }}>一键补全并优化提示词</Button>}
+        {!runActive && !cluster.run?.approved && baseSpec && <Button type="primary" loading={isCheckingDraft} disabled={busy || isOptimizing || !briefReady} onClick={() => { void checkDraft() }}>检查草案并进入审核</Button>}
+        {cluster.run?.status === 'awaiting_approval' && <Button type="primary" loading={cluster.approving} disabled={isCheckingDraft || inputChanged || isOptimizing || blocking > 0 || pendingSuggestions > 0 || !cluster.run.artifacts.productionSpec} icon={<CheckCircle2 size={14} />} onClick={() => { void runAgentAction(cluster.approve) }}>批准规格并开放生图</Button>}
+        {pendingSuggestions > 0 && <Text type="secondary">中栏有 {pendingSuggestions} 项模型修改建议。选择采用或保留原文后，再批准规格。</Text>}
+        {cluster.run?.approved && <Button type="primary" onClick={onContinueAssets}>继续做素材 →</Button>}
+        {cluster.run?.status === 'paused' && <Button type="primary" disabled={isOptimizing || legacyManagedRun} icon={<Play size={14} />} onClick={() => { void runAgentAction(() => cluster.resume(activeKey)) }}>{pendingRevision ? '更新受影响的任务' : '继续策划'}</Button>}
+        {cluster.run?.status === 'paused' && pendingRevision && <Button disabled={!baseSpec || busy || isOptimizing} onClick={() => { void checkDraft() }}>只检查当前草案，进入人工审核</Button>}
         {cluster.run && ['planning', 'reviewing'].includes(cluster.run.status) && <Button icon={<Pause size={14} />} onClick={cluster.pause}>暂停</Button>}
-        {cluster.run?.status === 'paused' && <Button type="primary" disabled={isOptimizing || legacyManagedRun} icon={<Play size={14} />} onClick={() => { void runAgentAction(() => cluster.resume(activeKey)) }}>继续</Button>}
-        {cluster.run && ['planning', 'reviewing', 'paused'].includes(cluster.run.status) && <Button danger icon={<CircleStop size={14} />} onClick={cluster.cancel}>取消</Button>}
-        {cluster.run && <Button disabled={isOptimizing} icon={<RotateCcw size={14} />} onClick={() => { void cluster.reset() }}>新建运行</Button>}
-        {cluster.run?.status === 'awaiting_approval' && cluster.run.artifacts.productionSpec && blocking === 0 && <Button type="primary" disabled={isOptimizing} icon={<CheckCircle2 size={14} />} onClick={() => { void cluster.approve() }}>批准规格并开放生图</Button>}
-        {cluster.run?.approved && hasImages && <Button icon={<ShieldCheck size={14} />} disabled={isOptimizing || legacyManagedRun} onClick={() => baseSpec && void runAgentAction(() => cluster.runQualityChecks(baseSpec, activeKey))}>运行生成后检查</Button>}
-      </Space>
+        {cluster.run && ['planning', 'reviewing', 'paused', 'quality_check'].includes(cluster.run.status) && <Button danger icon={<CircleStop size={14} />} onClick={cluster.cancel}>取消</Button>}
+        {baseSpec && !busy && <Button type="link" size="small" loading={isOptimizing} disabled={!briefReady || isOptimizing} onClick={() => { void onOptimizePrompt?.() }}>一键补全并优化提示词</Button>}
+      </div>
+      <Collapse size="small" items={[{ key: 'deep-planning', label: '可选：让 Agent 继续细化与评审', children: <Space direction="vertical" size={10} style={{ width: '100%' }}>
+        <Text>多个 Agent 会继续策划、交叉评审并修订，耗时和调用次数更多；本次固定使用同一文字模型。WebLLM 只支持轻量补全。</Text>
+        <Collapse size="small" items={[{ key: 'responsibilities', label: '十个专业职责分别做什么', children: <ol className="agent-responsibilities">{PROFESSIONAL_AGENT_ROLES.map(role => <li key={role}><b>{AGENT_ROLE_LABELS[role].zh}</b><span>{AGENT_ROLE_LABELS[role].description}</span><Tag>{role === 'visualQa' || role === 'playtest' ? '素材完成后' : '批准前'}</Tag></li>)}</ol> }]} />
+        <Text type="secondary">规格整合、引擎规则和检查汇总由程序完成。视觉验收仅说明实际抽查的图片，试玩验收读取本浏览器的运行记录；未检查的部分会明确列出。</Text>
+        <Button disabled={Boolean(connectionIssue) || provider === 'webllm' || !baseSpec || busy || isOptimizing || testing || locked || legacyManagedRun} icon={<Play size={14} />} onClick={() => { void runAgentAction(start) }}>启动 Agent 集群</Button>
+        {(!selected || provider === 'webllm' || !baseSpec || locked) && <Text type="secondary">{!baseSpec ? '先补全草案，再选择是否继续细化。' : pendingRevision && locked ? '更新任务会沿用当前锁定模型，点击“更新受影响的任务”继续。' : locked ? '当前运行已锁定；重新策划前请新建运行。' : provider === 'webllm' ? '浏览器模型补全后，使用上方的草案检查继续。' : '需要先选择本机模型或自己的文字 API。'}</Text>}
+        {cluster.run && <Button disabled={isOptimizing || busy} icon={<RotateCcw size={14} />} onClick={() => { void runAgentAction(cluster.reset) }}>新建运行（重新审核）</Button>}
+        {cluster.run?.approved && hasImages && <Button icon={<ShieldCheck size={14} />} disabled={isOptimizing || legacyManagedRun || busy} onClick={() => baseSpec && void runAgentAction(() => cluster.runQualityChecks(baseSpec, activeKey))}>运行生成后检查</Button>}
+      </Space> }]} />
+      {cluster.savedRun && <Collapse size="small" items={[{ key: 'history', label: '查看上次策划记录（只读）', children: <><Text strong>{cluster.savedRun.projectName}</Text><Paragraph>{RUN_LABELS[cluster.savedRun.status]} · {cluster.savedRun.reviewMode === 'local-draft' ? '本地草案' : cluster.savedRun.modelLock.model}</Paragraph><Paragraph>这是历史记录，不会替当前故事批准规格。要继续修改，可在写故事中恢复上次草稿。</Paragraph><Collapse size="small" items={cluster.savedRun.tasks.map((task) => ({ key: task.id, label: AGENT_ROLE_LABELS[task.role].zh, children: <><Paragraph>{task.summary || task.error || task.status}</Paragraph>{task.output && <pre className="workflow-history-output">{artifactPreview(task.output)}</pre>}</> }))} /></> }]} />}
+      {Boolean(cluster.run?.archivedTasks?.length) && <Collapse size="small" items={[{ key: 'revisions', label: '查看修改前的任务记录与用量', children: <Collapse size="small" items={cluster.run!.archivedTasks!.map((task, index) => ({ key: `${task.id}-${index}`, label: `${AGENT_ROLE_LABELS[task.role].zh} · ${task.usage?.totalTokens || 0} Token`, children: <><Paragraph>{task.summary || task.status}</Paragraph>{task.output && <pre className="workflow-history-output">{artifactPreview(task.output)}</pre>}</> }))} /> }]} />}
 
-      {selected && isLocalAgentProvider(provider) && baseSpec && !cluster.run?.approved && (!cluster.run || ['draft', 'failed', 'cancelled'].includes(cluster.run.status)) && <div className="local-draft-review-option">
-        <strong>本机模型做不出完整规格？</strong>
-        <span>可以用已补全的本地草案继续。系统先查关卡和素材是否可用，所选灵感会列出供你核对；仍需你批准后才能制作素材。</span>
-        <Button disabled={isOptimizing} onClick={() => { void cluster.reviewLocalDraft(baseSpec, { provider, model: model.trim() || '本地规则草案', baseUrl: activeBaseUrl }) }}>检查本地草案并继续</Button>
-      </div>}
-
-      {reviewTarget && createPortal(<div className="agent-review-content">{cluster.run ? <>
+      {reviewTarget && createPortal(<div className="agent-review-content">
+        {(plannedSpec || baseSpec) && <GameSpecSummary spec={(plannedSpec || baseSpec)!} imageJobs={estimatedImageJobs(plannedSpec || baseSpec)} onEdit={onEditStory} />}
+        {(plannedSpec || baseSpec) && onDraftChange && <NarrativeEditor spec={(plannedSpec || baseSpec)!} onChange={next => {
+          const suggestionsOnly = sameSpecExceptSuggestions((plannedSpec || baseSpec)!, next)
+          if (suggestionsOnly) void runAgentAction(async () => { await cluster.updateSuggestionDecisions(next); onDraftChange(next, true) })
+          else onDraftChange(next)
+        }} onRefine={onRefine} disabled={busy || isOptimizing} />}
+        {cluster.run && !['draft', 'cancelled'].includes(cluster.run.status) ? <>
         {cluster.run.reviewMode === 'local-draft' && <Alert type="info" showIcon message="本地草案待你审核" description="已运行规则检查，未运行完整 Agent 集群。请核对故事、所选灵感和关卡；有阻断项时先修改草案。" />}
+
         <div>
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-            <Text>Agent 进度 {completed}/{tasks.length}</Text>
-            <Text type="secondary">Token {totalTokens.toLocaleString()} · 阻断项 {blocking}</Text>
+            <Text>{cluster.run.reviewMode === 'local-draft' ? '规则检查' : '制作任务'} {completed}/{tasks.length}</Text>
+            <Text type="secondary">{cluster.run.reviewMode === 'local-draft' ? '未调用文字模型' : `Token ${totalTokens.toLocaleString()}`} · 待处理 {blocking}</Text>
           </Space>
           <Progress percent={progress} status={cluster.run.status === 'failed' ? 'exception' : cluster.run.status === 'ready' ? 'success' : 'active'} />
         </div>
         {cluster.run.status === 'awaiting_approval' && plannedSpec && <Alert
           type={blocking ? 'warning' : 'success'}
           showIcon
-          message={blocking ? `仍有 ${blocking} 个阻断项，已停止自动修订` : `规划已通过：预计 ${plannedJobs} 个图片任务`}
+          message={blocking ? `还有 ${blocking} 个问题需要修改` : '规则检查通过，等待你确认'}
           description={blocking ? '请按字段路径修改原始构想，再补全草案并重新检查；此时不会调用图片 API。' : `共 ${plannedSpec.assets.filter((asset) => asset.enabled).length} 个已启用素材、${plannedSpec.levels.length} 个关卡。批准后仍可在素材卡片中关闭项目或调整关卡分配。`}
         />}
-        {cluster.run.error && <Alert type="error" showIcon message={cluster.run.error} />}
-        <Collapse
+        {cluster.run.error && <WorkflowNotice feedback={{ tone: 'error', title: '策划中断，已有结果已保留', description: '可在任务详情重试失败步骤，或检查现有草案进入人工审核。', detail: cluster.run.error }}><Button disabled={!baseSpec || busy} onClick={() => { void checkDraft() }}>检查现有草案</Button></WorkflowNotice>}
+        <Collapse size="small" items={[{ key: 'task-details', label: '查看任务过程与技术详情', children: <Collapse
           size="small"
-          items={tasks.map((task) => {
+          items={tasks.filter(task => PROFESSIONAL_AGENT_ROLES.includes(task.role)).map((task) => {
             const label = AGENT_ROLE_LABELS[task.role]
             const actionableIssues = (task.issues || []).filter((item) => item.severity !== 'info')
             const advisoryIssues = (task.issues || []).filter((item) => item.severity === 'info')
             return {
               key: task.id,
-              label: <Space wrap><Text strong>{label.zh} / {label.en}</Text><Tag color={STATUS_COLOR[task.status]}>{task.status}</Tag>{task.round > 1 && <Tag>第 {task.round} 轮</Tag>}</Space>,
+              label: <Space wrap><Text strong>{task.id.startsWith('consistencyCritic-final-') ? '最终独立评审' : label.zh} / {label.en}</Text><Tag color={STATUS_COLOR[task.status]}>{task.status}</Tag>{pendingRevision?.retainedTaskIds.includes(task.id) && <Tag color="green">沿用成果</Tag>}{task.round > 1 && <Tag>第 {task.round} 轮</Tag>}</Space>,
               children: <Space direction="vertical" size={8} style={{ width: '100%' }}>
                 <Text type="secondary">{label.description}</Text>
                 {task.summary && <Paragraph style={{ margin: 0 }}>{task.summary}</Paragraph>}
@@ -499,12 +556,13 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
               </Space>,
             }
           })}
-        />
+        /> }]} />
+        <Collapse size="small" items={[{ key: 'program-checks', label: '程序整合与规则检查（不额外调用模型）', children: <Space direction="vertical" style={{ width: '100%' }}>{tasks.filter(task => SYSTEM_AGENT_ROLES.includes(task.role)).map(task => <section key={task.id}><Text strong>{AGENT_ROLE_LABELS[task.role].zh}</Text><Tag>{task.status}</Tag><Paragraph>{task.summary || '等待前面的成果。'}</Paragraph>{task.error && <Text type="danger">{task.error}</Text>}</section>)}</Space> }]} />
         {cluster.run.artifacts.releaseReport && <Card size="small" style={{ background: '#f6ffed' }}>
           <Title level={5} style={{ marginTop: 0 }}>发布检查</Title>
           <Paragraph style={{ marginBottom: 0 }}>{String(cluster.run.artifacts.releaseReport.summary || (cluster.run.artifacts.releaseReport.ready ? '所有阻断项已通过。' : '仍有需要处理的阻断项。'))}</Paragraph>
         </Card>}
-      </> : <div className="agent-review-empty"><strong>等待开始策划</strong><span>先在“写故事”填写名称和故事，再到左栏选择文字模型、补全提示词并启动 Agent 集群。</span></div>}</div>, reviewTarget)}
+      </> : <><div className="agent-review-empty"><strong>{baseSpec ? '草案已建立' : '等待补全设定'}</strong><span>{baseSpec ? '点击左栏“检查草案并进入审核”。无需运行完整 Agent，也能继续制作游戏。' : '先填写名称和故事，再点击左栏的一键补全。文字模型可选，不配置也能生成草案。'}</span></div></>}</div>, reviewTarget)}
     </Space>
   </Card>
 }

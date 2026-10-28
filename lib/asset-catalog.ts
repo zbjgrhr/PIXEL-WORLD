@@ -49,7 +49,7 @@ export const ASSET_CATALOG: AssetCatalogEntry[] = [
   audio('waterEnemyMoveSound', '水中敌人行动音效', 'A gentle bubbling swim sound.'),
   sprite('boss', 'BOSS', 'An imposing oversized boss with a strong final-arena silhouette.', 'boss'),
   image('bossAttackEffect', 'BOSS攻击特效', 'attackEffect', 'A large dramatic boss attack effect with transparent surroundings.'),
-  runtime('bossMotion', 'BOSS行动形态', 'Multi-phase pursuit, projectile volleys, and a final enraged phase.', 'boss'),
+  runtime('bossMotion', 'BOSS行动形态', '移动接近主角，间隔发射弹射物，并定时跳跃。', 'boss'),
   audio('bossAttackSound', 'BOSS攻击音效', 'A deep layered boss attack sound.'),
   audio('bossMoveSound', 'BOSS行动音效', 'Heavy ominous movement pulses.'),
   image('meleeWeapon', '近战武器', 'weapon', 'One isolated melee weapon, horizontal side view.'),
@@ -287,7 +287,7 @@ export function buildStructuredPrompt(levelCount: number): string {
   const levels = Array.from({ length: levelCount }, (_, index) =>
     `关卡 ${index + 1}：\n背景：\n平台类型：\n障碍物：\n出现素材：\n背景音乐：\n天气/滤镜/闪光：`,
   ).join('\n\n')
-  return `游戏标题：\n世界观与故事：\n背景故事：\n整体像素风格：\n主角目标（可选）：\n难度偏好（可选）：\n叙事节奏（可选）：\n角色一致性要求（可选）：\n\n${fields}\n\n${levels}`
+  return `游戏标题：\n世界观与故事：\n背景故事：\n整体像素风格：\n主角姓名（可选）：\n对手姓名（可选）：\n主角目标（可选）：\n难度偏好（可选）：\n叙事节奏（可选）：\n角色一致性要求（可选）：\n事件起因：\n主角动机：\n主要冲突：\n人物关系：\nBoss与故事的关系：\n关键线索：\n线索回应：\n结局方向：\n开场剧情：\n结局剧情：\n\n${fields}\n\n${levels}`
 }
 
 export function isStructuredPromptBlank(prompt: string): boolean {

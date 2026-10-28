@@ -31,6 +31,7 @@ function looksLikeInvalidKey(value: string): boolean {
 }
 
 const ModelSelector: React.FC<ModelSelectorProps> = ({
+  disabled = false,
   hideProviderSelector = false,
   selectedProvider,
   onProviderChange,
@@ -84,6 +85,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
           Provider / 平台
         </Text>
         <Select
+          disabled={disabled}
           value={selectedProvider}
           onChange={handleProviderChange}
           style={{ width: '100%' }}
@@ -107,6 +109,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
           Model / 模型
         </Text>
         <Select
+          disabled={disabled}
           value={activeModel}
           onChange={onModelChange}
           style={{ width: '100%' }}
@@ -143,6 +146,7 @@ const ModelSelector: React.FC<ModelSelectorProps> = ({
       <div>
         <Text strong style={{ display: 'block', marginBottom: '8px' }}>API Key</Text>
         <Input.Password
+          disabled={disabled}
           value={apiKey}
           onChange={(e) => handleApiKeyChange(e.target.value)}
           placeholder={providerConfig?.keyHint ?? 'Enter your API key'}

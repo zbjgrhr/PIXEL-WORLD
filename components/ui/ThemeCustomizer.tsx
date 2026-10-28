@@ -1,6 +1,7 @@
 'use client'
 
-import { Alert, Button, Collapse, Input, InputNumber, Segmented, Select, Space, Tag, Typography, message } from 'antd'
+import { useEffect, useState } from 'react'
+import { Button, Collapse, Input, InputNumber, Select, Space, Tag, Typography, message } from 'antd'
 import { History, ListRestart, Sparkles } from 'lucide-react'
 import type { ThemeCustomizerProps } from '@/types'
 import { PROMPT_TEMPLATES } from '@/configs/prompt-templates'
@@ -13,7 +14,9 @@ function templateStory(prompt: string): string {
   return prompt.match(/^背景故事：\s*(.+)$/m)?.[1]?.trim() || ''
 }
 
-const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ inspiration, creationMode = 'agent', onCreationModeChange, customThemeName, onThemeNameChange, customStory, onStoryChange, customPrompt, onPromptChange, levelCount = 3, onLevelCountChange, onOptimizePrompt, onCompleteIdea, isOptimizing = false, isAgentBusy = false, optimizedSpec, hasSavedDraft = false, onRestoreDraft }) => {
+const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ inspiration, customThemeName, onThemeNameChange, customStory, onStoryChange, customPrompt, onPromptChange, levelCount = 3, onLevelCountChange, onOptimizePrompt, onCompleteIdea, isOptimizing = false, isAgentBusy = false, optimizedSpec, completionNotice, hasSavedDraft = false, onRestoreDraft }) => {
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  useEffect(() => { if (optimizedSpec) setDetailsOpen(true) }, [optimizedSpec])
   const handleTemplateSelect = (templateId: string) => {
     const template = PROMPT_TEMPLATES.find((item) => item.id === templateId)
     if (!template) return
@@ -49,20 +52,6 @@ const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ inspiration, creation
     </div>
     {inspiration}
     <Button className="idea-next-button" type="primary" block disabled={!customThemeName.trim() || !customStory.trim()} onClick={onCompleteIdea}>完成故事，进入 AI 策划 →</Button>
-    <div>
-      <Text strong style={{ display: 'block', marginBottom: 8 }}>策划方式</Text>
-      <Segmented
-        block
-        value={creationMode}
-        disabled={isAgentBusy || isOptimizing}
-        onChange={(value) => onCreationModeChange?.(value as 'agent' | 'classic')}
-        options={[
-          { value: 'agent', label: 'Agent 集群（推荐）' },
-          { value: 'classic', label: '传统单次优化' },
-        ]}
-      />
-      {creationMode === 'agent' && <Alert type="info" showIcon message="多个专业 Agent 会先策划、交叉评审并修正规格；你批准后才会开放图片生成。" style={{ marginTop: 8 }} />}
-    </div>
     <div className="structured-prompt-section">
       <div className="structured-prompt-heading">
         <Text strong>详细设定（可选）</Text>
@@ -93,9 +82,12 @@ const ThemeCustomizer: React.FC<ThemeCustomizerProps> = ({ inspiration, creation
               ? '正在补全设定，完成后会显示在下方。'
               : '使用已选择的文字模型补全；未配置模型时生成本地草案。补全后可在下方检查，再进入 AI 策划。'}
       </Text>
+      {completionNotice}
+      <Collapse size="small" activeKey={detailsOpen ? ['fields'] : []} onChange={(keys) => setDetailsOpen(keys.includes('fields'))} items={[{ key: 'fields', label: '编辑完整设定字段（可选）', children: <>
       <TextArea value={customPrompt} onChange={(event) => onPromptChange(event.target.value)} rows={18} placeholder="请在各字段冒号后填写；不需要的项目可以留空。" style={{ width: '100%', fontSize: 12, lineHeight: 1.7 }} />
       <div className="prompt-writing-help"><strong>怎么填写</strong><span>在字段冒号后写具体画面或玩法；不确定的留空。</span><small>主角：戴蓝披风的骑士，侧视像素风</small><small>关卡 1 背景：黄昏森林，留出行走区域</small><small>可选补充主角目标、难度、叙事节奏和角色外观要求。</small></div>
-      <Text type="secondary" style={{ fontSize: 12 }}>{creationMode === 'agent' ? '保留你明确填写的要求；Agent 只补充空白、消除冲突，不会覆盖你的核心设定。' : '保留需要的描述，其余字段留空；一键优化只补全空白或不足的字段。'}</Text>
+      <Text type="secondary" style={{ fontSize: 12 }}>保留需要的描述，其余字段可以留空。后续补全与评审会围绕你填写的要求继续。</Text>
+      </> }]} />
     </div>
     {optimizedSpec && <Collapse size="small" items={[{
       key: 'optimized-spec',

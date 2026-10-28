@@ -1,5 +1,7 @@
 'use client'
 
+import { readCampaign, clearCampaign } from '@/lib/campaign-save'
+
 import React, { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { message } from 'antd'
 import { useGameStore } from '@/lib/store'
@@ -139,6 +141,7 @@ export default function Home() {
   } = useGameStore()
 
   const [showGameInterface, setShowGameInterface] = useState(false)
+  const [previewStale, setPreviewStale] = useState(false)
   const [activeStudioStage, setActiveStudioStage] = useState<'idea' | 'agents' | 'assets'>('idea')
   const [studioWorkspaceTarget, setStudioWorkspaceTarget] = useState<HTMLDivElement | null>(null)
   const previousStudioStage = useRef(activeStudioStage)
@@ -470,7 +473,8 @@ export default function Home() {
   }
 
   const startGame = (fromBeginning: boolean) => {
-    if (fromBeginning) setCurrentLevelIndex(0)
+    if (fromBeginning) { clearCampaign(selectedTheme); setCurrentLevelIndex(0) }
+    else if (activeGameData.data?.spec) setCurrentLevelIndex(readCampaign(activeGameData.data.spec, selectedTheme)?.levelIndex || 0)
     setGameState('playing')
     setShowGameCover(false)
     setShowGameInterface(true)
@@ -514,7 +518,7 @@ export default function Home() {
           />
         ))}
       </div>
-      {showGameCover ? (
+      {showGameCover && (
         <GameCoverMenu
           theme={activeTheme}
           gameData={activeGameData}
@@ -524,12 +528,13 @@ export default function Home() {
           onLoad={() => startGame(false)}
           onExit={exitCover}
         />
-      ) : showGameInterface ? (
+      )}
+      {showGameInterface && !showGameCover && (
         <div className="game-runtime-shell">
           <GameCanvas loadingMessage={loadingMessage} onBackToMenu={returnToCover} />
         </div>
-      ) : (
-        <div id="world-home" className="pixel-world-shell">
+      )}
+      <div id="world-home" className="pixel-world-shell" style={{ display: showGameCover || showGameInterface ? 'none' : undefined }}>
           <ProjectHeader />
           <Guidebook />
           <div className="world-content-frame">
@@ -555,6 +560,7 @@ export default function Home() {
                   activeStage={activeStudioStage}
                   onStageChange={setActiveStudioStage}
                   workspaceTarget={studioWorkspaceTarget}
+                  onPreviewStaleChange={setPreviewStale}
                 />
               </div>
 
@@ -564,6 +570,7 @@ export default function Home() {
 
               <div className="workspace-panel">
                 <div id="preview-publish" className="preview-scroll-content section-anchor">
+                  {previewStale && createdThemes.length > 0 && <div className="workflow-preview-note" role="status"><strong>这里显示已创建的游戏</strong><span>草稿或素材正在修改。完成当前制作后，右栏才会更新。</span></div>}
                   <ThemePreview
                     isLoading={isLoading}
                     loadingMessage={loadingMessage}
@@ -584,8 +591,7 @@ export default function Home() {
               </div>
             </div>
           </div>
-        </div>
-      )}
+      </div>
     </main>
   )
 }

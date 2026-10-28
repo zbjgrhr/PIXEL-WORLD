@@ -4,6 +4,26 @@ import { POST } from './route'
 describe('POST /api/agents/execute', () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 
+  it.each([
+    ['error', '中断了输出'],
+    ['length', '达到输出上限'],
+    ['content_filter', '拦截了本次回答'],
+  ])('rejects %s completion without repairing or accepting its partial JSON', async (finishReason, message) => {
+    const upstream = vi.fn(async () => new Response(JSON.stringify({
+      choices: [{ finish_reason: finishReason, message: { content: '{"summary":"已完成","artifact":{"goals":["暂时只有一个目标"]}}' } }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', upstream)
+    const response = await POST(new Request('http://localhost/api/agents/execute', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runId: 'interrupted', taskId: 'director-r1', role: 'director', round: 1, provider: 'openrouter', model: 'qwen/qwen3.8-flash', apiKey: 'sk-test-only', sourcePrompt: '修复灯塔', projectName: '灯塔', levelCount: 1, artifacts: {} }),
+    }) as never)
+    const result = await response.json()
+    expect(result.success).toBe(false)
+    expect(result.error).toContain(message)
+    expect(result.data).toBeUndefined()
+    expect(upstream).toHaveBeenCalledTimes(1)
+  })
+
   it('refuses historical managed cloud requests before any upstream call', async () => {
     const upstream = vi.fn()
     vi.stubGlobal('fetch', upstream)
@@ -104,8 +124,9 @@ describe('POST /api/agents/execute', () => {
     expect(data.data.artifact.spec.assets.length).toBeGreaterThan(0)
   })
 
-  it('uses the deterministic local integrator when the upstream integration request times out', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('Gateway Timeout', { status: 504 })))
+  it('integrates specialist results without making an additional paid model request', async () => {
+    const fetchMock = vi.fn(async () => new Response('Gateway Timeout', { status: 504 }))
+    vi.stubGlobal('fetch', fetchMock)
 
     const request = new Request('http://localhost/api/agents/execute', {
       method: 'POST',
@@ -125,7 +146,9 @@ describe('POST /api/agents/execute', () => {
     const data = await response.json()
     expect(response.status).toBe(200)
     expect(data.success).toBe(true)
-    expect(data.data.artifact.localFallback).toBe(true)
+    expect(data.data.artifact.localFallback).toBe(false)
+    expect(data.data.artifact.execution).toBe('program')
+    expect(fetchMock).not.toHaveBeenCalled()
     expect(data.data.artifact.spec.title).toBe('星光救援')
     expect(data.data.artifact.spec.levels).toHaveLength(2)
   })

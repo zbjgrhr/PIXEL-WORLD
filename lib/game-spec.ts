@@ -1,6 +1,7 @@
 import { ANIMATION_CLIP_POSES, ASSET_CATALOG, createAssetPlan, normalizeAnimationSpec } from '@/lib/asset-catalog'
 import { stabilizeGameSpec } from '@/lib/game-spec-guardrails'
 import { extractStoryAnchors } from '@/lib/story-anchors'
+import { alignNarrativeCast, ensureNarrative, normalizeNarrative } from '@/lib/narrative'
 import type {
   AssetCategory,
   AssetDefinition,
@@ -198,7 +199,7 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
   const levelCount = Math.min(10, Math.max(1, requestedLevelCount || 1))
   const explicitAssetValues = Object.fromEntries(ASSET_CATALOG.map((entry) => [
     entry.category,
-    structuredField(prompt, [entry.label, entry.category]),
+    structuredField(prompt, [entry.label, entry.category, entry.label.split(' / ')[0]]),
   ])) as Partial<Record<AssetCategory, string>>
   const assetValues = Object.fromEntries(ASSET_CATALOG.map((entry) => [
     entry.category,
@@ -209,12 +210,15 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
   const world = explicitWorld
     || section(freeformPrompt, ['world', '世界'], freeformPrompt || 'A mysterious original fantasy pixel world with readable platforming spaces.')
   const storyAnchors = extractStoryAnchors(world)
+  const sceneEnemy = storyAnchors.place
+    ? `One original ground enemy native to ${storyAnchors.place}${storyAnchors.enemy ? `: ${storyAnchors.enemy}${/机器人/.test(storyAnchors.enemy) ? ', a small patrol robot with mechanical limbs and a sensor eye' : /无人机/.test(storyAnchors.enemy) ? ', a compact patrol drone with visible rotors and a sensor eye' : ''}, with a distinct recognizable silhouette` : /巡逻机器人/.test(world) ? ': a small patrol robot with mechanical limbs, a sensor eye, and a clear machine silhouette' : /日本/.test(storyAnchors.place) ? ': a small animated lantern spirit inspired by Japanese folklore, with a warm paper glow and a distinct face' : /沙漠|埃及/.test(storyAnchors.place) ? ': a sand-colored desert beetle with a rounded shell and six clear legs' : /月球/.test(storyAnchors.place) ? ': a compact moon-dust creature with rocky limbs and a luminous core' : ''}; a consistent side-view pixel creature with one recognizable silhouette across every animation frame, isolated from the background.`
+    : assetValues.groundEnemy || 'A hostile original creature with a readable side-view combat silhouette.'
   const heroAppearance = explicitAssetValues.hero
     || (storyAnchors.hero
       ? `An original full-body side-view pixel hero based on ${storyAnchors.hero}, with a clear silhouette and equipment suited to the adventure.`
       : section(freeformPrompt, ['character', 'hero', '主角', '人物'], assetValues.hero || 'A brave side-view adult adventurer with a strong silhouette and practical travel armor.'))
   const enemyAppearance = explicitAssetValues.groundEnemy
-    || section(freeformPrompt, ['enemy', 'enemies', '敌人', '怪物'], assetValues.groundEnemy || 'A hostile original creature with a readable side-view combat silhouette.')
+    || section(freeformPrompt, ['enemy', 'enemies', '敌人', '怪物'], sceneEnemy)
   const meleeWeapon = explicitAssetValues.meleeWeapon || assetValues.meleeWeapon || 'One compact original melee weapon.'
   const rangedWeapon = explicitAssetValues.rangedWeapon || assetValues.rangedWeapon || 'One compact original ranged weapon.'
   const weaponAppearance = `${meleeWeapon} Ranged companion: ${rangedWeapon}`
@@ -275,8 +279,8 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
       environment,
       ground,
       obstacle: levelObstacle,
-      enemyCount: Math.min(6, Math.max(0, Number(enemyCountText.match(/\d+/)?.[0]) || 3 + index)),
-      collectibleCount: Math.min(8, Math.max(0, Number(collectibleCountText.match(/\d+/)?.[0]) || 3 + index)),
+      enemyCount: Math.min(6, Math.max(0, Number(enemyCountText.match(/\d+/)?.[0] ?? 3 + index))),
+      collectibleCount: Math.min(8, Math.max(0, Number(collectibleCountText.match(/\d+/)?.[0] ?? 3 + index))),
       hasBoss: index === levelCount - 1 || /yes|true|是|有/i.test(bossText),
       ...defaults,
       platformMode,
@@ -303,7 +307,7 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
 
   const visualStyle = structuredField(prompt, ['整体像素风格', '视觉风格', 'visual style'])
 
-  return stabilizeGameSpec({
+  return ensureNarrative(stabilizeGameSpec({
     version: 3,
     title: structuredField(prompt, ['游戏标题', 'game title']) || themeName.trim() || 'Pixel World',
     world,
@@ -318,20 +322,20 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
     hero: { name: storyAnchors.hero || 'Hero', appearance: heroAppearance, maxHealth: 100, moveSpeed: 5, jumpPower: 15 },
     weapon: { name: 'Seedblade', appearance: weaponAppearance, mode: 'hybrid', meleeDamage: 24, rangedDamage: 16, cooldownMs: 420, projectileSpeed: 10 },
     enemies: [{ name: 'World Stalker', appearance: enemyAppearance, health: 48, damage: 12, speed: 1.4, behavior: 'chase' }],
-    boss: { name: storyAnchors.antagonist || 'World Guardian', appearance: bossAppearance, health: 280, damage: 20, speed: 1.1, attackPattern: 'Alternates between pursuit, projectiles, and an enraged final phase.' },
+    boss: { name: storyAnchors.antagonist || 'World Guardian', appearance: bossAppearance, health: 280, damage: 20, speed: 1.1, attackPattern: '移动接近主角，间隔发射弹射物，并定时跳跃。' },
     collectible: { name: storyAnchors.collectible || 'Inner Seed', appearance: collectibleAppearance, effect: 'score', value: 100 },
     projectile,
     attackEffect,
     levels,
     assets,
-  })
+  }), prompt, explicitWorld || structuredField(prompt, ['背景故事', 'background story', 'story']) || freeformPrompt)
 }
 
 /** Keep every user-filled structured field attached to its exact category. */
 export function preserveExplicitPromptFields(spec: GameSpec, fallback: GameSpec, sourcePrompt: string): GameSpec {
   const explicitCategories = new Map<AssetCategory, string>()
   for (const entry of ASSET_CATALOG) {
-    const value = structuredField(sourcePrompt, [entry.label, entry.category])
+    const value = structuredField(sourcePrompt, [entry.label, entry.category, entry.label.split(' / ')[0]])
     if (value) explicitCategories.set(entry.category, value)
   }
   const exact = (aliases: string[]) => structuredField(sourcePrompt, aliases)
@@ -351,10 +355,14 @@ export function preserveExplicitPromptFields(spec: GameSpec, fallback: GameSpec,
   return {
     ...spec,
     title: exact(['游戏标题', 'game title']) ? fallback.title : spec.title,
-    world: exact(['世界观与故事', '世界观', 'world']) ? fallback.world : spec.world,
-    backgroundStory: exact(['背景故事', 'background story', 'story']) ? fallback.backgroundStory : spec.backgroundStory,
-    visualStyle: exact(['整体像素风格', '视觉风格', 'visual style']) ? fallback.visualStyle : spec.visualStyle,
+    world: fallback.narrative?.source.lockedFields.world || spec.world,
+    backgroundStory: fallback.narrative?.source.lockedFields.backgroundStory || spec.backgroundStory,
+    narrative: fallback.narrative ? normalizeNarrative({ ...spec.narrative, source: fallback.narrative.source }, spec, fallback.narrative) : spec.narrative,
+    visualStyle: fallback.narrative?.source.playerFields['visualStyle.artDirection']
+      ? { ...spec.visualStyle, artDirection: fallback.narrative.source.playerFields['visualStyle.artDirection'] }
+      : exact(['整体像素风格', '视觉风格', 'visual style']) ? fallback.visualStyle : spec.visualStyle,
     hero: explicitCategories.has('hero') ? { ...spec.hero, appearance: fallback.hero.appearance } : spec.hero,
+    enemies: explicitCategories.has('groundEnemy') ? spec.enemies.map((enemy, index) => index === 0 ? { ...enemy, appearance: fallback.enemies[0].appearance } : enemy) : spec.enemies,
     weapon: explicitCategories.has('meleeWeapon') || explicitCategories.has('rangedWeapon')
       ? { ...spec.weapon, appearance: fallback.weapon.appearance }
       : spec.weapon,
@@ -395,17 +403,23 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
       damage: bounded(enemy.damage, base.damage, 1, 80),
       speed: bounded(enemy.speed, base.speed, 0.4, 5),
       behavior: ['patrol', 'chase', 'ranged'].includes(String(enemy.behavior)) ? enemy.behavior as EnemySpec['behavior'] : base.behavior,
+      category: ['groundEnemy', 'airEnemy', 'waterEnemy'].includes(String(enemy.category))
+        ? enemy.category as EnemySpec['category']
+        : (['groundEnemy', 'airEnemy', 'waterEnemy'] as const)[index],
+      assetId: typeof enemy.assetId === 'string' && enemy.assetId.trim() ? enemy.assetId.trim() : undefined,
     }
   })
 
   const levels: LevelSpec[] = Array.from({ length: count }, (_, index) => {
-    const raw = (rawLevels[index] || rawLevels[rawLevels.length - 1] || fallback.levels[0]) as Partial<LevelSpec>
-    const base = fallback.levels[Math.min(index, fallback.levels.length - 1)] || fallback.levels[0]
+    const base = fallback.levels[index] || { ...fallback.levels[fallback.levels.length - 1], id: `level-${index + 1}`, name: `第 ${index + 1} 关` }
+    const byId = rawLevels.find(level => level?.id === base.id)
+    const positional = !rawLevels.some(level => level?.id) || rawLevels.length === count
+    const raw = (byId || (positional ? rawLevels[index] : undefined) || base) as Partial<LevelSpec>
     const environment = text(raw.environment, base.environment)
     const defaults = levelDefaults(index, count, environment)
     return {
-      id: text(raw.id, `level-${index + 1}`),
-      name: text(raw.name, `Level ${index + 1}`),
+      id: base.id,
+      name: text(raw.name, base.name),
       environment,
       ground: text(raw.ground, base.ground),
       obstacle: text(raw.obstacle, base.obstacle),
@@ -456,12 +470,17 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
       if (asset.category === 'hero' && hero?.appearance) derivedPrompt = hero.appearance
       else if (asset.category === 'boss' && boss?.appearance) derivedPrompt = boss.appearance
       else if (asset.category === 'collectible' && collectible?.appearance) derivedPrompt = collectible.appearance
-      else if (asset.category === 'groundEnemy' && input.enemies?.[0]?.appearance) derivedPrompt = input.enemies[0].appearance
+      else if (['groundEnemy', 'airEnemy', 'waterEnemy'].includes(String(asset.category))) {
+        const enemy = enemies.find(item => item.assetId === asset.id)
+          || enemies.find(item => item.category === asset.category)
+        if (enemy?.appearance) derivedPrompt = enemy.appearance
+      }
       else if (asset.category === 'rangedProjectile' && input.projectile) derivedPrompt = input.projectile
       else if (asset.category === 'meleeAttackEffect' && input.attackEffect) derivedPrompt = input.attackEffect
       else if (asset.category === 'levelBackground') {
         const level = levels.find((item) => asset.levelIds?.includes(item.id))
-        if (level) derivedPrompt = level.environment
+        const prior = fallback.levels.find((item) => item.id === level?.id)
+        if (level && level.environment !== prior?.environment) derivedPrompt = level.environment
       }
     }
     const base = defaultAssets.find((item) => item.category === asset.category) || defaultAssets[index % defaultAssets.length]
@@ -486,7 +505,7 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
       title: text(asset.title, base.title),
       prompt: text(derivedPrompt, base.prompt),
       enabled: typeof asset.enabled === 'boolean' ? asset.enabled : base.enabled,
-      levelIds: validLevelIds.length ? validLevelIds : base.levelIds,
+      levelIds: validLevelIds,
       kind,
       status,
       url: url || undefined,
@@ -497,8 +516,9 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
     }
   })
 
-  return {
+  return alignNarrativeCast({
     version: 3,
+    narrative: normalizeNarrative({ ...input.narrative, opening: input.narrative?.opening || input.backgroundStory || fallback.narrative?.opening, source: fallback.narrative?.source || input.narrative?.source }, { ...fallback, levels }, fallback.narrative),
     title: text(input.title, fallback.title),
     creativeBrief: {
       heroGoal: text(fallback.creativeBrief?.heroGoal, text(input.creativeBrief?.heroGoal, '')),
@@ -539,7 +559,7 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
     attackEffect: text(input.attackEffect, fallback.attackEffect),
     levels,
     assets,
-  }
+  }, fallback)
 }
 
 export function serializeGameSpec(spec: GameSpec): string {
@@ -547,5 +567,6 @@ export function serializeGameSpec(spec: GameSpec): string {
   const levels = spec.levels.map((level, index) => `关卡 ${index + 1}：${level.name}\n背景：${level.environment}\n平台类型：${level.platformMode}\n障碍物：${level.obstacle}\n敌人数：${level.enemyCount}\n收集品数：${level.collectibleCount}\n背景音乐：${level.music.tempo} BPM\n天气/滤镜/闪光：${level.effects.weather} / ${level.effects.filter} / ${level.effects.flash ? 'yes' : 'no'}\nBOSS：${level.hasBoss ? 'yes' : 'no'}`).join('\n\n')
   const brief = spec.creativeBrief
   const optional = brief ? `\n主角目标（可选）：${brief.heroGoal || ''}\n难度偏好（可选）：${brief.difficulty || ''}\n叙事节奏（可选）：${brief.pacing || ''}\n角色一致性要求（可选）：${brief.identityRules || ''}` : ''
-  return `游戏标题：${spec.title}\n世界观与故事：${spec.world}\n背景故事：${spec.backgroundStory}\n整体像素风格：${spec.visualStyle.artDirection} ${spec.visualStyle.palette} ${spec.visualStyle.lighting} ${spec.visualStyle.pixelScale}${optional}\n主角：${spec.hero.name} — ${spec.hero.appearance}\n近战/远程武器：${spec.weapon.name} — ${spec.weapon.appearance}\n\n${assets}\n\n${levels}`
+  const narrativeFields = spec.narrative ? `\n事件起因：${spec.narrative.incitingIncident}\n主角动机：${spec.narrative.motivation}\n主要冲突：${spec.narrative.conflict}\nBoss与故事的关系：${spec.narrative.bossRelation}\n结局方向：${spec.narrative.resolution}\n开场剧情：${spec.narrative.opening}\n结局剧情：${spec.narrative.ending}` : ''
+  return `游戏标题：${spec.title}\n世界观与故事：${spec.world}\n背景故事：${spec.backgroundStory}\n整体像素风格：${spec.visualStyle.artDirection} ${spec.visualStyle.palette} ${spec.visualStyle.lighting} ${spec.visualStyle.pixelScale}${optional}${narrativeFields}\n主角：${spec.hero.name} — ${spec.hero.appearance}\n近战/远程武器：${spec.weapon.name} — ${spec.weapon.appearance}\n\n${assets}\n\n${levels}`
 }

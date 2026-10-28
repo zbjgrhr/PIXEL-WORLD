@@ -68,6 +68,37 @@ export async function inspectSpriteImage(bytes: Buffer, frameCount = 1): Promise
   return { width: info.width, height: info.height, frameCount, transparentRatio, frames }
 }
 
+/** A one-frame idle asset must not hide several separate full-body figures. */
+export async function inspectSingleCharacterSprite(bytes: Buffer): Promise<void> {
+  const { data, info } = await sharp(bytes, { limitInputPixels: 4096 * 4096 }).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  const { width, height } = info
+  const pixelCount = width * height
+  const visited = new Uint8Array(pixelCount)
+  const queue = new Int32Array(pixelCount)
+  const componentSizes: number[] = []
+  for (let start = 0; start < pixelCount; start++) {
+    if (visited[start] || data[start * 4 + 3] <= 64) continue
+    let head = 0, tail = 0
+    queue[tail++] = start
+    visited[start] = 1
+    while (head < tail) {
+      const index = queue[head++]
+      const x = index % width
+      const neighbors = [x > 0 ? index - 1 : -1, x + 1 < width ? index + 1 : -1, index >= width ? index - width : -1, index + width < pixelCount ? index + width : -1]
+      for (const neighbor of neighbors) {
+        if (neighbor < 0 || visited[neighbor] || data[neighbor * 4 + 3] <= 64) continue
+        visited[neighbor] = 1
+        queue[tail++] = neighbor
+      }
+    }
+    componentSizes.push(tail)
+  }
+  componentSizes.sort((a, b) => b - a)
+  if (componentSizes.length > 1 && componentSizes[1] >= Math.max(pixelCount * .025, componentSizes[0] * .15)) {
+    throw new ImageQualityError('站立单帧里出现多个角色或大块背景残片；未采用这张图片，请重新生成。')
+  }
+}
+
 /** Use one scale for the whole strip and a shared foot baseline, without stretching poses. */
 export async function alignSpriteCells(bytes: Buffer, frameCount: number): Promise<Buffer> {
   const { data, info } = await sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
@@ -96,6 +127,7 @@ export async function processGeneratedImage(url: string, options: {
   preserveCanvas?: boolean
   frameCount?: number
   gridRows?: number
+  strictSingleCharacter?: boolean
 }): Promise<string> {
   let bytes = await readGeneratedImage(url)
   const meta = await sharp(bytes, { limitInputPixels: 4096 * 4096 }).metadata()
@@ -106,6 +138,7 @@ export async function processGeneratedImage(url: string, options: {
   if (options.preserveCanvas && options.frameCount) bytes = await padImageToGrid(bytes, options.frameCount, options.gridRows || 1)
   if (options.isolated && (!options.gridRows || options.gridRows === 1)) {
     await inspectSpriteImage(bytes, options.frameCount || 1)
+    if (options.strictSingleCharacter && (options.frameCount || 1) === 1) await inspectSingleCharacterSprite(bytes)
     if (options.preserveCanvas) bytes = await alignSpriteCells(bytes, options.frameCount || 1)
   }
   return `data:image/png;base64,${bytes.toString('base64')}`

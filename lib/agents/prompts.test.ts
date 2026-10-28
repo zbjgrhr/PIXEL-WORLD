@@ -28,7 +28,7 @@ describe('role-scoped Agent context', () => {
       },
     }
     const prompts = buildAgentPrompts(request)
-    expect(prompts.user).toContain('Current finalized GameSpec')
+    expect(prompts.user).toContain('Current asset identity and visual plan')
     expect(prompts.user).not.toContain('DO_NOT_SEND_THIS_TO_COORDINATOR')
     expect(prompts.system).toMatch(/do not repeat the complete GameSpec/i)
   })

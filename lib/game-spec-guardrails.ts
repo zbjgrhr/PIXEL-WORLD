@@ -62,7 +62,7 @@ function concreteBackgroundPrompt(asset: AssetDefinition, levels: LevelSpec[]): 
   if (asset.category !== 'levelBackground') return asset
   const level = levels.find((item) => asset.levelIds.includes(item.id))
   if (!level) return asset
-  const prompt = `Environment-only 16-bit side-scrolling pixel-art background for “${level.name}”. ${level.environment} Wide readable traversal lane, layered parallax depth, vivid high-saturation biome colors, luminous clean midtones, colorful shadows, crisp pixel detail, no gray haze or muddy wash, no hero, no enemy, no boss, no weapon, no pickup, no foreground obstacle, no words, no logo, no UI.`
+  const prompt = `Distant 16-bit side-scrolling pixel-art backdrop for “${level.name}”. ${level.environment} Show landmarks behind the action plane, with layered parallax depth and uninterrupted distant scenery in the lower quarter. The game renders its playable ground and collision platforms separately; do not paint a foreground walkway, bridge deck, floor, or platform into this background. Vivid high-saturation biome colors, luminous clean midtones, colorful shadows, crisp pixel detail, no gray haze or muddy wash, no hero, no enemy, no boss, no weapon, no pickup, no foreground obstacle, no words, no logo, no UI.`
   const isGeneric = /placeholder|region\s*\d|generated from|describe this level|关卡背景描述|等待补充/i.test(asset.prompt)
   const basePrompt = isGeneric || !asset.prompt.includes(level.environment) ? prompt : asset.prompt
   const vividContract = 'Vivid high-saturation biome colors, luminous clean midtones, colorful readable shadows, crisp layer separation, no gray haze, no muddy wash, no faded color grade.'
@@ -78,7 +78,7 @@ export function stabilizeGameSpec(spec: GameSpec): GameSpec {
     ...level,
     platformMode: inferredPlatformMode(level),
     enemyCount: Math.min(index === spec.levels.length - 1 ? 5 : 6, Math.max(0, Math.round(level.enemyCount))),
-    collectibleCount: Math.min(8, Math.max(1, Math.round(level.collectibleCount))),
+    collectibleCount: Math.min(8, Math.max(0, Math.round(level.collectibleCount))),
     hasBoss: index === spec.levels.length - 1,
   }))
 

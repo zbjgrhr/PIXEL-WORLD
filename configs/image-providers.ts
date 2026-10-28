@@ -20,7 +20,7 @@ export interface ProviderConfig {
   models: ModelConfig[]
 }
 
-export const OPENROUTER_PRIMARY_IMAGE_MODEL = 'bytedance-seed/seedream-4.5'
+export const OPENROUTER_PRIMARY_IMAGE_MODEL = 'bytedance-seed/seedream-5-0-flash'
 export const OPENROUTER_FLUX_IMAGE_MODEL = 'black-forest-labs/flux.2-pro'
 
 export const IMAGE_PROVIDERS: ProviderConfig[] = [
@@ -91,15 +91,15 @@ export const IMAGE_PROVIDERS: ProviderConfig[] = [
         supportsReferenceImages: true,
       },
       {
-        id: 'bytedance-seed/seedream-5-0-flash',
-        label: 'Seedream 5.0 Flash（快速参考图）',
+        id: OPENROUTER_PRIMARY_IMAGE_MODEL,
+        label: 'Seedream 5.0 Flash（默认）',
         supportsNegativePrompt: false,
         endpointKind: 'openrouter-images',
         supportsReferenceImages: true,
       },
       {
-        id: OPENROUTER_PRIMARY_IMAGE_MODEL,
-        label: 'Seedream 4.5（默认）',
+        id: 'bytedance-seed/seedream-4.5',
+        label: 'Seedream 4.5（可选）',
         supportsNegativePrompt: false,
         endpointKind: 'openrouter-images',
         supportsReferenceImages: true,

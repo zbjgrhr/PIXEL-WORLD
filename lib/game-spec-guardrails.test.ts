@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { PROMPT_TEMPLATES } from '@/configs/prompt-templates'
 import { createFallbackGameSpec } from '@/lib/game-spec'
 import { inspectGameSpec } from '@/lib/agents/validation'
+import { stabilizeGameSpec } from '@/lib/game-spec-guardrails'
 
 describe('GameSpec deterministic guardrails', () => {
   it('turns the Dragon Castle template into compatible five-level assignments', () => {
@@ -37,5 +38,15 @@ describe('GameSpec deterministic guardrails', () => {
       expect(spec.levels.at(-1)?.hasBoss).toBe(true)
       expect(inspectGameSpec(spec).filter((item) => item.severity === 'blocking')).toEqual([])
     }
+  })
+
+  it('keeps newly repaired backgrounds behind the separately rendered ground', () => {
+    const spec = createFallbackGameSpec('云中邮差穿过断桥寻找失踪的信。', '云中邮差', 2)
+    const background = spec.assets.find((asset) => asset.category === 'levelBackground')!
+    background.prompt = 'placeholder'
+    const repaired = stabilizeGameSpec(spec).assets.find((asset) => asset.id === background.id)!
+    expect(repaired.prompt).toContain('playable ground and collision platforms separately')
+    expect(repaired.prompt).toContain('no gray haze')
+    expect(repaired.prompt).not.toContain('Wide readable traversal lane')
   })
 })

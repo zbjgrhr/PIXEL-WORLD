@@ -102,12 +102,16 @@ interface GameStore {
   resetGame: () => void
 }
 
-function migrateGameData(input: unknown, themeId = 'Pixel World'): GameData {
+export function migrateGameData(input: unknown, themeId = 'Pixel World'): GameData {
   const data = input && typeof input === 'object' ? input as GameData : {}
   if (!data.data) return {}
   const levels = Array.isArray(data.data.levels) ? data.data.levels : []
   const fallback = createFallbackGameSpec(themeId, themeId, Math.max(1, levels.length))
-  const spec = normalizeGameSpec(data.data.spec || fallback, fallback, Math.max(1, levels.length))
+  const baseline = data.data.spec?.narrative && fallback.narrative ? { ...fallback, narrative: { ...fallback.narrative, source: data.data.spec.narrative.source } } : fallback
+  const normalized = normalizeGameSpec(data.data.spec || fallback, baseline, Math.max(1, levels.length))
+  // Do not silently add new task gates to old saved games whose real actor
+  // layouts were created before narrative tasks existed.
+  const spec = data.data.spec?.narrative ? normalized : { ...normalized, narrative: undefined }
   const migratedLevels: LevelData[] = levels.map((level, index) => ({
     id: level.id || `level-${index + 1}`,
     backgroundUrl: level.backgroundUrl || '',
@@ -299,6 +303,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       void Promise.all(Object.entries(gameDataByTheme).map(async ([themeId, value]) => {
         if (!value.data?.spec) return [themeId, value] as const
         const hydratedSpec = await hydrateSpecAssets(themeId, value.data.spec)
+        if (!value.data.spec.narrative) return [themeId, { ...value, data: { ...value.data, spec: { ...hydratedSpec, narrative: undefined } } }] as const
         return [themeId, buildGameDataFromSpec(hydratedSpec)] as const
       })).then((entries) => {
         const hydratedByTheme = Object.fromEntries(entries)

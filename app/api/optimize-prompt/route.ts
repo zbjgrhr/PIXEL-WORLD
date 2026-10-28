@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import {
   createFallbackGameSpec,
-  normalizeGameSpec,
-  preserveExplicitPromptFields,
   serializeGameSpec,
 } from '@/lib/game-spec'
-import { stabilizeGameSpec } from '@/lib/game-spec-guardrails'
 import type { GameSpec, ProviderId } from '@/types'
 import { PROMPT_TEMPLATES } from '@/configs/prompt-templates'
 import { apiKeyHasUnsupportedCharacters, normalizeApiKey } from '@/lib/api-key'
 import { isStructuredPromptBlank } from '@/lib/asset-catalog'
 import { mergeProjectBrief } from '@/lib/project-brief'
+import { normalizeModelGameSpec } from '@/lib/model-game-spec'
+import { responseText, type ChatPayload } from '@/lib/agents/execution'
+import { separateStoryIntroduction } from '@/lib/story-introduction'
 
 interface OptimizeRequest {
   prompt?: string
@@ -18,33 +18,45 @@ interface OptimizeRequest {
   story?: string
   levelCount?: number
   provider?: ProviderId
+  model?: string
   apiKey?: string
 }
 
-const SYSTEM_PROMPT = `You are a game-design prompt compiler. Convert the user's idea into one strict JSON GameSpec version 3 for a playable 2D side-scrolling pixel platform combat game.
+const SYSTEM_PROMPT = `You help a player turn a game idea into a coherent 2D pixel adventure. Return one concise JSON object, using only fields you can improve: world, backgroundStory, hero {name, appearance}, boss {name, appearance}, collectible {name}, visualStyle {artDirection, palette, lighting}, narrative {incitingIncident, motivation, conflict, bossRelation, opening, ending}. Write player-facing story in natural Chinese. The player's name, story, explicitly named characters, place, relationships and outcome are facts; never replace them. If the story already has a completed ending, do not rewrite its opening or ending; propose at most two genuinely useful narrative improvements, preferably a missing cause or boss relationship. Omit unchanged fields. Enrich missing motives and visual identity without inventing unsupported game mechanics. Image appearance describes one isolated, consistent character. Do not return levels, assets, audio, rules, a complete GameSpec or markdown. Keep the whole answer short.`
 
-Rules:
-- Keep background, hero, enemy, weapon, ground, obstacle, projectile, attack effect, collectible, and boss visually separate.
-- Asset descriptions must state only what belongs to that asset; never copy a whole scene into a sprite description.
-- Match every explicit labeled field only to its corresponding asset category. A hero field can never become a weapon prompt, and a weapon field can never become a hero prompt.
-- Every image prompt must describe one original, non-branded design. Never mention or imitate an existing game, film, anime, character, franchise, artist, studio, logo, trademark, or living person.
-- Keep image prompts concise. Do not copy the world story or another level's environment into an isolated asset prompt.
-- Preserve the user's theme and important creative choices.
-- The separately supplied game title and story are locked, highest-priority user intent. Every generated world, backgroundStory, hero goal and level must support them without changing their meaning.
-- Produce coherent art direction, palette, lighting, and pixel scale shared by all assets.
-- Unless the user explicitly requests monochrome or muted art, use bright high-saturation color harmony, luminous clean midtones, colorful readable shadows and crisp depth separation. Even night, castle and dungeon levels must avoid gray haze, muddy grading and washed-out highlights.
-- Write backgroundStory as a vivid 120-180 word game introduction with a clear conflict, the hero's goal, the collectible's importance, and the final boss. Do not describe UI or controls.
-- Preserve every non-empty user field verbatim in meaning. Only enrich fields that are blank or underspecified.
-- Keep the exact V3 keys from the schema example, including assets, levelIds, animation, sound, motion, music, effects, and platformMode.
-- Every game includes melee and ranged combat, ground enemies, optional air and water enemies, collectibles, projectiles, attack effects, procedural audio specifications, and at least one boss.
-- Image and spriteSheet assets use pending status unless a URL already exists. Audio and runtime assets use success status because they are synthesized locally.
-- Asset levelIds must reference real level ids. Level-specific backgrounds, music, and effects must each target exactly one level.
-- The final level hasBoss=true; earlier levels haveBoss=false.
-- platformMode must match the level: ground for ordinary terrain, water only for underwater/river zones, air only for floating/aerial traversal. Ground enemies use ground levels, water enemies use water levels, and air enemies never use water levels.
-- Every level background prompt must repeat that level's concrete environment description and must never contain placeholder text.
-- Character action strips always use idle 1 frame, walk 3, jump 2, meleeAttack 3, rangedAttack 3, hit 1, death 2; every frame shows the complete same character from head to feet.
-- Keep ordinary enemyCount at 6 or below (5 or below in the final Boss level), weapon cooldownMs at 420, and ensure Boss plus melee/ranged resources are assigned to the final level.
-- Return JSON only, without markdown.`
+const OPTIMIZER_TIMEOUT_MS = 60_000
+// Leave room for a short reasoning pass and a complete JSON patch, while still
+// bounding cost and latency. Full GameSpec generation belongs to the Agents.
+const OPTIMIZER_OUTPUT_TOKENS = 4000
+
+function compactStory(story: string): string {
+  const value = story.trim()
+  return value.length <= 1800 ? value : `${value.slice(0, 1050)}\n…\n${value.slice(-650)}`
+}
+
+function compactPlayerFields(prompt: string): string {
+  return prompt.split(/\r?\n/).flatMap(line => {
+    const match = line.trim().match(/^([^：:]{1,70})[：:]\s*(.+)$/)
+    if (!match || /^(?:游戏标题|世界观与故事|背景故事)$/.test(match[1].trim())) return []
+    return [`${match[1].trim()}：${match[2].trim().slice(0, 200)}`]
+  }).slice(0, 30).join('\n').slice(0, 3000)
+}
+
+export function optimizerMessages(prompt: string, fallback: GameSpec): Array<{ role: 'system' | 'user'; content: string }> {
+  const story = fallback.narrative?.source.originalStory.split('【已选灵感】')[0].trim() || ''
+  const inspirations = [...prompt.matchAll(/【已选灵感】([^\n]+)/g)].map(match => match[1].trim()).slice(0, 5)
+  const fields = compactPlayerFields(prompt)
+  return [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: [
+      `游戏名称：${fallback.title.slice(0, 160)}`,
+      `玩家故事：${compactStory(story)}`,
+      inspirations.length ? `已选灵感：${inspirations.join('；').slice(0, 600)}` : '',
+      fields ? `玩家已填要求：\n${fields}` : '',
+      `当前草案事实：主角=${fallback.hero.name}；Boss=${fallback.boss.name}；地点=${fallback.world.slice(0, 180)}；目标=${fallback.creativeBrief?.heroGoal || fallback.narrative?.motivation || ''}`,
+    ].filter(Boolean).join('\n') },
+  ]
+}
 
 function optimizerEndpoint(provider: ProviderId): { url: string; model: string } | undefined {
   if (provider === 'openai') {
@@ -68,16 +80,35 @@ function extractJson(content: string): unknown {
   return JSON.parse(cleaned.slice(start, end + 1))
 }
 
+/** Keep one-click completion focused; the full Agent review can propose wider rewrites. */
+export function curateOptimizerCandidate(value: unknown, fallback: GameSpec): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  const candidate = { ...(value as Record<string, unknown>) }
+  const story = fallback.narrative?.source.originalStory.split('【已选灵感】')[0] || ''
+  const hasPlayerEnding = Boolean(separateStoryIntroduction(story).ending)
+  if (hasPlayerEnding) delete candidate.backgroundStory
+  if (candidate.narrative && typeof candidate.narrative === 'object' && !Array.isArray(candidate.narrative)) {
+    const proposed = candidate.narrative as Record<string, unknown>
+    const allowed = hasPlayerEnding
+      ? ['incitingIncident', 'bossRelation', 'conflict', 'motivation']
+      : ['incitingIncident', 'motivation', 'bossRelation', 'conflict', 'opening', 'ending']
+    candidate.narrative = Object.fromEntries(allowed.filter(key => typeof proposed[key] === 'string' && String(proposed[key]).trim()).slice(0, hasPlayerEnding ? 2 : 4).map(key => [key, proposed[key]]))
+  }
+  return candidate
+}
+
 async function optimizeWithAi(
   provider: ProviderId,
   apiKey: string,
   prompt: string,
   fallback: GameSpec,
+  selectedModel?: string,
 ): Promise<unknown> {
   const config = optimizerEndpoint(provider)
   if (!config) throw new Error('当前文字服务不提供兼容的提示词整理接口')
   const response = await fetch(config.url, {
     method: 'POST',
+    signal: AbortSignal.timeout(OPTIMIZER_TIMEOUT_MS),
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
@@ -87,16 +118,14 @@ async function optimizeWithAi(
       } : {}),
     },
     body: JSON.stringify({
-      model: config.model,
+      model: selectedModel?.trim() || config.model,
       temperature: 0.25,
+      max_tokens: OPTIMIZER_OUTPUT_TOKENS,
+      ...(provider === 'openrouter' && selectedModel?.trim() === 'qwen/qwen3.8-flash'
+        ? { reasoning: { effort: 'low' } }
+        : {}),
       response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: `Requested level count: ${fallback.levels.length}\nFallback schema example (keep these exact keys):\n${JSON.stringify(fallback)}\n\nUser idea:\n${prompt}`,
-        },
-      ],
+      messages: optimizerMessages(prompt, fallback),
     }),
   })
 
@@ -105,12 +134,10 @@ async function optimizeWithAi(
     throw new Error(`Prompt optimizer API failed (${response.status}): ${detail.slice(0, 180)}`)
   }
 
-  const payload = await response.json() as {
-    choices?: Array<{ message?: { content?: string } }>
-  }
-  const content = payload.choices?.[0]?.message?.content
+  const payload = await response.json() as ChatPayload
+  const content = responseText(payload)
   if (!content) throw new Error('Prompt optimizer returned an empty response')
-  return extractJson(content)
+  return curateOptimizerCandidate(extractJson(content), fallback)
 }
 
 export async function POST(request: NextRequest) {
@@ -150,16 +177,20 @@ export async function POST(request: NextRequest) {
       source = 'template'
     } else if (apiKey && config) {
       try {
-        const candidate = await optimizeWithAi(provider, apiKey, prompt, fallback)
-        spec = preserveExplicitPromptFields(stabilizeGameSpec(normalizeGameSpec(candidate, fallback, levelCount)), fallback, prompt)
+        const candidate = await optimizeWithAi(provider, apiKey, prompt, fallback, body.model)
+        spec = normalizeModelGameSpec(candidate, fallback, levelCount, prompt)
         source = 'ai'
       } catch (error) {
-        warning = error instanceof Error
-          ? `AI optimization was unavailable, so the reliable local compiler was used: ${error.message}`
-          : 'AI optimization was unavailable, so the reliable local compiler was used.'
+        warning = error instanceof Error && /TimeoutError|AbortError/.test(error.name)
+          ? '文字模型在 60 秒内未完成补全，已保留可审核的本地草案。你可以继续制作，或换模型后重试。'
+          : error instanceof Error
+            ? `文字模型补全未完成，已保留可审核的本地草案：${error.message.slice(0, 180)}`
+            : '文字模型补全未完成，已保留可审核的本地草案。'
       }
     } else {
-      warning = '已在本地整理游戏构想；选择文字 Agent 并运行后，会继续策划和评审。'
+      warning = config && !apiKey
+        ? '所选文字服务尚未填写 API Key，已生成可审核的本地草案。填写 Key 后可重新补全。'
+        : '已在本地整理游戏构想；选择文字 Agent 并运行后，会继续策划和评审。'
     }
 
     return NextResponse.json({

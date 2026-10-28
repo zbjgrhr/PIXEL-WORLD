@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Button, Input, Select, Space, Alert, message } from 'antd'
 import { useGameStore } from '@/lib/store'
@@ -31,6 +31,7 @@ import AiAccessTabs from './ui/AiAccessTabs'
 import CustomConnectionFields from './ui/CustomConnectionFields'
 import AiProviderChoice from './ui/AiProviderChoice'
 import StageHeading from './ui/StageHeading'
+import WorkflowNotice, { type WorkflowFeedback } from './ui/WorkflowNotice'
 import InspirationLibrary, { type InspirationTarget } from './ui/InspirationLibrary'
 import ThemesList from './ThemesList'
 import { getApiPlatformGuide } from '@/configs/api-platform-guide'
@@ -40,6 +41,11 @@ import { isLocalAgentProvider } from '@/lib/agents/config'
 import { executeLocalAgentTask } from '@/lib/agents/local-client'
 import { createWebLlmCreativePatch, isWebLlmReady } from '@/lib/agents/webllm-client'
 import { applyWebLlmCreativePatch } from '@/lib/agents/webllm-lite'
+import { mergeRefinement, type RefinementScope } from '@/lib/refine-game-spec'
+import { sameSpecExceptSuggestions } from '@/lib/narrative-suggestions'
+import { preservePlanningMedia } from '@/lib/agents/draft-revision'
+import { normalizeGameSpec } from '@/lib/game-spec'
+import { mergeCompletedDraft } from '@/lib/completed-draft'
 import { selectedInspirationTexts } from '@/configs/inspiration-packs'
 import type {
   AnimationClipPose,
@@ -80,6 +86,7 @@ export interface SideMenuProps {
   activeStage: 'idea' | 'agents' | 'assets'
   onStageChange: (stage: 'idea' | 'agents' | 'assets') => void
   workspaceTarget: HTMLDivElement | null
+  onPreviewStaleChange?: (stale: boolean) => void
 }
 
 const EMPTY_GENERATING = Object.fromEntries(ASSET_TYPES.map((type) => [type, false])) as RegeneratingImages
@@ -133,6 +140,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
   activeStage,
   onStageChange,
   workspaceTarget,
+  onPreviewStaleChange,
 }) => {
   const {
     selectedTheme, customPrompt, levelCount, setSelectedTheme, setCustomPrompt, setLevelCount,
@@ -142,7 +150,10 @@ const SideMenu: React.FC<SideMenuProps> = ({
   const [customStory, setCustomStory] = useState('')
   const [isThemeCreated, setIsThemeCreated] = useState(false)
   const [optimizedSpec, setOptimizedSpec] = useState<GameSpec | null>(null)
-  const [creationMode, setCreationMode] = useState<'agent' | 'classic'>('agent')
+  const [planningLabel, setPlanningLabel] = useState('尚未补全')
+  const [completionFeedback, setCompletionFeedback] = useState<WorkflowFeedback | null>(null)
+  const [imageFeedback, setImageFeedback] = useState<WorkflowFeedback | null>(null)
+  const [previewStale, setPreviewStale] = useState(false)
   const [imageSource, setImageSource] = useState<'builtin' | 'upload' | 'comfy' | 'byok' | 'custom'>('builtin')
   const [imageAccessMode, setImageAccessMode] = useState<AiAccessMode>('ready')
   const [readyImageSource, setReadyImageSource] = useState<'builtin' | 'upload' | 'comfy'>('builtin')
@@ -165,6 +176,20 @@ const SideMenu: React.FC<SideMenuProps> = ({
   const briefRevisionRef = useRef(0)
   const [inputRevision, setInputRevision] = useState(0)
   const [agentReviewTarget, setAgentReviewTarget] = useState<HTMLDivElement | null>(null)
+
+  useEffect(() => { onPreviewStaleChange?.(previewStale) }, [previewStale, onPreviewStaleChange])
+  const handlePlanningStateChange = useCallback((state: { label: string; approved: boolean }) => {
+    setPlanningLabel(state.label)
+    setAgentApproved(state.approved)
+  }, [])
+  const invalidateBrief = () => {
+    setCompletionFeedback(null)
+    setAgentApproved(false)
+    setPreviewStale(true)
+  }
+  const reportImageError = (detail: string) => {
+    setImageFeedback({ tone: 'error', title: '素材操作未完成', description: '已完成的素材会保留。检查当前图片来源和配置后重试，也可以主动改用内置素材。', detail })
+  }
 
   useEffect(() => {
     const mode = loadAiAccessMode('image')
@@ -216,10 +241,11 @@ const SideMenu: React.FC<SideMenuProps> = ({
 
   const restoreSavedDraft = () => {
     if (!savedDraft) return
+    invalidateBrief()
     briefRevisionRef.current += 1
     setInputRevision((revision) => revision + 1)
     const restoredPrompt = savedDraft.prompt?.trim() || buildStructuredPrompt(savedDraft.spec.levels.length)
-    optimizedInputRef.current = savedDraft.sourcePrompt && savedDraft.sourcePrompt !== restoredPrompt
+    optimizedInputRef.current = typeof savedDraft.sourcePrompt === 'string' && savedDraft.sourcePrompt !== restoredPrompt
       ? { source: savedDraft.sourcePrompt, generated: restoredPrompt }
       : null
     setCustomThemeName(savedDraft.name || savedDraft.spec.title)
@@ -228,7 +254,12 @@ const SideMenu: React.FC<SideMenuProps> = ({
     setLevelCount(savedDraft.spec.levels.length)
     setOptimizedSpec(savedDraft.spec)
     setAgentApproved(false)
-    void hydrateSpecAssets(DRAFT_PROJECT_ID, savedDraft.spec).then((hydrated) => setOptimizedSpec(hydrated))
+    const restoredRevision = briefRevisionRef.current
+    void hydrateSpecAssets(DRAFT_PROJECT_ID, savedDraft.spec).then((hydrated) => {
+      if (briefRevisionRef.current === restoredRevision) setOptimizedSpec(hydrated)
+    }).catch((error: unknown) => {
+      if (briefRevisionRef.current === restoredRevision) reportImageError(error instanceof Error ? error.message : '缓存图片读取失败。')
+    })
     setSavedDraft(null)
     message.success('已恢复上次素材规划；新建页面默认仍保持空白字段。')
   }
@@ -243,6 +274,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
 
   const updateSpec = (spec: GameSpec, prompt?: string) => {
     setOptimizedSpec(spec)
+    setPreviewStale(true)
     persistDraft(spec, prompt)
   }
 
@@ -254,6 +286,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
 
   const applyInspiration = (target: InspirationTarget, text: string) => {
     if (target === 'story' && customStory.includes(text)) return void message.info('这条灵感已在故事中。')
+    invalidateBrief()
     briefRevisionRef.current += 1
     setInputRevision((revision) => revision + 1)
     const sourcePrompt = customPrompt === optimizedInputRef.current?.generated
@@ -325,7 +358,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
     message.success('已用内置图片补齐缺项，上传素材保持不变。')
   }
 
-  const optimizePrompt = async (quiet = false, promptOverride?: string, themeOverride?: string): Promise<GameSpec | null> => {
+  const optimizePrompt = async (quiet = false, promptOverride?: string, themeOverride?: string, scope?: RefinementScope): Promise<GameSpec | null> => {
     if (optimizationInFlight.current) return null
     if (isAgentBusy) {
       if (!quiet) message.info('Agent 正在处理任务，请等待结束后再补全设定。')
@@ -343,21 +376,32 @@ const SideMenu: React.FC<SideMenuProps> = ({
       ? optimizedInputRef.current.source
       : currentPrompt).trim()
     const prompt = rawPrompt || buildStructuredPrompt(levelCount)
+    const connection = textOptimizer
+    const cloudOptimizer = connection.provider === 'dashscope' || connection.provider === 'openrouter' || connection.provider === 'openai'
     optimizationInFlight.current = true
     setIsOptimizing(true)
+    setCompletionFeedback(null)
     try {
       const response = await fetch('/api/optimize-prompt', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, story, theme: projectName, levelCount }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(70_000),
+        body: JSON.stringify({ prompt, story, theme: projectName, levelCount,
+          ...(cloudOptimizer ? { provider: connection.provider, model: connection.model, apiKey: connection.apiKey.trim() } : {}),
+        }),
       })
       const result = await response.json()
       if (!response.ok || !result.success) throw new Error(result.error || '提示词优化失败。')
-      let spec = result.data.spec as GameSpec
-      let usedModel = false
-      let modelWarning = ''
-      const connection = textOptimizer
-      if (connection.provider && connection.model) {
-        const sourceBrief = mergeProjectBrief(prompt, projectName, story)
+      const localDraft = result.data.spec as GameSpec
+      // A fresh rules baseline must not replace the player's field provenance
+      // and locks when refining an existing draft of the same story.
+      const baseline = optimizedSpec?.narrative && localDraft.narrative
+        ? { ...localDraft, narrative: { ...localDraft.narrative, source: optimizedSpec.narrative.source } }
+        : localDraft
+      const playerEditedDraft = optimizedSpec?.narrative?.source.origin === 'player'
+      let spec = mergeCompletedDraft(optimizedSpec, baseline, levelCount)
+      let usedModel = result.data.source === 'ai'
+      let modelWarning = cloudOptimizer ? result.data.warning || '' : ''
+      if (connection.provider && connection.model && !cloudOptimizer) {
+        const sourceBrief = mergeProjectBrief(prompt, projectName, story) + (scope ? `\n【本次只优化此组】${scope}。保持其他组内容和锁定原文不变。` : '')
         if (connection.provider === 'webllm') {
           if (!isWebLlmReady(connection.model)) {
             modelWarning = 'WebLLM 尚未准备完成，已使用稳定的本地草案。先在文字策划中准备浏览器模型，再进行轻量灵感补全。'
@@ -387,12 +431,12 @@ const SideMenu: React.FC<SideMenuProps> = ({
               sourcePrompt: sourceBrief,
               projectName,
               levelCount,
-              baseSpec: spec,
+              baseSpec: stripLargeAssetUrls(spec),
               artifacts: {},
             }
             const agentResult: AgentExecuteResponse = isLocalAgentProvider(connection.provider)
               ? await executeLocalAgentTask(task)
-              : await fetch('/api/agents/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(task) })
+              : await fetch('/api/agents/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(55_000), body: JSON.stringify(task) })
                 .then((reply) => reply.json() as Promise<AgentExecuteResponse>)
             const candidate = agentResult.data?.artifact.spec as GameSpec | undefined
             if (!agentResult.success || !candidate) throw new Error(agentResult.error || '模型没有返回可用的游戏规格。')
@@ -408,15 +452,29 @@ const SideMenu: React.FC<SideMenuProps> = ({
         }
       }
       if (revision !== briefRevisionRef.current) {
+        setCompletionFeedback({ tone: 'warning', title: '内容已修改，未应用这次结果', description: '请按最新的名称和故事重新补全。' })
         if (!quiet) message.info('填写内容已变化；请基于最新的名称和故事重新补全。')
         return null
       }
+      if (scope && optimizedSpec) spec = mergeRefinement(optimizedSpec, spec, scope)
+      spec = preservePlanningMedia(spec, optimizedSpec || undefined)
+      if (spec.narrative) spec = { ...spec, narrative: { ...spec.narrative, source: { ...spec.narrative.source, origin: playerEditedDraft ? 'player' : usedModel ? 'model' : 'rules' } } }
       const generatedPrompt = serializeGameSpec(spec)
       optimizedInputRef.current = { source: rawPrompt, generated: generatedPrompt }
       updateSpec(spec, generatedPrompt)
       setCustomPrompt(generatedPrompt)
       setAgentApproved(false)
       setInputRevision((value) => value + 1)
+      setPreviewStale(true)
+      setCompletionFeedback({
+        tone: !usedModel && modelWarning && !/尚未填写 API Key/.test(modelWarning) ? 'warning' : 'success',
+        title: usedModel ? `已使用 ${connection.model} 补全设定`
+          : /尚未填写 API Key/.test(modelWarning) ? '已用内置规则生成草案；所选服务缺少 Key'
+            : modelWarning ? '文字模型未完成补全，已保留当前草案'
+              : '已用内置规则生成本地草案',
+        description: '你的名称、故事和手填要求已保留。检查草案后仍需你批准；本次没有生成图片。',
+        detail: modelWarning || undefined,
+      })
       if (!quiet) {
         message.success(usedModel
           ? '所选文字模型已围绕名称和故事补全游戏设定。'
@@ -427,7 +485,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
       }
       return spec
     } catch (error) {
-      if (!quiet) message.error(error instanceof Error ? error.message : '提示词优化失败。')
+      setCompletionFeedback({ tone: 'error', title: '补全未完成，原有输入已保留', description: '可以再次补全，或在文字来源中选择内置规则。', detail: error instanceof Error ? error.message : '提示词优化失败。' })
       return null
     } finally {
       optimizationInFlight.current = false
@@ -480,16 +538,17 @@ const SideMenu: React.FC<SideMenuProps> = ({
   }
 
   const testApi = async () => {
+    setImageFeedback(null)
     if (imageSource === 'custom') {
       const issue = customConnectionError(customImage)
-      if (issue) return void message.error(issue)
+      if (issue) return void reportImageError(issue)
       setIsTesting(true)
       try {
         const response = await fetch('/api/custom-connection/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ baseUrl: customImage.baseUrl.trim(), model: customImage.model.trim(), apiKey: customImage.apiKey.trim() }) })
         const result = await response.json().catch(() => null)
         if (!response.ok || !result?.success) throw new Error(result?.error || `HTTP ${response.status}`)
         message.success('图片接口已返回有效测试图片。')
-      } catch (error) { message.error(error instanceof Error ? error.message : '图片接口测试失败。') }
+      } catch (error) { reportImageError(error instanceof Error ? error.message : '图片接口测试失败。') }
       finally { setIsTesting(false) }
       return
     }
@@ -497,39 +556,40 @@ const SideMenu: React.FC<SideMenuProps> = ({
     if (imageSource === 'comfy') {
       setComfyDetecting(true)
       try { const models = await discoverComfyCheckpoints(comfyEndpoint); setComfyCheckpoints(models); if (models.length && !models.includes(comfyCheckpoint)) setComfyCheckpoint(models[0]); message.success(`检测到 ${models.length} 个 ComfyUI 检查点。`) }
-      catch (error) { message.error(error instanceof Error ? error.message : 'ComfyUI 连接失败。') }
+      catch (error) { reportImageError(error instanceof Error ? error.message : 'ComfyUI 连接失败。') }
       finally { setComfyDetecting(false) }
       return
     }
-    if (!apiKey.trim()) return void message.error('请先填写 API Key。')
+    if (!apiKey.trim()) return void reportImageError('请先填写 API Key。')
     let spec = optimizedSpec
     if (!spec) spec = await optimizePrompt(true)
     if (!spec) return
     const source = spec.assets.find((asset) => asset.category === 'collectible')
-    if (!source) return void message.error('当前规格没有可用于测试的收集品素材。')
+    if (!source) return void reportImageError('当前规格没有可用于测试的收集品素材。')
     setIsTesting(true)
     try {
       await requestAsset(spec, { ...source, id: `api-test-${Date.now()}`, title: 'API Test', prompt: 'One tiny luminous pixel crystal pickup for API validation.' })
       message.success('API 测试成功：模型已经返回有效图片。')
     } catch (error) {
-      message.error(error instanceof Error ? error.message : 'API 测试失败。')
+      reportImageError(error instanceof Error ? error.message : 'API 测试失败。')
     } finally {
       setIsTesting(false)
     }
   }
 
   const generateSelectedAssets = async () => {
+    setImageFeedback(null)
     if (abortRef.current) return void message.info('素材正在生成，请等待完成或先取消。')
-    if (creationMode === 'agent' && !agentApproved) return void message.error('请先完成 Agent 集群评审，并点击“批准规格并开放生图”。')
+    if (!agentApproved) return void reportImageError('请先检查草案，并点击“批准规格并开放生图”。')
     if (imageSource === 'builtin') return createBuiltinGame()
     if (imageSource === 'upload') return void message.info('请在素材卡片逐项上传图片，或主动用内置素材补齐。')
-    if (imageSource === 'byok' && !apiKey.trim()) return void message.error('图片生成需要 API Key。')
-    if (imageSource === 'custom') { const issue = customConnectionError(customImage); if (issue) return void message.error(issue) }
+    if (imageSource === 'byok' && !apiKey.trim()) return void reportImageError('图片生成需要 API Key。')
+    if (imageSource === 'custom') { const issue = customConnectionError(customImage); if (issue) return void reportImageError(issue) }
     let baseSpec = optimizedSpec
     if (!baseSpec || baseSpec.levels.length !== levelCount) baseSpec = await optimizePrompt(true)
-    if (!baseSpec) return void message.error('请先点击“一键优化提示词”建立 V3 素材规划。')
+    if (!baseSpec) return void reportImageError('请先点击“一键优化提示词”建立 V3 素材规划。')
     if (imageSource === 'comfy') {
-      if (!comfyCheckpoint) return void message.error('请先检测并选择 ComfyUI 检查点。')
+      if (!comfyCheckpoint) return void reportImageError('请先检测并选择 ComfyUI 检查点。')
       const builtIn = buildBuiltinGameSpec(baseSpec)
       baseSpec = { ...baseSpec, assets: baseSpec.assets.map((asset, index) => asset.kind === 'spriteSheet' ? builtIn.assets[index] : asset) }
     }
@@ -658,12 +718,20 @@ const SideMenu: React.FC<SideMenuProps> = ({
       setIsThemeCreated(true)
       setGameState('menu')
       updateSpec(finalSpec)
+      setPreviewStale(false)
       const failures = finalAssets.filter((asset) => asset.status === 'failed').length
+      setImageFeedback({ tone: failures || controller.signal.aborted ? 'warning' : 'success', title: failures ? `${failures} 个素材需要处理` : controller.signal.aborted ? '生成已停止' : '素材制作完成', description: failures ? '成功素材已保留；在右栏查看失败的素材或动作并单独重试。' : '已有结果保留在右栏，可以检查、试玩和导出。' })
       if (failures) message.warning(`已保留成功素材；${failures} 个任务失败，可在素材卡片中重试。`)
       else if (controller.signal.aborted) message.info('生成已停止，已完成素材全部保留。')
       else message.success('已选择素材全部生成完成，可以开始游戏或导出。')
       onCreateTheme?.()
       setTimeout(() => { if (themesListRef?.current) themesListRef.current.scrollTop = themesListRef.current.scrollHeight }, 100)
+    } catch (error) {
+      reportImageError(error instanceof Error ? error.message : '素材生成失败。')
+      useGameStore.getState().removeGameDataForTheme(loadingId)
+      onThemeUpdate?.(themes.filter((theme) => !theme.isLoading))
+      setSelectedTheme(selectedTheme)
+      setGameState('menu')
     } finally {
       abortRef.current = null
       setLoading(false)
@@ -686,26 +754,28 @@ const SideMenu: React.FC<SideMenuProps> = ({
     onThemeUpdate?.(next); setGameData(gameData, id); setSelectedTheme(id)
     requestAnimationFrame(() => document.getElementById('preview-publish')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
     setGameState('menu'); setIsThemeCreated(true); updateSpec(spec); onCreateTheme?.()
+    setPreviewStale(false)
+    setImageFeedback({ tone: 'success', title: '游戏已创建', description: '右栏已更新。先试玩检查玩法，之后仍可替换素材或导出离线游戏。' })
     message.success(successMessage)
   }
 
   const createBuiltinGame = async () => {
-    if (creationMode === 'agent' && !agentApproved) return void message.error('请先完成 Agent 集群评审，并点击“批准规格并开放生图”。')
+    if (!agentApproved) return void reportImageError('请先检查草案，并点击“批准规格并开放生图”。')
     const base = optimizedSpec || await optimizePrompt(true)
-    if (!base) return void message.error('游戏规格创建失败。')
+    if (!base) return void reportImageError('游戏规格创建失败。')
     await publishPreparedGame(buildBuiltinGameSpec(base, `${customThemeName} ${customStory}`), '已使用内置像素素材创建可玩的游戏。')
   }
 
   const createUploadedGame = async () => {
-    if (creationMode === 'agent' && !agentApproved) return void message.error('请先批准 Agent 游戏规格。')
-    if (!optimizedSpec) return void message.error('请先建立游戏规格。')
+    if (!agentApproved) return void reportImageError('请先检查并批准游戏规格。')
+    if (!optimizedSpec) return void reportImageError('请先建立游戏规格。')
     const missing = optimizedSpec.assets.flatMap((asset) => {
       if (!asset.enabled || (asset.kind !== 'image' && asset.kind !== 'spriteSheet')) return []
       if (asset.kind === 'image') return asset.url ? [] : [asset.title]
       const animation = normalizeAnimationSpec(asset.animation)
       return animationClipPoses(asset).filter((pose) => !animation.clips?.[pose]?.url).map((pose) => `${asset.title} · ${pose}`)
     })
-    if (missing.length) return void message.error(`还缺 ${missing.slice(0, 3).join('、')}${missing.length > 3 ? ` 等 ${missing.length} 项` : ''}；可上传或点击“用内置素材补齐缺项”。`, 8)
+    if (missing.length) return void reportImageError(`还缺 ${missing.slice(0, 3).join('、')}${missing.length > 3 ? ` 等 ${missing.length} 项` : ''}；可上传或点击“用内置素材补齐缺项”。`)
     await publishPreparedGame(optimizedSpec, '已用上传素材创建可玩的游戏。')
   }
 
@@ -723,7 +793,8 @@ const SideMenu: React.FC<SideMenuProps> = ({
   }
 
   const storyReady = Boolean(customThemeName.trim() && customStory.trim())
-  const planningReady = creationMode === 'agent' ? agentApproved : Boolean(optimizedSpec)
+  const planningReady = agentApproved
+  const currentGameCreated = isThemeCreated && planningReady && !previewStale
 
   return <>
     <div className={`${className || ''} creator-sidebar studio-control-rail`} style={{ padding: 16, height: 'auto', overflow: 'visible', ...style }}>
@@ -731,13 +802,13 @@ const SideMenu: React.FC<SideMenuProps> = ({
         <nav className="studio-step-nav" aria-label="制作步骤">
           <div className="studio-step-nav-heading"><strong>制作进度</strong><span>选择步骤，查看当前要做的事</span></div>
           <button className={`studio-step-idea${activeStage === 'idea' ? ' is-active' : ''}${storyReady ? ' is-complete' : ''}`} aria-current={activeStage === 'idea' ? 'step' : undefined} onClick={() => onStageChange('idea')}><b>01</b><span>写故事<small>{storyReady ? '名称与故事已填写' : '填写名称与故事'}</small></span></button>
-          <button className={`studio-step-agents${activeStage === 'agents' ? ' is-active' : ''}${planningReady ? ' is-complete' : ''}`} aria-current={activeStage === 'agents' ? 'step' : undefined} onClick={() => onStageChange('agents')}><b>02</b><span>AI 策划<small>{planningReady ? '规格已确认' : optimizedSpec ? '草案已建立' : '选择模型并补全'}</small></span></button>
-          <button className={`studio-step-assets${activeStage === 'assets' ? ' is-active' : ''}${isThemeCreated ? ' is-complete' : ''}`} aria-current={activeStage === 'assets' ? 'step' : undefined} onClick={() => onStageChange('assets')}><b>03</b><span>做素材<small>{isThemeCreated ? '游戏已创建' : !planningReady ? '先完成策划' : '选择来源并制作'}</small></span></button>
+          <button className={`studio-step-agents${activeStage === 'agents' ? ' is-active' : ''}${planningReady ? ' is-complete' : ''}`} aria-current={activeStage === 'agents' ? 'step' : undefined} onClick={() => onStageChange('agents')}><b>02</b><span>AI 策划<small>{planningReady ? '规格已确认' : isOptimizing ? '正在补全' : isAgentBusy ? '策划处理中' : planningLabel}</small></span></button>
+          <button className={`studio-step-assets${activeStage === 'assets' ? ' is-active' : ''}${currentGameCreated ? ' is-complete' : ''}`} aria-current={activeStage === 'assets' ? 'step' : undefined} onClick={() => onStageChange('assets')}><b>03</b><span>做素材<small>{currentGameCreated ? '游戏已创建' : !planningReady ? '先完成策划' : '选择来源并制作'}</small></span></button>
         </nav>
         <div className={`studio-control-stage-intro studio-control-stage-${activeStage}`}>
           <span>第 {activeStage === 'idea' ? '1' : activeStage === 'agents' ? '2' : '3'} 步 · 当前操作</span>
-          <h2>{activeStage === 'idea' ? '写故事' : activeStage === 'agents' ? 'AI 策划' : '做素材'}</h2>
-          <p>{activeStage === 'idea' ? '先在中栏写下游戏名称与故事；完成后会进入策划。' : activeStage === 'agents' ? '在这里选择文字工具；策划与审核结果会显示在中栏。' : '在这里选择图片来源，再到中栏制作素材。'}</p>
+        <h2>{activeStage === 'idea' ? '写故事' : activeStage === 'agents' ? 'AI 策划' : '做素材'}</h2>
+          <p>{activeStage === 'idea' ? '先在中栏写下游戏名称与故事；完成后会进入策划。' : activeStage === 'agents' ? '补全草案，再到中栏确认；文字模型可选。' : '在这里选择图片来源，再到中栏制作素材。'}</p>
         </div>
         {activeStage === 'idea' && <div className="studio-step-guidance">
           <strong>{storyReady ? '名称和故事已经写好' : '从你的故事开始'}</strong>
@@ -745,7 +816,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
           <Button type="link" onClick={() => document.getElementById('game-idea')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>前往中栏填写与检查 →</Button>
         </div>}
         <section id="agent-studio" className="studio-control-content section-anchor" hidden={activeStage !== 'agents'}>
-          <div className="agent-studio-shell" hidden={creationMode !== 'agent'}><AgentStudio
+          <div className="agent-studio-shell"><AgentStudio
             embedded
             projectId={DRAFT_PROJECT_ID}
             sourcePrompt={composeProjectPrompt(customThemeName, customStory, customPrompt === optimizedInputRef.current?.generated ? optimizedInputRef.current.source : customPrompt, levelCount)}
@@ -760,32 +831,50 @@ const SideMenu: React.FC<SideMenuProps> = ({
             onApprovedRestored={(spec) => { updateSpec(spec); setAgentApproved(true) }}
             onBusyChange={setIsAgentBusy}
             onTextConnectionChange={setTextOptimizer}
-            reviewTarget={creationMode === 'agent' && activeStage === 'agents' ? agentReviewTarget : null}
+            reviewTarget={activeStage === 'agents' ? agentReviewTarget : null}
+            completionNotice={completionFeedback && <WorkflowNotice feedback={completionFeedback} />}
+            onEditStory={() => onStageChange('idea')}
+            onDraftChange={(next, suggestionsOnly) => {
+              if (isAgentBusy || isOptimizing) return
+              if (suggestionsOnly && optimizedSpec && sameSpecExceptSuggestions(optimizedSpec, next)) {
+                setOptimizedSpec(next)
+                persistDraft(next)
+                return
+              }
+              invalidateBrief()
+              briefRevisionRef.current += 1
+              setInputRevision(revision => revision + 1)
+              const generated = serializeGameSpec(next)
+              optimizedInputRef.current = { source: optimizedInputRef.current?.source ?? customPrompt, generated }
+              setCustomPrompt(generated)
+              updateSpec({ ...next, narrative: next.narrative ? { ...next.narrative, source: { ...next.narrative.source, origin: 'player' } } : undefined }, generated)
+            }}
+            onRefine={(scope) => { void optimizePrompt(false, undefined, undefined, scope) }}
+            onContinueAssets={() => onStageChange('assets')}
+            onPlanningStateChange={handlePlanningStateChange}
             inputRevision={inputRevision}
           /></div>
-          {creationMode === 'classic' && <div className="nav-section-placeholder">
-            <p>传统模式使用本地草案。切换到 Agent 集群后，可让多个 Agent 策划、评审并修正规格。</p>
-            <Button onClick={() => { setCreationMode('agent'); setAgentApproved(false); onStageChange('agents') }}>启用 Agent 集群</Button>
-          </div>}
+
         </section>
         <section id="image-lab" className="studio-control-content section-anchor" hidden={activeStage !== 'assets'}>
-          {creationMode === 'agent' && !agentApproved ? <div className="stage-gate-note" role="status"><strong>先批准 GameSpec</strong><span>批准后可在这里选图片来源，中栏制作素材。</span></div> : <Space direction="vertical" style={{ width: '100%' }}>
-            <AiAccessTabs value={imageAccessMode} onChange={changeImageAccessMode} kind="image" />
-            {imageAccessMode === 'ready' ? <Select value={readyImageSource} onChange={(value: 'builtin' | 'upload' | 'comfy') => { setReadyImageSource(value); setImageSource(value); localStorage.setItem('pixel-world-image-ready-choice', value) }} style={{ width: '100%' }} options={[
+          {!agentApproved ? <div className="stage-gate-note" role="status"><strong>先批准 GameSpec</strong><span>先到 AI 策划检查草案并批准，再回来选择图片来源。</span><Button onClick={() => onStageChange('agents')}>前往检查与审核</Button></div> : <Space direction="vertical" style={{ width: '100%' }}>
+            <AiAccessTabs value={imageAccessMode} onChange={changeImageAccessMode} kind="image" disabled={isLoading} />
+            {imageAccessMode === 'ready' ? <Select disabled={isLoading} aria-label="图片来源" value={readyImageSource} onChange={(value: 'builtin' | 'upload' | 'comfy') => { setReadyImageSource(value); setImageSource(value); localStorage.setItem('pixel-world-image-ready-choice', value) }} style={{ width: '100%' }} options={[
               { value: 'builtin', label: <AiProviderChoice name="内置像素素材" note="打开即用" color="#338a70" /> },
               { value: 'upload', label: <AiProviderChoice name="上传自己的图片" note="免 Key" color="#e58a3b" /> },
               { value: 'comfy', label: <AiProviderChoice name="ComfyUI Desktop" note="本机生图" color="#9160d4" /> },
-            ]} /> : <Select value={ownImageSource === 'custom' ? 'custom' : selectedProvider} onChange={(value: ProviderId) => { if (value === 'custom') { setOwnImageSource('custom'); setImageSource('custom'); localStorage.setItem('pixel-world-image-own-choice', 'custom') } else { onProviderChange(value); setOwnImageSource('byok'); setImageSource('byok'); localStorage.setItem('pixel-world-image-own-choice', 'byok') } }} style={{ width: '100%' }} options={[...IMAGE_PROVIDERS.map((provider) => ({ value: provider.id, label: <AiProviderChoice name={provider.labelZh || provider.label} note={getApiPlatformGuide(provider.id).strengths[0]} color={getApiPlatformGuide(provider.id).accent} /> })), { value: 'custom', label: <AiProviderChoice name="手动接入其他服务" note="自定义接口" color="#317d70" /> }]} />}
+            ]} /> : <Select disabled={isLoading} value={ownImageSource === 'custom' ? 'custom' : selectedProvider} onChange={(value: ProviderId) => { if (value === 'custom') { setOwnImageSource('custom'); setImageSource('custom'); localStorage.setItem('pixel-world-image-own-choice', 'custom') } else { onProviderChange(value); setOwnImageSource('byok'); setImageSource('byok'); localStorage.setItem('pixel-world-image-own-choice', 'byok') } }} style={{ width: '100%' }} options={[...IMAGE_PROVIDERS.map((provider) => ({ value: provider.id, label: <AiProviderChoice name={provider.labelZh || provider.label} note={getApiPlatformGuide(provider.id).strengths[0]} color={getApiPlatformGuide(provider.id).accent} /> })), { value: 'custom', label: <AiProviderChoice name="手动接入其他服务" note="自定义接口" color="#317d70" /> }]} />}
             {imageSource === 'upload' && <p className="ai-source-help">在中栏素材卡片逐项上传图片；角色也能按动作上传帧条。</p>}
-            {imageSource === 'comfy' && <><Input value={comfyEndpoint} onChange={(event) => setComfyEndpoint(event.target.value)} placeholder="http://127.0.0.1:8188" /><Space wrap><Button loading={comfyDetecting} onClick={() => { void testApi() }}>检测 ComfyUI</Button><Select value={comfyCheckpoint || undefined} onChange={setComfyCheckpoint} placeholder="选择检查点模型" style={{ minWidth: 220 }} options={comfyCheckpoints.map((name) => ({ value: name, label: name }))} /></Space><Alert type="info" showIcon message={<span><a href="https://comfy.org/download" target="_blank" rel="noopener noreferrer">下载 ComfyUI Desktop ↗</a> · 浏览器直连本机；需启动服务并允许跨域访问。角色动作暂用内置素材。</span>} /></>}
-            {imageSource === 'byok' && <ModelSelector hideProviderSelector selectedProvider={selectedProvider} onProviderChange={onProviderChange} selectedModel={selectedModel} onModelChange={onModelChange} apiKey={apiKey} onApiKeyChange={onApiKeyChange} />}
-            {imageSource === 'custom' && <><CustomConnectionFields kind="image" value={customImage} onChange={changeCustomImage} /><Space wrap><Button loading={isTesting} onClick={() => { void testApi() }}>测试连接</Button><span className="ai-cost-hint">测试会实际生成一张小图，可能产生一次调用费用。</span></Space></>}
+            {imageSource === 'comfy' && <><Input disabled={isLoading} value={comfyEndpoint} onChange={(event) => setComfyEndpoint(event.target.value)} placeholder="http://127.0.0.1:8188" /><Space wrap><Button loading={comfyDetecting} onClick={() => { void testApi() }}>检测 ComfyUI</Button><Select disabled={isLoading} value={comfyCheckpoint || undefined} onChange={setComfyCheckpoint} placeholder="选择检查点模型" style={{ minWidth: 220 }} options={comfyCheckpoints.map((name) => ({ value: name, label: name }))} /></Space><Alert type="info" showIcon message={<span><a href="https://comfy.org/download" target="_blank" rel="noopener noreferrer">下载 ComfyUI Desktop ↗</a> · 浏览器直连本机；需启动服务并允许跨域访问。角色动作暂用内置素材。</span>} /></>}
+            {imageSource === 'byok' && <ModelSelector disabled={isLoading} hideProviderSelector selectedProvider={selectedProvider} onProviderChange={onProviderChange} selectedModel={selectedModel} onModelChange={onModelChange} apiKey={apiKey} onApiKeyChange={onApiKeyChange} />}
+            {imageSource === 'custom' && <><CustomConnectionFields disabled={isLoading} kind="image" value={customImage} onChange={changeCustomImage} /><Space wrap><Button loading={isTesting} onClick={() => { void testApi() }}>测试连接</Button><span className="ai-cost-hint">测试会实际生成一张小图，可能产生一次调用费用。</span></Space></>}
             <p className="ai-effect-note">内置素材打开即用；本机效果取决于设备与模型。连接自己的服务可选更多模型，也可能按量收费。</p>
           </Space>}
+          {imageFeedback && <WorkflowNotice feedback={imageFeedback}><Button size="small" disabled={isLoading} onClick={() => { setImageAccessMode('ready'); saveAiAccessMode('image', 'ready'); setReadyImageSource('builtin'); setImageSource('builtin'); localStorage.setItem('pixel-world-image-ready-choice', 'builtin'); setImageFeedback(null) }}>改用内置素材</Button></WorkflowNotice>}
           {planningReady && <div className="studio-rail-actions">
-            {imageSource === 'builtin' && <Button block size="large" disabled={creationMode === 'agent' && !agentApproved} onClick={() => { void createBuiltinGame() }}>用内置素材创建游戏</Button>}
-            {imageSource === 'upload' && <Button block size="large" type="primary" disabled={creationMode === 'agent' && !agentApproved} onClick={() => { void createUploadedGame() }}>用已上传素材创建游戏</Button>}
-            <ActionButtons isThemeCreated={isThemeCreated} isLoading={isLoading} selectedTheme={isPresetTheme(selectedTheme) ? '' : selectedTheme} customPrompt={customPrompt || (optimizedSpec ? serializeGameSpec(optimizedSpec) : '')} customThemeName={customThemeName || optimizedSpec?.title || ''} apiKey={imageSource === 'custom' ? customImage.apiKey : apiKey} allowWithoutApiKey={imageSource !== 'byok' && imageSource !== 'custom'} showCreateButton={imageSource !== 'builtin' && imageSource !== 'upload'} onCreateTheme={() => { void generateSelectedAssets() }} onStartGame={handleStartGame} />
+            {imageSource === 'builtin' && <Button type={currentGameCreated ? 'default' : 'primary'} block size="large" disabled={!agentApproved} onClick={() => { void createBuiltinGame().catch((error: unknown) => reportImageError(error instanceof Error ? error.message : '创建游戏失败。')) }}>用内置素材创建游戏</Button>}
+            {imageSource === 'upload' && <Button block size="large" type="primary" disabled={!agentApproved} onClick={() => { void createUploadedGame().catch((error: unknown) => reportImageError(error instanceof Error ? error.message : '创建游戏失败。')) }}>用已上传素材创建游戏</Button>}
+            <ActionButtons isThemeCreated={currentGameCreated} isLoading={isLoading} selectedTheme={isPresetTheme(selectedTheme) ? '' : selectedTheme} customPrompt={customPrompt || (optimizedSpec ? serializeGameSpec(optimizedSpec) : '')} customThemeName={customThemeName || optimizedSpec?.title || ''} apiKey={imageSource === 'custom' ? customImage.apiKey : apiKey} allowWithoutApiKey={imageSource !== 'byok' && imageSource !== 'custom'} showCreateButton={imageSource !== 'builtin' && imageSource !== 'upload'} onCreateTheme={() => { void generateSelectedAssets() }} onStartGame={handleStartGame} />
           </div>}
         </section>
       </div>
@@ -794,19 +883,19 @@ const SideMenu: React.FC<SideMenuProps> = ({
       {themes.some((theme) => theme.id.startsWith('custom-')) && <ThemesList ref={themesListRef} themes={themes.filter((theme) => theme.id.startsWith('custom-') || theme.id.startsWith('loading-'))} selectedTheme={selectedTheme} onThemeSelect={onThemeSelect} />}
       <header className="studio-workspace-header">
         <small>{activeStage === 'idea' ? '第 1 步 · 写故事' : activeStage === 'agents' ? '第 2 步 · AI 策划' : '第 3 步 · 做素材'}</small>
-        <h2>{activeStage === 'idea' ? '先写游戏名称和故事' : activeStage === 'agents' ? '让 AI 完善游戏设定' : '为游戏准备画面'}</h2>
-        <p>{activeStage === 'idea' ? '写清主角是谁、想完成什么。后面的 AI 策划和画面会以此为依据。' : activeStage === 'agents' ? '在左栏选文字工具，补全设定并查看评审；游戏内容由你最后确认。' : '在左栏选图片来源，在这里逐项生成或上传；右栏可以查看成品。'}</p>
+        <div className="workflow-project-status" role="status"><span>{isOptimizing ? '正在补全设定' : agentApproved ? '当前草案已批准' : optimizedSpec ? '当前草案尚未批准' : '当前故事待补全'}</span>{previewStale && <span>右栏成品不会随草稿自动更新</span>}</div>
+        <h2>{activeStage === 'idea' ? '先写游戏名称和故事' : activeStage === 'agents' ? '完善游戏设定' : '为游戏准备画面'}</h2>
+        <p>{activeStage === 'idea' ? '写清主角是谁、想完成什么。后面的 AI 策划和画面会以此为依据。' : activeStage === 'agents' ? '先补全草案，再确认游戏内容。文字模型和完整 Agent 策划都可选。' : '在左栏选图片来源，在这里逐项生成或上传；右栏可以查看成品。'}</p>
       </header>
       {activeStage === 'idea' && <section id="game-idea" className="studio-section prompt-section section-anchor studio-workspace-editor">
         <StageHeading title="名称与故事" />
         <ThemeCustomizer
           inspiration={<InspirationLibrary story={customStory} prompt={customPrompt} onApply={applyInspiration} />}
-          creationMode={creationMode}
-          onCreationModeChange={(mode) => { setCreationMode(mode); setAgentApproved(false); setInputRevision((revision) => revision + 1) }}
-          customThemeName={customThemeName} onThemeNameChange={(value) => { briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); resetGeneratedPromptOnBriefEdit(); setCustomThemeName(value); setOptimizedSpec(null); setAgentApproved(false) }}
-          customStory={customStory} onStoryChange={(value) => { briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); resetGeneratedPromptOnBriefEdit(); setCustomStory(value); setOptimizedSpec(null); setAgentApproved(false) }}
-          customPrompt={customPrompt} onPromptChange={(value) => { briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); optimizedInputRef.current = null; setCustomPrompt(value); setOptimizedSpec(null); setAgentApproved(false) }}
-          levelCount={levelCount} onLevelCountChange={(count) => { briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); setLevelCount(count); setOptimizedSpec(null); setAgentApproved(false); if (isStructuredPromptBlank(customPrompt)) setCustomPrompt(buildStructuredPrompt(count)) }}
+          customThemeName={customThemeName} onThemeNameChange={(value) => { invalidateBrief(); briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); resetGeneratedPromptOnBriefEdit(); setCustomThemeName(value); setOptimizedSpec(null); setAgentApproved(false) }}
+          customStory={customStory} onStoryChange={(value) => { invalidateBrief(); briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); resetGeneratedPromptOnBriefEdit(); setCustomStory(value); setOptimizedSpec(null); setAgentApproved(false) }}
+          customPrompt={customPrompt} onPromptChange={(value) => { invalidateBrief(); briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); optimizedInputRef.current = null; setCustomPrompt(value); setOptimizedSpec(null); setAgentApproved(false) }}
+          levelCount={levelCount} onLevelCountChange={(count) => { invalidateBrief(); briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); setLevelCount(count); setOptimizedSpec(null); setAgentApproved(false); if (isStructuredPromptBlank(customPrompt)) setCustomPrompt(buildStructuredPrompt(count)) }}
+          completionNotice={completionFeedback && <WorkflowNotice feedback={completionFeedback} />}
           onOptimizePrompt={() => { void optimizePrompt(false) }} isOptimizing={isOptimizing} isAgentBusy={isAgentBusy} optimizedSpec={optimizedSpec}
           onCompleteIdea={() => onStageChange('agents')}
           hasSavedDraft={Boolean(savedDraft)} onRestoreDraft={restoreSavedDraft}
@@ -814,13 +903,13 @@ const SideMenu: React.FC<SideMenuProps> = ({
       </section>}
       {activeStage === 'agents' && <section className="studio-section studio-workspace-review section-anchor">
         <StageHeading title="AI 策划与审核" />
-        <p>左栏选好文字工具后，AI 的策划过程和审核结果会显示在这里；最后由你决定是否采用。</p>
+        <p>先看故事、主角和关卡是否符合你的想法，再批准。需要时可以展开任务详情查看具体问题。</p>
         <div ref={setAgentReviewTarget} className="agent-review-target" />
       </section>}
       {activeStage === 'assets' && <section id="asset-workshop" className="section-anchor studio-workspace-assets">
-        {optimizedSpec && (creationMode === 'classic' || agentApproved)
-          ? <AssetPlanner spec={optimizedSpec} onChange={updateSpec} onGenerate={() => { void generateSelectedAssets() }} onCancel={() => abortRef.current?.abort()} onTestApi={() => { void testApi() }} onUpload={uploadDraftAsset} onFillMissing={() => { void fillMissingWithBuiltin().catch((error: unknown) => message.error(error instanceof Error ? error.message : '内置素材补齐失败。')) }} imageSource={imageSource} isGenerating={isLoading} isTesting={isTesting} progress={generationProgress} />
-          : <div className="studio-section nav-section-placeholder"><StageHeading title="图片和声音素材" /><p>{creationMode === 'agent' ? '先确认 AI 策划的游戏内容，接着就能在这里上传或生成素材。' : '先补全游戏设定，接着就能在这里上传或生成素材。'}</p></div>}
+        {optimizedSpec && agentApproved
+          ? <AssetPlanner showBatchAction={false} spec={optimizedSpec} onChange={updateSpec} onGenerate={() => { void generateSelectedAssets() }} onCancel={() => abortRef.current?.abort()} onTestApi={() => { void testApi() }} onUpload={uploadDraftAsset} onFillMissing={() => { void fillMissingWithBuiltin().catch((error: unknown) => reportImageError(error instanceof Error ? error.message : '内置素材补齐失败。')) }} imageSource={imageSource} isGenerating={isLoading} isTesting={isTesting} progress={generationProgress} />
+          : <div className="studio-section nav-section-placeholder"><StageHeading title="图片和声音素材" /><p>先在 AI 策划中检查并批准游戏内容，接着就能上传或生成素材。</p></div>}
       </section>}
     </div>, workspaceTarget)}
   </>

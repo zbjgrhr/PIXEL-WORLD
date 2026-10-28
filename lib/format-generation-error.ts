@@ -59,7 +59,7 @@ export function formatGenerationError(raw: string): string {
 
   if (lower.includes("does not exist") && lower.includes('model')) {
     if (lower.includes('openrouter')) {
-      return '所选 OpenRouter 图片模型已停用或暂不可用。请刷新页面并选择 Seedream 4.5 或 FLUX.2 Pro。'
+      return '所选 OpenRouter 图片模型已停用或暂不可用。请刷新页面并选择 Seedream 5.0 Flash、Seedream 4.5 或 FLUX.2 Pro。'
     }
     return '所选模型已停用或不可用。请刷新页面后重新选择当前可用模型。'
   }

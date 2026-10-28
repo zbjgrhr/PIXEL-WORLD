@@ -68,20 +68,23 @@ export function localProviderConfig(provider: LocalAgentProviderId) {
 }
 
 export const AGENT_ROLE_LABELS: Record<AgentRole, { en: string; zh: string; description: string }> = {
-  director: { en: 'Director', zh: '总控', description: '理解需求并建立创作简报' },
-  narrative: { en: 'Narrative', zh: '叙事', description: '设计世界观、冲突与背景故事' },
-  mechanics: { en: 'Mechanics', zh: '玩法', description: '设计战斗、数值与进阶节奏' },
+  director: { en: 'Director', zh: '创意导演', description: '明确玩家事实、缺项和可自由补充的范围' },
+  narrative: { en: 'Narrative', zh: '故事与角色策划', description: '建立事件因果、人物关系、伏笔及完整结局' },
+  mechanics: { en: 'Mechanics', zh: '玩法设计师', description: '把故事目标转成引擎支持的任务与战斗' },
   artDirector: { en: 'Art Director', zh: '美术总监', description: '建立一致的像素美术规范' },
   levelDesigner: { en: 'Level Designer', zh: '关卡设计', description: '规划逐关内容与难度曲线' },
   integrator: { en: 'Integrator', zh: '规格整合', description: '合并为可执行 GameSpec V3' },
-  consistencyCritic: { en: 'Consistency Critic', zh: '一致性评审', description: '检查美术、叙事和素材矛盾' },
+  consistencyCritic: { en: 'Consistency Critic', zh: '综合评审', description: '检查故事因果、灵感落实、玩法和素材矛盾' },
   engineQa: { en: 'Engine QA', zh: '引擎检查', description: '检查玩法闭环和引擎可执行性' },
-  revision: { en: 'Revision', zh: '修订', description: '根据评审修复规格' },
-  assetCoordinator: { en: 'Asset Coordinator', zh: '素材统筹', description: '整理最终素材提示词与关卡分配' },
-  visualQa: { en: 'Visual QA', zh: '视觉检查', description: '检查生成素材完整度与一致性' },
-  playtest: { en: 'Playtest', zh: '试玩检查', description: '检查通关、战斗和关卡条件' },
+  revision: { en: 'Revision', zh: '定向修订', description: '只修改评审指出的问题，保留玩家锁定内容' },
+  assetCoordinator: { en: 'Asset Coordinator', zh: '素材与动画统筹', description: '整理素材、动作、角色参考和逐关分配' },
+  visualQa: { en: 'Visual QA', zh: '视觉验收', description: '检查实际收到的图片，明确抽查范围和未检查项' },
+  playtest: { en: 'Playtest', zh: '试玩验收', description: '读取真实运行记录；缺少证据时标记未实测' },
   publisher: { en: 'Publisher', zh: '发布检查', description: '汇总发布阻断项与建议' },
 }
+
+export const PROFESSIONAL_AGENT_ROLES: AgentRole[] = ['director', 'narrative', 'mechanics', 'levelDesigner', 'artDirector', 'assetCoordinator', 'consistencyCritic', 'revision', 'visualQa', 'playtest']
+export const SYSTEM_AGENT_ROLES: AgentRole[] = ['integrator', 'engineQa', 'publisher']
 
 export function getAgentProvider(provider: AgentProviderId): AgentProviderConfig {
   return AGENT_PROVIDERS.find((item) => item.id === provider) || AGENT_PROVIDERS[0]

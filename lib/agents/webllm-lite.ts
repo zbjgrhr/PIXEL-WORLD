@@ -1,3 +1,5 @@
+import { alignNarrativeCast } from '@/lib/narrative'
+import { stageNarrativeSuggestions } from '@/lib/narrative-suggestions'
 import type { GameSpec } from '@/types'
 
 export interface WebLlmCreativePatch {
@@ -27,10 +29,17 @@ export function buildWebLlmCreativeRequest(projectName: string, story: string, i
     system: `You are Pixel World's lightweight creative helper. Return JSON only, with any of these keys: ${PATCH_FIELDS.join(', ')}. Improve the world, hero goal and art direction from the player's story. Do not create levels, assets, code, API settings, or a complete GameSpec. Keep each value concise and preserve the player's intent.`,
     user: [
       `Game title: ${projectName.slice(0, 160)}`,
-      `Player story: ${story.slice(0, 1800)}`,
-      inspirations.length ? `Selected inspirations: ${inspirations.slice(0, 6).map((item) => item.slice(0, 180)).join(' / ')}` : '',
+      `Player story: ${story.length > 700 ? `${story.slice(0, 450)} … ${story.slice(-250)}` : story}`,
+      inspirations.length ? `Selected inspirations: ${inspirations.slice(0, 5).map((item) => item.slice(0, 90)).join(' / ')}` : '',
     ].filter(Boolean).join('\n'),
   }
+}
+
+/** Conservative estimate used as a preflight guard, not an exact tokenizer. */
+export function estimateWebLlmPromptTokens(system: string, user: string): number {
+  const text = system + '\n' + user
+  const nonAscii = [...text].filter(char => char.charCodeAt(0) > 127).length
+  return nonAscii * 2 + Math.ceil((text.length - nonAscii) / 3) + 80
 }
 
 export function parseWebLlmCreativePatch(content: string): WebLlmCreativePatch {
@@ -49,10 +58,12 @@ export function parseWebLlmCreativePatch(content: string): WebLlmCreativePatch {
 }
 
 export function applyWebLlmCreativePatch(spec: GameSpec, patch: WebLlmCreativePatch): GameSpec {
-  return {
+  const unlocked = spec.narrative ? { ...spec.narrative, source: { ...spec.narrative.source, lockedFields: {} } } : undefined
+  return stageNarrativeSuggestions(spec, alignNarrativeCast({
     ...spec,
     world: patch.world || spec.world,
     backgroundStory: patch.backgroundStory || spec.backgroundStory,
+    narrative: unlocked ? { ...unlocked, opening: patch.backgroundStory || unlocked.opening, source: { ...unlocked.source, origin: 'model' } } : undefined,
     visualStyle: {
       ...spec.visualStyle,
       artDirection: patch.artDirection || spec.visualStyle.artDirection,
@@ -62,5 +73,5 @@ export function applyWebLlmCreativePatch(spec: GameSpec, patch: WebLlmCreativePa
     hero: { ...spec.hero, name: patch.heroName || spec.hero.name, appearance: patch.heroAppearance || spec.hero.appearance },
     boss: { ...spec.boss, name: patch.bossName || spec.boss.name, appearance: patch.bossAppearance || spec.boss.appearance },
     collectible: { ...spec.collectible, name: patch.collectibleName || spec.collectible.name },
-  }
+  }, spec))
 }

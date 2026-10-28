@@ -3,9 +3,9 @@ import { apiKeyHasUnsupportedCharacters, normalizeApiKey } from '@/lib/api-key'
 import { agentModelSupportsVision, getAgentProvider } from '@/lib/agents/config'
 import { buildAgentPrompts } from '@/lib/agents/prompts'
 import { isLocalAgentProvider } from '@/lib/agents/config'
-import { localIntegratorResponse, normalizeArtifact, prepareAgentRequest, parseJsonObject, responseText, ROLE_TOKEN_BUDGET } from '@/lib/agents/execution'
+import { agentOutputBudget, deterministicAgentResponse, hasUsableRevisionPatch, localIntegratorResponse, normalizeArtifact, prepareAgentRequest, parseJsonObject, responseText } from '@/lib/agents/execution'
 import type { ChatPayload } from '@/lib/agents/execution'
-import { CustomEndpointError, customJsonRequest, validateCustomBaseUrl } from '@/lib/custom-endpoint.server'
+import { CustomEndpointError, customChatStream, customJsonRequest, validateCustomBaseUrl } from '@/lib/custom-endpoint.server'
 import { formatGenerationError } from '@/lib/format-generation-error'
 import type {
   AgentExecuteRequest,
@@ -23,6 +23,7 @@ const VALID_ROLES = new Set<AgentRole>([
 ])
 
 const MODEL_TIMEOUT_MS = 45_000
+const modelTimeoutMs = (role: AgentRole) => role === 'levelDesigner' ? 65_000 : MODEL_TIMEOUT_MS
 
 class AgentUpstreamError extends Error {
   constructor(readonly status: number, message: string, readonly recoverable: boolean) {
@@ -57,7 +58,7 @@ async function callModel(
     const payload = {
       model: request.model,
       temperature: request.role === 'consistencyCritic' || request.role === 'engineQa' ? 0.1 : 0.25,
-      max_tokens: ROLE_TOKEN_BUDGET[request.role],
+      max_tokens: agentOutputBudget(request),
       ...(responseFormat ? { response_format: { type: 'json_object' } } : {}),
       messages: [
         { role: 'system', content: system },
@@ -65,7 +66,9 @@ async function callModel(
       ],
     }
     try {
-      return await customJsonRequest(request.baseUrl || '', '/chat/completions', apiKey, payload) as unknown as ChatPayload
+      const baseUrl = request.baseUrl || ''
+      const isBailianWorkspace = new URL(baseUrl).hostname.endsWith('.maas.aliyuncs.com') && /^qwen[-/]/i.test(request.model)
+      return await (isBailianWorkspace ? customChatStream(baseUrl, apiKey, { ...payload, enable_thinking: false }) : customJsonRequest(baseUrl, '/chat/completions', apiKey, payload)) as unknown as ChatPayload
     } catch (error) {
       if (error instanceof CustomEndpointError && error.status === 400 && responseFormat && /response.format|response_format|json.object/i.test(error.message)) {
         return callModel(request, apiKey, system, user, false, onAttempt)
@@ -74,7 +77,8 @@ async function callModel(
     }
   }
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS)
+  const timeoutMs = modelTimeoutMs(request.role)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   let response: Response
   try {
     if (onAttempt) await onAttempt()
@@ -92,7 +96,7 @@ async function callModel(
       body: JSON.stringify({
         model: request.model,
         ...(getAgentProvider(request.provider).models.find((item) => item.id === request.model)?.supportsTemperature === false ? {} : { temperature: request.role === 'consistencyCritic' || request.role === 'engineQa' ? 0.1 : 0.35 }),
-        max_tokens: request.runId.startsWith('prompt-optimize-') ? 1800 : ROLE_TOKEN_BUDGET[request.role],
+        max_tokens: agentOutputBudget(request),
         ...(request.provider === 'openrouter' && request.model === 'qwen/qwen3.8-flash' ? {
           reasoning: { enabled: false },
         } : {}),
@@ -109,7 +113,7 @@ async function callModel(
   } catch (error) {
     clearTimeout(timer)
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new AgentUpstreamError(504, `Agent model timed out after ${MODEL_TIMEOUT_MS / 1000} seconds.`, true)
+      throw new AgentUpstreamError(504, `Agent model timed out after ${timeoutMs / 1000} seconds.`, true)
     }
     throw error
   }
@@ -125,7 +129,7 @@ async function callModel(
     }
     return await response.json() as ChatPayload
   } catch (error) {
-    if (controller.signal.aborted) throw new AgentUpstreamError(504, '文字模型在45秒内未完整返回；可重试或使用当前草案继续。', false)
+    if (controller.signal.aborted) throw new AgentUpstreamError(504, `文字模型在${timeoutMs / 1000}秒内未完整返回；可重试或使用当前草案继续。`, false)
     throw error
   } finally { clearTimeout(timer) }
 }
@@ -136,12 +140,15 @@ async function callAndParse(request: AgentExecuteRequest, apiKey: string, onAtte
   let parsed: Record<string, unknown>
   let payload = first
   const calls = [first]
+  // An upstream interruption is not malformed JSON. Do not ask a repair call to
+  // invent the missing half or silently approve a partial object.
+  const firstText = responseText(first)
   try {
-    parsed = parseJsonObject(responseText(first))
+    parsed = parseJsonObject(firstText)
   } catch {
     if (onAttempt) throw new AgentUpstreamError(502, '云端文字模型未返回有效 JSON；本次上游尝试已计费。', false)
     const repairSystem = 'Return valid JSON only. Preserve the supplied content without adding executable code or explanations.'
-    const repairUser = `Repair this malformed Agent response into {"summary":string,"artifact":object,"issues":array}:\n${responseText(first).slice(0, 30000)}`
+    const repairUser = `Repair this malformed Agent response into {"summary":string,"artifact":object,"issues":array}:\n${firstText.slice(0, 30000)}`
     payload = await callModel(request, apiKey, repairSystem, repairUser, true)
     calls.push(payload)
     parsed = parseJsonObject(responseText(payload))
@@ -165,6 +172,7 @@ function errorStatus(error: unknown): number {
 
 export async function POST(nextRequest: NextRequest) {
   let body: AgentExecuteRequest | undefined
+  let reportedUsage: AgentUsage | undefined
   try {
     body = await nextRequest.json() as AgentExecuteRequest
     if (!body || !VALID_ROLES.has(body.role) || !body.runId || !body.taskId) {
@@ -184,16 +192,20 @@ export async function POST(nextRequest: NextRequest) {
     } else if (!provider.models.some((model) => model.id === body!.model)) {
       return NextResponse.json({ success: false, error: 'The selected Agent model is not supported.', recoverable: false, timestamp: new Date().toISOString() } satisfies AgentExecuteResponse, { status: 400 })
     }
+    const deterministic = deterministicAgentResponse(body)
+    if (deterministic) return NextResponse.json(deterministic)
     const key = normalizeApiKey(body.apiKey)
     if (!key || apiKeyHasUnsupportedCharacters(key)) {
       return NextResponse.json({ success: false, error: 'A valid Agent API Key is required.', recoverable: false, timestamp: new Date().toISOString() } satisfies AgentExecuteResponse, { status: 401 })
     }
 
     const { parsed, usage } = await callAndParse(body, key)
+    reportedUsage = usage
     if (body.provider === 'custom') {
       const rawArtifact = parsed.artifact
       if (!rawArtifact || typeof rawArtifact !== 'object' || Array.isArray(rawArtifact) || !Object.keys(rawArtifact).length
-        || ((body.role === 'integrator' || body.role === 'revision') && !(rawArtifact as Record<string, unknown>).spec)) {
+        || (body.role === 'integrator' && !(rawArtifact as Record<string, unknown>).spec)
+        || (body.role === 'revision' && !hasUsableRevisionPatch(rawArtifact as Record<string, unknown>))) {
         throw new AgentUpstreamError(502, '自定义文字模型未返回 Agent 所需的结构化内容。', false)
       }
       if (body.provider === 'custom' && body.runId.startsWith('agent-test-') && body.role === 'integrator') {
@@ -204,7 +216,7 @@ export async function POST(nextRequest: NextRequest) {
       }
     }
     const { artifact, issues } = normalizeArtifact(body, parsed)
-    const summary = typeof parsed.summary === 'string' && parsed.summary.trim()
+    const summary = artifact.patchRejected ? '本次修订引入了新问题，已保留上一次规格；原评审问题仍需处理。' : typeof parsed.summary === 'string' && parsed.summary.trim()
       ? parsed.summary.trim().slice(0, 1200)
       : `${body.role} completed its structured deliverable.`
     const result = NextResponse.json({
@@ -216,7 +228,9 @@ export async function POST(nextRequest: NextRequest) {
   } catch (error) {
     const upstreamRejectedPermanently = error instanceof AgentUpstreamError && !error.recoverable && error.status < 500
     if (body && body.provider !== 'custom' && (body.role === 'integrator' || body.role === 'revision') && !upstreamRejectedPermanently) {
-      return NextResponse.json(localIntegratorResponse(body, error))
+      const fallback = localIntegratorResponse(body, error)
+      if (fallback.data && reportedUsage) fallback.data.usage = reportedUsage
+      return NextResponse.json(fallback)
     }
     const recoverable = error instanceof AgentUpstreamError
       ? error.recoverable

@@ -1,6 +1,6 @@
 import { buildAgentPrompts } from '@/lib/agents/prompts'
 import { localProviderConfig } from '@/lib/agents/config'
-import { localIntegratorResponse, normalizeArtifact, parseJsonObject, prepareAgentRequest, responseText, ROLE_TOKEN_BUDGET } from '@/lib/agents/execution'
+import { agentOutputBudget, deterministicAgentResponse, localIntegratorResponse, normalizeArtifact, parseJsonObject, prepareAgentRequest, responseText, ROLE_TOKEN_BUDGET } from '@/lib/agents/execution'
 import type { ChatPayload } from '@/lib/agents/execution'
 import type { AgentExecuteRequest, AgentExecuteResponse, LocalAgentProviderId } from '@/types'
 import { isWebLlmReady, webLlmCompletion } from '@/lib/agents/webllm-client'
@@ -8,6 +8,22 @@ import { isWebLlmReady, webLlmCompletion } from '@/lib/agents/webllm-client'
 const LOCAL_CONNECTION_TIMEOUT_MS = 20_000
 const CONNECTION_SYSTEM_PROMPT = 'You are a connection test. Reply with this exact JSON only: {"ready":true}'
 const CONNECTION_USER_PROMPT = 'Return the connection test JSON now.'
+
+async function localJson<T>(url: string, init: RequestInit, timeoutMs: number): Promise<T> {
+  const controller = new AbortController()
+  const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs)
+  const signal = init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal
+  try {
+    const response = await fetch(url, { ...init, signal })
+    if (!response.ok) throw new Error(`本机服务请求失败（HTTP ${response.status}）：${(await response.text()).slice(0, 300)}`)
+    // Some local servers send headers before inference finishes. The deadline
+    // must include reading the JSON body, not just establishing a connection.
+    return await response.json() as T
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error(`本机模型在 ${timeoutMs / 1000} 秒内未返回完整结果。请检查服务或换一个更小的模型；已有草案仍可继续审核。`)
+    throw error
+  } finally { globalThis.clearTimeout(timer) }
+}
 
 export function safeLocalBaseUrl(value: string): string {
   const url = new URL(value)
@@ -24,9 +40,7 @@ export async function discoverLocalModels(provider: LocalAgentProviderId, baseUr
       .slice(0, 15).map((item) => ({ id: item.model_id, label: item.model_id }))
   }
   const endpoint = safeLocalBaseUrl(baseUrl || localProviderConfig(provider).baseUrl || '')
-  const response = await fetch(`${endpoint}/models`, { headers: password ? { Authorization: `Bearer ${password}` } : {}, cache: 'no-store' })
-  if (!response.ok) throw new Error(`无法获取本机模型列表（HTTP ${response.status}）。请确认服务已启动，并允许浏览器连接本地网络。`)
-  const payload = await response.json() as { data?: Array<{ id?: string }> }
+  const payload = await localJson<{ data?: Array<{ id?: string }> }>(`${endpoint}/models`, { headers: password ? { Authorization: `Bearer ${password}` } : {}, cache: 'no-store' }, 20_000)
   return (payload.data || []).filter((item): item is { id: string } => Boolean(item.id)).map((item) => ({ id: item.id, label: item.id }))
 }
 
@@ -47,24 +61,12 @@ export async function testLocalAgentConnection(provider: LocalAgentProviderId, m
     }
   } else {
     const endpoint = safeLocalBaseUrl(baseUrl || localProviderConfig(provider).baseUrl || '')
-    const controller = new AbortController()
-    const timer = globalThis.setTimeout(() => controller.abort(), LOCAL_CONNECTION_TIMEOUT_MS)
-    let response: Response
-    try {
-      response = await fetch(`${endpoint}/chat/completions`, {
-        method: 'POST', signal: controller.signal,
+    payload = await localJson<ChatPayload>(`${endpoint}/chat/completions`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(password ? { Authorization: `Bearer ${password}` } : {}) },
         body: JSON.stringify({ model, temperature: 0, max_tokens: 32, stream: false,
           messages: [{ role: 'system', content: CONNECTION_SYSTEM_PROMPT }, { role: 'user', content: CONNECTION_USER_PROMPT }] }),
-      })
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') throw new Error('本机模型在 20 秒内没有响应。请确认模型已加载；小模型首次唤醒也可能较慢。')
-      throw error
-    } finally {
-      globalThis.clearTimeout(timer)
-    }
-    if (!response.ok) throw new Error(`本机模型测试失败（HTTP ${response.status}）：${(await response.text()).slice(0, 240)}`)
-    payload = await response.json() as ChatPayload
+      }, LOCAL_CONNECTION_TIMEOUT_MS)
   }
   try {
     const result = JSON.parse(responseText(payload).trim()) as { ready?: unknown }
@@ -76,6 +78,8 @@ export async function testLocalAgentConnection(provider: LocalAgentProviderId, m
 
 export async function executeLocalAgentTask(rawRequest: AgentExecuteRequest, signal?: AbortSignal): Promise<AgentExecuteResponse> {
   const request = prepareAgentRequest(rawRequest)
+  const deterministic = deterministicAgentResponse(request)
+  if (deterministic) return deterministic
   const prompts = buildAgentPrompts(request)
   let payload: ChatPayload
   if (request.provider === 'webllm') {
@@ -83,14 +87,12 @@ export async function executeLocalAgentTask(rawRequest: AgentExecuteRequest, sig
   } else {
     const provider = request.provider as Exclude<LocalAgentProviderId, 'webllm'>
     const endpoint = safeLocalBaseUrl(request.baseUrl || localProviderConfig(provider).baseUrl || '')
-    const response = await fetch(`${endpoint}/chat/completions`, {
+    payload = await localJson<ChatPayload>(`${endpoint}/chat/completions`, {
       method: 'POST', signal,
       headers: { 'Content-Type': 'application/json', ...(request.apiKey ? { Authorization: `Bearer ${request.apiKey}` } : {}) },
-      body: JSON.stringify({ model: request.model, temperature: 0.2, max_tokens: ROLE_TOKEN_BUDGET[request.role], stream: false,
+      body: JSON.stringify({ model: request.model, temperature: 0.2, max_tokens: agentOutputBudget(request), stream: false,
         messages: [{ role: 'system', content: prompts.system }, { role: 'user', content: prompts.user }] }),
-    })
-    if (!response.ok) throw new Error(`本地模型调用失败（HTTP ${response.status}）：${(await response.text()).slice(0, 300)}`)
-    payload = await response.json() as ChatPayload
+    }, 45_000)
   }
   try {
     const parsed = parseJsonObject(responseText(payload))
@@ -104,7 +106,7 @@ export async function executeLocalAgentTask(rawRequest: AgentExecuteRequest, sig
     const { artifact, issues } = normalizeArtifact(request, parsed)
     const usage = payload.usage || {}
     return { success: true, data: { role: request.role, artifact, issues,
-      summary: typeof parsed.summary === 'string' ? parsed.summary.slice(0, 1200) : '本地模型已返回结果。',
+      summary: artifact.patchRejected ? '本次修订引入了新问题，已保留上一次规格；原评审问题仍需处理。' : typeof parsed.summary === 'string' ? parsed.summary.slice(0, 1200) : '本地模型已返回结果。',
       usage: { promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens || 0 },
       provider: request.provider, model: request.model }, timestamp: new Date().toISOString() }
   } catch (error) {

@@ -30,13 +30,17 @@ interface AssetPlannerProps {
   isGenerating: boolean
   isTesting: boolean
   progress: number
+  showBatchAction?: boolean
 }
 
+const STATUS_LABEL = { pending: '待制作', generating: '制作中', success: '已完成', failed: '需重试', cancelled: '已停止' } as const
+const GROUP_LABEL: Record<string, string> = { gameplay: '角色与玩法素材', groundEnemy: '地面敌人', airEnemy: '空中敌人', waterEnemy: '水中敌人', boss: 'Boss', level: '关卡画面与声音' }
+const POSE_LABEL: Record<string, string> = { idle: '站立', walk: '行走', jump: '跳跃', meleeAttack: '近战', rangedAttack: '远程', hit: '受击', death: '死亡' }
 const STATUS_COLOR: Record<AssetDefinition['status'], string> = {
   pending: 'default', generating: 'processing', success: 'success', failed: 'error', cancelled: 'warning',
 }
 
-export default function AssetPlanner({ spec, onChange, onGenerate, onCancel, onTestApi, onUpload, onFillMissing, imageSource, isGenerating, isTesting, progress }: AssetPlannerProps) {
+export default function AssetPlanner({ spec, onChange, onGenerate, onCancel, onTestApi, onUpload, onFillMissing, imageSource, isGenerating, isTesting, progress, showBatchAction = true }: AssetPlannerProps) {
   const [newCategory, setNewCategory] = useState<AssetCategory>('groundEnemy')
   const levels = spec.levels.map((level, index) => ({ label: `L${index + 1} ${level.name}`, value: level.id }))
   const imageAssets = spec.assets.filter((asset) => asset.enabled && (asset.kind === 'image' || asset.kind === 'spriteSheet'))
@@ -83,18 +87,18 @@ export default function AssetPlanner({ spec, onChange, onGenerate, onCancel, onT
         <Select value={newCategory} onChange={setNewCategory} style={{ minWidth: 220 }} options={ASSET_CATALOG.filter((entry) => entry.repeatable !== false).map((entry) => ({ value: entry.category, label: entry.label }))} />
         <Button icon={<Plus size={14} />} onClick={addAsset}>新增素材</Button>
         {imageSource !== 'upload' && imageSource !== 'builtin' && <Button icon={<Beaker size={14} />} loading={isTesting} onClick={onTestApi}>测试 API（生成1张）</Button>}
-        {imageSource === 'upload' ? <Button onClick={onFillMissing}>用内置素材补齐缺项</Button> : isGenerating ? <Button danger icon={<X size={14} />} onClick={onCancel}>停止队列</Button> : <Button type="primary" icon={<RotateCcw size={14} />} disabled={!pendingCount} onClick={onGenerate}>生成已选素材</Button>}
+        {imageSource === 'builtin' ? <Text type="secondary">左栏创建内置素材游戏后，就能在右栏试玩。</Text> : imageSource === 'upload' ? <Button onClick={onFillMissing}>用内置素材补齐缺项</Button> : isGenerating ? <Button danger icon={<X size={14} />} onClick={onCancel}>停止队列</Button> : showBatchAction ? <Button type="primary" icon={<RotateCcw size={14} />} disabled={!pendingCount} onClick={onGenerate}>生成已选素材</Button> : <Text type="secondary">检查下方素材后，在左栏开始生成。</Text>}
       </Space>
       {isGenerating && <Progress percent={progress} status="active" style={{ marginBottom: 12 }} />}
       <Collapse size="small" defaultActiveKey={['groundEnemy', 'gameplay', 'level']} items={grouped.map(([group, assets]) => ({
         key: group,
-        label: `${group} · ${assets.length}`,
+        label: `${GROUP_LABEL[group] || group} · ${assets.length}`,
         children: <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(260px, 100%), 1fr))', gap: 12 }}>
-          {assets.map((asset) => <Card key={asset.id} size="small" title={<Space><Switch size="small" checked={asset.enabled} onChange={(enabled) => patchAsset(asset.id, { enabled })} /><Text strong>{asset.title}</Text></Space>} extra={<Tag color={STATUS_COLOR[asset.status]}>{asset.status}</Tag>}>
+          {assets.map((asset) => <Card key={asset.id} size="small" title={<Space><Switch size="small" checked={asset.enabled} onChange={(enabled) => patchAsset(asset.id, { enabled })} /><Text strong>{asset.title}</Text></Space>} extra={<Tag color={STATUS_COLOR[asset.status]}>{STATUS_LABEL[asset.status]}</Tag>}>
             {asset.kind === 'spriteSheet' && asset.animation?.layoutVersion === 3 ? <Space size={[4, 4]} wrap style={{ marginBottom: 8 }}>
               {animationClipPoses(asset).map((pose) => {
                 const clip = normalizeAnimationSpec(asset.animation).clips?.[pose]
-                return <Tag key={pose} title={clip?.error} color={clip?.status === 'failed' ? 'error' : clip?.status === 'generating' ? 'processing' : clip?.url ? 'success' : 'default'}>{pose} · {clip?.frameCount || 1}帧</Tag>
+                return <Tag key={pose} title={clip?.error} color={clip?.status === 'failed' ? 'error' : clip?.status === 'generating' ? 'processing' : clip?.url ? 'success' : 'default'}>{POSE_LABEL[pose] || pose} · {clip?.frameCount || 1}帧</Tag>
               })}
             </Space> : asset.url && <Image src={asset.url} alt={asset.title} height={120} style={{ width: '100%', objectFit: asset.category === 'levelBackground' ? 'cover' : 'contain', imageRendering: 'pixelated' }} />}
             <TextArea value={asset.prompt} rows={3} onChange={(event) => patchAsset(asset.id, { prompt: event.target.value, status: asset.url ? asset.status : asset.kind === 'audio' || asset.kind === 'runtime' ? 'success' : 'pending' })} style={{ marginTop: asset.url ? 8 : 0 }} />

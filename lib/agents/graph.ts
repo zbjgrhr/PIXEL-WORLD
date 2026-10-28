@@ -9,8 +9,8 @@ interface TaskTemplate {
 const PLANNING_GRAPH: TaskTemplate[] = [
   { role: 'director', phase: 'planning', dependencies: [] },
   { role: 'narrative', phase: 'planning', dependencies: ['director'] },
-  { role: 'mechanics', phase: 'planning', dependencies: ['director'] },
-  { role: 'artDirector', phase: 'planning', dependencies: ['director'] },
+  { role: 'mechanics', phase: 'planning', dependencies: ['narrative'] },
+  { role: 'artDirector', phase: 'planning', dependencies: ['narrative'] },
   { role: 'levelDesigner', phase: 'planning', dependencies: ['narrative', 'mechanics', 'artDirector'] },
   { role: 'integrator', phase: 'planning', dependencies: ['levelDesigner'] },
   { role: 'consistencyCritic', phase: 'review', dependencies: ['integrator'] },
@@ -21,6 +21,10 @@ const PLANNING_GRAPH: TaskTemplate[] = [
 
 export function taskId(role: AgentRole, round = 1): string {
   return `${role}-r${round}`
+}
+
+export function finalReviewTaskId(round = 2): string {
+  return `consistencyCritic-final-r${round}`
 }
 
 export function createPlanningTasks(round = 1): AgentTask[] {
