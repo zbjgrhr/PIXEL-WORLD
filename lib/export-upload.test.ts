@@ -4,13 +4,34 @@ import { exportGameZip, offlineGameRuntimeSource } from '@/lib/export-game'
 import { buildGameDataFromSpec } from '@/lib/virtual-levels'
 import { ANIMATION_CLIP_POSES } from '@/lib/asset-catalog'
 import { withUploadedClip, withUploadedStatic } from '@/lib/uploaded-asset'
+import { createGameTranslator } from './game-language'
 
 afterEach(() => vi.unstubAllGlobals())
 
 describe('offline export with uploaded art', () => {
-  it('plays three offline story levels through the final Boss without any art', async () => {
+  it.each(['zh-CN', 'en'] as const)('plays three offline story levels through the final Boss in %s without any art', async creationLanguage => {
     const story = '钟表匠林澈来到倒走的城市。守钟机械带走妹妹阿遥。林澈修好三枚钟芯，在中央钟室让守钟机械认出真正的维修指令。机械放走阿遥，兄妹把中央钟调回正向。'
     const spec = createFallbackGameSpec(`世界观与故事：${story}`, '离线营救', 3)
+    spec.creationLanguage = creationLanguage
+    spec.templateSources=[{postId:'11111111-1111-4111-8111-111111111111',revision:'2026-10-31T00:00:00Z',authorId:'22222222-2222-4222-8222-222222222222',authorName:'Template <Author> & Co.',license:'remix-with-credit'}]
+    const t = createGameTranslator(creationLanguage)
+    // An authored English fixture exercises the same objective IDs, counts and
+    // gameplay rules; this is a runtime test, not a model translation result.
+    if (creationLanguage === 'en') {
+      spec.title = 'The Backward Clock'
+      spec.narrative!.opening = 'Clockmaker Lin follows the clockwork guardian to rescue his sister.'
+      spec.narrative!.ending = 'Lin and his sister restore the central clock and return home.'
+      spec.narrative!.chapters.forEach((chapter, index) => {
+        chapter.title = `Chapter ${index + 1}`
+        chapter.arrival = 'Lin enters the next street and searches for the missing clock core.'
+        chapter.departure = 'The repaired core reveals the way forward.'
+        chapter.bossBefore = 'The clockwork guardian blocks the central chamber.'
+        chapter.bossAfter = 'With the guardian defeated, Lin can restore the central clock.'
+        chapter.points.forEach(point => { point.name = 'Clockwork clue'; point.description = 'Inspect the clockwork mechanism.' })
+        chapter.objectives.forEach(task => { task.description = `Complete ${task.kind} objective`; task.feedback = 'The next step is now available.' })
+      })
+      spec.narrative!.clues.forEach(clue => { clue.setup = 'A damaged instruction plate points to the central clock.'; clue.payoff = 'The plate contains the instruction needed to repair the clock.' })
+    }
     spec.assets = spec.assets.map(asset => ({ ...asset, enabled: false, url: '' }))
     spec.levels.forEach(level => { level.enemyCount = 0 })
     spec.narrative!.chapters.forEach(chapter => {
@@ -70,6 +91,9 @@ describe('offline export with uploaded art', () => {
     expect(entries.has('index.html')).toBe(true)
     expect(entries.has('styles.css')).toBe(true)
     expect(entries.has('game.js')).toBe(true)
+    expect(entries.get('ATTRIBUTION.txt')).toContain('Template <Author> & Co.')
+    expect(entries.get('index.html')).toContain('Template &lt;Author&gt; &amp; Co.')
+    expect(JSON.parse(entries.get('project.json')!).templateSources).toEqual(spec.templateSources)
     exportedSpec = JSON.parse(entries.get('project.json')!)
     const embedded = entries.get('index.html')!.match(/<script type="application\/json" id="runtime-data">(.*?)<\/script>/)
     expect(embedded).not.toBeNull()
@@ -85,8 +109,8 @@ describe('offline export with uploaded art', () => {
     expect(painted).toContain('#5ba5df')
     expect(painted).toContain('#ffd84d')
     const read = () => (globalThis as typeof globalThis & { __pixelWorldReadOnlySnapshot: () => { level: number; player: { x: number }; story: { endingSeen: boolean; completedLevels: string[]; counts: Record<string, number> }; won: boolean } }).__pixelWorldReadOnlySnapshot()
-    const nextStory = () => buttons.filter(button => button.textContent === '继续冒险').at(-1)!.onclick?.()
-    const interact = () => buttons.filter(button => button.textContent === '交互 E').at(-1)!.onclick?.()
+    const nextStory = () => buttons.filter(button => button.textContent === t('继续冒险')).at(-1)!.onclick?.()
+    const interact = () => buttons.filter(button => button.textContent === t('交互 E')).at(-1)!.onclick?.()
     let now = performance.now()
     for (let overlay = 0; sections.at(-2)?.style.display === 'flex' && overlay < 20; overlay++) nextStory()
     const initialX = read().player.x
@@ -99,7 +123,7 @@ describe('offline export with uploaded art', () => {
     hidden = false
     listeners.get('keydown')!({ key: 'Escape', preventDefault: () => undefined })
     listeners.get('blur')!({ key: '', preventDefault: () => undefined })
-    expect(pauseButton.textContent).toBe('Resume')
+    expect(pauseButton.textContent).toBe(t('Resume'))
     now += 1000
     frame!(now)
     expect(read().player.x).toBe(initialX)
@@ -169,7 +193,7 @@ describe('offline export with uploaded art', () => {
     expect(read().story.completedLevels).toEqual(spec.levels.map(level => level.id))
     expect(read().story.endingSeen).toBe(true)
     expect(read().won).toBe(true)
-    buttons.filter(button => button.textContent === '重新开始').at(-1)!.onclick?.()
+    buttons.filter(button => button.textContent === t('重新开始')).at(-1)!.onclick?.()
     expect(read().level).toBe(0)
     expect(read().story.completedLevels).toEqual([])
     expect(read().story.endingSeen).toBe(false)

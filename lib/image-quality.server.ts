@@ -26,7 +26,8 @@ export interface SpriteImageCheck {
 /** Inspect actual pixels before the engine is allowed to slice an image. */
 export async function inspectSpriteImage(bytes: Buffer, frameCount = 1): Promise<SpriteImageCheck> {
   const { data, info } = await sharp(bytes, { limitInputPixels: 4096 * 4096 }).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
-  if (info.width < frameCount * 32 || info.height < 32 || info.width % frameCount !== 0) {
+  if (info.width < frameCount * 32 || info.height < 32 || info.width % frameCount !== 0
+    || info.width / frameCount / info.height < .48) {
     throw new ImageQualityError('图片尺寸不符合动作帧条要求，请重新生成。')
   }
   const cellWidth = info.width / frameCount
@@ -54,7 +55,9 @@ export async function inspectSpriteImage(bytes: Buffer, frameCount = 1): Promise
     const borderCoverage = edgeOccupied / Math.max(1, edgePixels)
     if (coverage < .004) throw new ImageQualityError(`第 ${frame + 1} 帧几乎没有角色，请重新生成这个动作。`)
     if (coverage > .86 || borderCoverage > .2) {
-      throw new ImageQualityError(`第 ${frame + 1} 帧带有场景底图或角色越界；未采用这张图片，避免试玩时出现卡片和闪烁。`)
+      const subject = frameCount === 1 ? '这张素材' : `第 ${frame + 1} 帧`
+      const reason = coverage > .86 ? '画面几乎被内容填满，疑似带有场景底图' : '主体或背景延伸到图片边缘'
+      throw new ImageQualityError(`${subject}${reason}；未采用这张图片，避免试玩时出现卡片和闪烁。`)
     }
     frames.push({ coverage, borderCoverage })
     histograms.push(histogram.map(value => value / Math.max(1, occupied)))

@@ -139,6 +139,10 @@ describe('player decisions on narrative edits', () => {
     expect(updated.tasks[0].usage).toBe(run.tasks[0].usage)
     expect(updated.approved).toBe(false)
     expect(pendingNarrativeSuggestions(updated.artifacts.productionSpec)).toHaveLength(0)
+    const hydratedEditor = structuredClone(dismissed)
+    hydratedEditor.assets[0].url = 'data:image/png;base64,b2xk'
+    hydratedEditor.assets[0].status = 'success'
+    expect(pendingNarrativeSuggestions(updateRunNarrativeDecisions(run, hydratedEditor).artifacts.productionSpec)).toHaveLength(0)
     expect(updateRunNarrativeDecisions(run, { ...dismissed, title: 'changed' })).toBe(run)
     expect(updateRunNarrativeDecisions({ ...run, status: 'planning' }, dismissed).status).toBe('planning')
   })

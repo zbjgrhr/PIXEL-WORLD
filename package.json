@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build --turbopack",
+    "build": "node scripts/generate-offline-engine.cjs --check && next build --turbopack",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -14,23 +14,29 @@
     "@ant-design/nextjs-registry": "^1.1.0",
     "@ant-design/v5-patch-for-react-19": "^1.0.3",
     "@mlc-ai/web-llm": "^0.2.85",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.118.0",
     "antd": "^5.27.1",
     "clsx": "^2.1.1",
     "framer-motion": "^12.23.12",
     "gsap": "^3.13.0",
     "lucide-react": "^0.542.0",
     "motion": "^12.23.12",
+    "music-metadata": "^12.3.2",
     "next": "15.5.18",
     "react": "19.1.7",
     "react-dom": "19.1.7",
     "sharp": "^0.33.5",
+    "yauzl": "^3.4.0",
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.13",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/yauzl": "^3.4.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.10"

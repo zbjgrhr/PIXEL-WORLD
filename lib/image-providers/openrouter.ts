@@ -42,8 +42,11 @@ function getOpenRouterHeaders(): Record<string, string> {
   }
 }
 
-function getAspectRatio(assetType: GenerateImageParams['assetType'], layout?: GenerateImageParams['layout'], frameCount = 1): string {
+export function getAspectRatio(assetType: GenerateImageParams['assetType'], layout?: GenerateImageParams['layout'], frameCount = 1, model = ''): string {
   if (layout === 'sprite-sheet') return '1:1'
+  // Seedream's public Image API does not offer 3:1. Use its widest supported
+  // ratios so three cells retain enough width before alignment to squares.
+  if (layout === 'animation-strip' && model.startsWith('bytedance-seed/')) return frameCount >= 3 ? '21:9' : frameCount === 2 ? '2:1' : '1:1'
   if (layout === 'animation-strip') return frameCount >= 3 ? '16:9' : frameCount === 2 ? '3:2' : '1:1'
   return assetType === 'background' ? '16:9' : '1:1'
 }
@@ -79,11 +82,11 @@ function buildImageRequestBody(
       ...commonBody,
       // Seedream 4.5 enforces a minimum pixel area despite advertising 1K.
       resolution: model.startsWith('bytedance-seed/') || params.assetType === 'background' ? '2K' : '1K',
-      aspect_ratio: getAspectRatio(params.assetType, params.layout, params.frameCount),
+      aspect_ratio: getAspectRatio(params.assetType, params.layout, params.frameCount, model),
     }
   }
 
-  return { ...commonBody, aspect_ratio: getAspectRatio(params.assetType, params.layout, params.frameCount) }
+  return { ...commonBody, aspect_ratio: getAspectRatio(params.assetType, params.layout, params.frameCount, model) }
 }
 
 async function modelSupportsReferences(apiKey: string, model: string, signal?: AbortSignal): Promise<boolean> {

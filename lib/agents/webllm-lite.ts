@@ -1,6 +1,7 @@
 import { alignNarrativeCast } from '@/lib/narrative'
 import { stageNarrativeSuggestions } from '@/lib/narrative-suggestions'
-import type { GameSpec } from '@/types'
+import { assertEnglishProse } from '@/lib/creation-language'
+import type { CreationLanguage, GameSpec } from '@/types'
 
 export interface WebLlmCreativePatch {
   world?: string
@@ -24,9 +25,9 @@ function cleanText(value: unknown, limit = 700): string | undefined {
 }
 
 /** Keep the browser model's input small enough for a 4K context window. */
-export function buildWebLlmCreativeRequest(projectName: string, story: string, inspirations: string[]): { system: string; user: string } {
+export function buildWebLlmCreativeRequest(projectName: string, story: string, inspirations: string[], creationLanguage: CreationLanguage = 'zh-CN'): { system: string; user: string } {
   return {
-    system: `You are Pixel World's lightweight creative helper. Return JSON only, with any of these keys: ${PATCH_FIELDS.join(', ')}. Improve the world, hero goal and art direction from the player's story. Do not create levels, assets, code, API settings, or a complete GameSpec. Keep each value concise and preserve the player's intent.`,
+    system: `You are Pixel World's lightweight creative helper. Return JSON only, with any of these keys: ${PATCH_FIELDS.join(', ')}. Improve the world, hero goal and art direction from the player's story. Do not create levels, assets, code, API settings, or a complete GameSpec. Keep each value concise and preserve the player's intent. Write names and player-facing story in ${creationLanguage === 'en' ? 'idiomatic English' : 'natural Simplified Chinese'}; image appearance and art-direction prompts remain concise English. Preserve explicit player facts, proper names and outcomes.`,
     user: [
       `Game title: ${projectName.slice(0, 160)}`,
       `Player story: ${story.length > 700 ? `${story.slice(0, 450)} … ${story.slice(-250)}` : story}`,
@@ -58,6 +59,7 @@ export function parseWebLlmCreativePatch(content: string): WebLlmCreativePatch {
 }
 
 export function applyWebLlmCreativePatch(spec: GameSpec, patch: WebLlmCreativePatch): GameSpec {
+  assertEnglishProse(patch, spec.creationLanguage)
   const unlocked = spec.narrative ? { ...spec.narrative, source: { ...spec.narrative.source, lockedFields: {} } } : undefined
   return stageNarrativeSuggestions(spec, alignNarrativeCast({
     ...spec,

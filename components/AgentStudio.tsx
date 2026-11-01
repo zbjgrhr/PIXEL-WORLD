@@ -11,7 +11,7 @@ import { inspectWebLlm, prepareWebLlm } from '@/lib/agents/webllm-client'
 import { countBlockingIssues } from '@/lib/agents/validation'
 import { latestPlanningIssues } from '@/lib/agents/review-status'
 import { useAgentCluster } from '@/hooks/useAgentCluster'
-import type { AgentExecuteRequest, AgentExecuteResponse, AgentProviderId, AgentTaskStatus, GameSpec } from '@/types'
+import type { AgentExecuteRequest, AgentExecuteResponse, AgentProviderId, AgentTaskStatus, CreationLanguage, GameSpec } from '@/types'
 import ApiPlatformGuide from './ui/ApiPlatformGuide'
 import { getApiPlatformGuide } from '@/configs/api-platform-guide'
 import { customConnectionError, EMPTY_CUSTOM_CONNECTION, loadAiAccessMode, loadCustomConnection, saveAiAccessMode, saveCustomConnection, type AiAccessMode, type CustomConnection } from '@/lib/custom-connection'
@@ -29,6 +29,7 @@ import { currentRunSpec, DRAFT_CHANGE_LABELS } from '@/lib/agents/draft-revision
 const { Paragraph, Text, Title } = Typography
 
 interface AgentStudioProps {
+  creationLanguage?: CreationLanguage
   embedded?: boolean
   projectId: string
   sourcePrompt: string
@@ -82,7 +83,7 @@ function artifactPreview(output?: Record<string, unknown>): string {
   return json.length > 20000 ? `${json.slice(0, 20000)}\n…（内容过长，已在界面截断）` : json
 }
 
-export default function AgentStudio({ embedded = false, projectId, sourcePrompt, projectName, briefReady, levelCount, baseSpec, onOptimizePrompt, isOptimizing = false, onSpecReady, onApproved, onApprovedRestored, onBusyChange, onTextConnectionChange, reviewTarget, inputRevision = 0, onDraftChange, onRefine, completionNotice, onEditStory, onContinueAssets, onPlanningStateChange }: AgentStudioProps) {
+export default function AgentStudio({ embedded = false, projectId, sourcePrompt, projectName, briefReady, levelCount, baseSpec, creationLanguage, onOptimizePrompt, isOptimizing = false, onSpecReady, onApproved, onApprovedRestored, onBusyChange, onTextConnectionChange, reviewTarget, inputRevision = 0, onDraftChange, onRefine, completionNotice, onEditStory, onContinueAssets, onPlanningStateChange }: AgentStudioProps) {
   const [provider, setProvider] = useState<AgentProviderId>('openrouter')
   const [accessMode, setAccessMode] = useState<AiAccessMode>('ready')
   const [readyProvider, setReadyProvider] = useState<AgentProviderId | null>(null)
@@ -101,7 +102,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
   const [localCheck, setLocalCheck] = useState<{ state: 'idle' | 'checking' | 'ready' | 'failed'; text: string }>({ state: 'idle', text: '' })
   const [webLlmSetup, setWebLlmSetup] = useState<{ state: 'idle' | 'checking' | 'preparing' | 'ready' | 'failed'; progress: number; text: string; cached?: boolean }>({ state: 'idle', progress: 0, text: '' })
   const webLlmAttempt = useRef(0)
-  const cluster = useAgentCluster({ projectId, sourcePrompt, projectName, levelCount, baseSpec, onSpecReady, onApproved, onApprovedRestored })
+  const cluster = useAgentCluster({ projectId, sourcePrompt, projectName, levelCount, baseSpec, creationLanguage, onSpecReady, onApproved, onApprovedRestored })
   const seenInputRevision = useRef(inputRevision)
 
   useEffect(() => {
@@ -182,7 +183,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
   const plannedSpec = !busy && baseSpec ? baseSpec : cluster.run ? currentRunSpec(cluster.run) : undefined
   const pendingRevision = cluster.run?.pendingRevision
   const inputChanged = seenInputRevision.current !== inputRevision
-  const pendingSuggestions = pendingNarrativeSuggestions(plannedSpec || baseSpec).length
+  const pendingSuggestions = pendingNarrativeSuggestions(cluster.run?.artifacts.productionSpec || plannedSpec || baseSpec).length
   const plannedJobs = estimatedImageJobs(plannedSpec)
 
   const changeProvider = (value: AgentProviderId) => {
@@ -257,7 +258,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
       if (!isLocalAgentProvider(provider) && provider !== 'custom') {
         const body: AgentExecuteRequest = {
           runId: `agent-test-${Date.now()}`, taskId: 'director-test', role: 'director', round: 1,
-          provider, model, apiKey: apiKey.trim(), sourcePrompt: 'Create a minimal original pixel platform game test brief.',
+          provider, model, apiKey: apiKey.trim(), creationLanguage: creationLanguage || baseSpec?.creationLanguage || 'zh-CN', sourcePrompt: 'Create a minimal original pixel platform game test brief.',
           projectName: 'Agent API Test', levelCount: 1, artifacts: {},
         }
         const response = await fetch('/api/agents/execute', { method: 'POST', signal: AbortSignal.timeout(55_000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
@@ -276,7 +277,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
       const body: AgentExecuteRequest = {
         runId: `agent-test-${Date.now()}`, taskId: 'director-test', role: 'director', round: 1,
         provider, model: customAgent.model.trim(), apiKey: activeKey, baseUrl: activeBaseUrl,
-        sourcePrompt: 'Create a minimal original pixel platform game test brief.', projectName: 'Agent API Test', levelCount: 1, artifacts: {},
+        creationLanguage: creationLanguage || baseSpec?.creationLanguage || 'zh-CN', sourcePrompt: 'Create a minimal original pixel platform game test brief.', projectName: 'Agent API Test', levelCount: 1, artifacts: {},
       }
       const response = await fetch('/api/agents/execute', { method: 'POST', signal: AbortSignal.timeout(55_000), headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const result = await response.json().catch(() => null) as AgentExecuteResponse | null
@@ -503,7 +504,13 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
         {(plannedSpec || baseSpec) && <GameSpecSummary spec={(plannedSpec || baseSpec)!} imageJobs={estimatedImageJobs(plannedSpec || baseSpec)} onEdit={onEditStory} />}
         {(plannedSpec || baseSpec) && onDraftChange && <NarrativeEditor spec={(plannedSpec || baseSpec)!} onChange={next => {
           const suggestionsOnly = sameSpecExceptSuggestions((plannedSpec || baseSpec)!, next)
-          if (suggestionsOnly) void runAgentAction(async () => { await cluster.updateSuggestionDecisions(next); onDraftChange(next, true) })
+          if (suggestionsOnly) void runAgentAction(async () => {
+            const updated = await cluster.updateSuggestionDecisions(next)
+            if (cluster.run && updated === cluster.run && pendingNarrativeSuggestions(cluster.run.artifacts.productionSpec).length > pendingNarrativeSuggestions(next).length) {
+              throw new Error('修改建议未能写入审核记录，请重新检查草案。')
+            }
+            onDraftChange(next, true)
+          })
           else onDraftChange(next)
         }} onRefine={onRefine} disabled={busy || isOptimizing} />}
         {cluster.run && !['draft', 'cancelled'].includes(cluster.run.status) ? <>
@@ -531,7 +538,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
             const advisoryIssues = (task.issues || []).filter((item) => item.severity === 'info')
             return {
               key: task.id,
-              label: <Space wrap><Text strong>{task.id.startsWith('consistencyCritic-final-') ? '最终独立评审' : label.zh} / {label.en}</Text><Tag color={STATUS_COLOR[task.status]}>{task.status}</Tag>{pendingRevision?.retainedTaskIds.includes(task.id) && <Tag color="green">沿用成果</Tag>}{task.round > 1 && <Tag>第 {task.round} 轮</Tag>}</Space>,
+              label: <Space wrap><Text strong>{task.id.startsWith('consistencyCritic-final-') ? '最终独立评审' : label.zh} / {label.en}</Text><Tag color={STATUS_COLOR[task.status]}>{task.status}</Tag>{pendingRevision?.retainedTaskIds.includes(task.id) && <Tag color="green">沿用成果</Tag>}{task.round > 1 && <Tag>{`第 ${task.round} 轮`}</Tag>}</Space>,
               children: <Space direction="vertical" size={8} style={{ width: '100%' }}>
                 <Text type="secondary">{label.description}</Text>
                 {task.summary && <Paragraph style={{ margin: 0 }}>{task.summary}</Paragraph>}

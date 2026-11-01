@@ -35,6 +35,18 @@ describe('planning improvements reach image production', () => {
     expect(serializeGameSpec(next)).toContain('点亮灯塔')
     expect(serializeGameSpec(next)).toContain('蓝披风不能变色')
   })
+  it('preserves automatic fallback labels through GameSpec normalization', () => {
+    const base = createFallbackGameSpec('', 'Test', 1)
+    const collectible = base.assets.find(asset => asset.category === 'collectible')!
+    const hero = base.assets.find(asset => asset.category === 'hero')!
+    collectible.url = '/builtin/crystal.svg'
+    collectible.status = 'success'
+    collectible.source = 'builtin-fallback'
+    hero.animation!.clips!.walk = { ...hero.animation!.clips!.walk!, url: 'data:image/png;base64,YQ==', status: 'success', source: 'builtin-fallback' }
+    const saved = normalizeGameSpec(JSON.parse(JSON.stringify(base)), base)
+    expect(saved.assets.find(asset => asset.id === collectible.id)?.source).toBe('builtin-fallback')
+    expect(saved.assets.find(asset => asset.id === hero.id)?.animation?.clips?.walk?.source).toBe('builtin-fallback')
+  })
   it('accepts optional fields after a level and fills unspecified creative goals', () => {
     const base = createFallbackGameSpec('关卡 1：灯塔\n主角目标（可选）：找回船队', 'Test', 1)
     expect(base.creativeBrief?.heroGoal).toBe('找回船队')

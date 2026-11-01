@@ -14,7 +14,7 @@ export function currentRunSpec(run: AgentRun): GameSpec | undefined {
 export function changedDraftGroups(before: GameSpec, after: GameSpec): AgentDraftChangeGroup[] {
   const groups: AgentDraftChangeGroup[] = []
   const a = before.narrative, b = after.narrative
-  if (before.title !== after.title || before.version !== after.version || before.levels.length !== after.levels.length || a?.source.originalStory !== b?.source.originalStory || a?.source.originalTitle !== b?.source.originalTitle) groups.push('requirements')
+  if ((before.creationLanguage || 'zh-CN') !== (after.creationLanguage || 'zh-CN') || before.title !== after.title || before.version !== after.version || before.levels.length !== after.levels.length || a?.source.originalStory !== b?.source.originalStory || a?.source.originalTitle !== b?.source.originalTitle) groups.push('requirements')
   const story = (spec: GameSpec) => [spec.world, spec.backgroundStory, spec.creativeBrief?.heroGoal, ...(['premise', 'incitingIncident', 'motivation', 'conflict', 'bossRelation', 'resolution', 'opening', 'ending'] as const).map(key => spec.narrative?.[key])]
   if (different(story(before), story(after))) groups.push('story')
   const cast = (spec: GameSpec) => [spec.narrative?.characters, ...[spec.hero, spec.boss, spec.weapon, spec.collectible, ...spec.enemies].map(item => [item.name, item.appearance])]
@@ -83,7 +83,7 @@ export function reviseAgentDraft(run: AgentRun, spec: GameSpec, input: { sourceP
       const old = run.tasks.find(task => task.role === template.role && task.round === 1)
       return old && !roles.has(template.role) ? old : { ...template, attempts: old?.attempts || 0 }
     })
-  return { ...run, ...input, status: run.reviewMode === 'local-draft' ? 'draft' : 'paused', approved: false, currentRound: 1, error: undefined, planningSpec: spec,
+  return { ...run, ...input, creationLanguage: spec.creationLanguage || 'zh-CN', status: run.reviewMode === 'local-draft' ? 'draft' : 'paused', approved: false, currentRound: 1, error: undefined, planningSpec: spec,
     artifacts: run.reviewMode === 'local-draft' ? {} : clearArtifactsForRoles(run.artifacts, roles), tasks,
     archivedTasks: [...(run.archivedTasks || []), ...archived].slice(-150),
     pendingRevision: { groups: allGroups, invalidatedRoles: [...roles], retainedTaskIds: tasks.filter(complete).map(task => task.id) }, updatedAt: Date.now() }
@@ -112,8 +112,15 @@ export function retryPlanningRun(run: AgentRun, selectedId: string): AgentRun {
 /** Successful player media survive replanning; changed art can be regenerated explicitly later. */
 export function preservePlanningMedia(spec: GameSpec, seed?: GameSpec): GameSpec {
   if (!seed) return spec
+  // Asset IDs are reused by every new project. An ID match alone can attach an
+  // old game's artwork to a new story (including incompatible action clips).
+  const sameStory = spec.title === seed.title
+    && (spec.creationLanguage || 'zh-CN') === (seed.creationLanguage || 'zh-CN')
+    && spec.narrative?.source.originalStory === seed.narrative?.source.originalStory
+  if (!sameStory) return spec
   return { ...spec, assets: spec.assets.map(asset => {
-    const original = seed.assets.find(item => item.id === asset.id && item.kind === asset.kind)
+    const original = seed.assets.find(item => item.id === asset.id && item.kind === asset.kind
+      && item.category === asset.category && item.prompt.trim() === asset.prompt.trim())
     if (!original) return asset
     const animation = asset.animation && original.animation ? { ...asset.animation, clips: Object.fromEntries(Object.entries(asset.animation.clips || {}).map(([pose, clip]) => {
       const prior = original.animation?.clips?.[pose as keyof NonNullable<typeof original.animation.clips>]

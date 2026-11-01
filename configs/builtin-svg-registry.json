@@ -1,0 +1,105 @@
+{
+  "description": "Reviewed original Pixel World bundled SVG bytes. Only these SVGs may occur inside an uploaded game ZIP; standalone SVG uploads remain unsupported.",
+  "files": [
+    {
+      "file": "bat.svg",
+      "sha256": "e922038bfb2fe44a22697c99a8fe544eabb0ac0d43c253b51196354e1d0e5e08"
+    },
+    {
+      "file": "bubble.svg",
+      "sha256": "b92cbe73de602494b65299c364a4fe671573121c4f2bc8b4e57fbc0c511311f9"
+    },
+    {
+      "file": "claw.svg",
+      "sha256": "86cdfeed4225421b3c2a9f42f22b94ff0c20b5f680553182abb8042be76c8965"
+    },
+    {
+      "file": "cloud.svg",
+      "sha256": "b46e9fcd8c2381d92e401dd5b6921999bf9ef5d49f38b5a630385a458b901ca6"
+    },
+    {
+      "file": "crate.svg",
+      "sha256": "d1bd1e6cf150014ad258356ee1979518ce4bf021d04f9c200dbda8812cf01636"
+    },
+    {
+      "file": "crystal.svg",
+      "sha256": "31a3d3abf114bc95c451737edae1e8f672aa469cf4169a3d6ca8acce412c2f84"
+    },
+    {
+      "file": "feather.svg",
+      "sha256": "cd6072fa85caf080743eaea6b877c619256d964468f86766da6a8c6234ae4025"
+    },
+    {
+      "file": "fish.svg",
+      "sha256": "23fb8aa15b0ea6baf410de2c43fe7fb82d8e631964291d49e8a5108822dc5db9"
+    },
+    {
+      "file": "flame.svg",
+      "sha256": "1299a7b0375831b669c38ac5c44f2a249fa401119921839c21494d6538e28051"
+    },
+    {
+      "file": "forest.svg",
+      "sha256": "27266c75f4aa615837240003de09c6cf8e6c405ae851624236a9ec83658c23a6"
+    },
+    {
+      "file": "frost.svg",
+      "sha256": "cb069618ee16eeb99df46d93c2322d12af89321a13aa0a5096ec8d2cbd1a3a83"
+    },
+    {
+      "file": "golem.svg",
+      "sha256": "88e4cdaa05e6873a8663203ef1352742863e2b3f04735f023fef91b170a33392"
+    },
+    {
+      "file": "ground.svg",
+      "sha256": "1f737d4167d4ac885d0f50dc3fcde92e2fd2afb398d2c97b7b7e6e76eec5245f"
+    },
+    {
+      "file": "hero.svg",
+      "sha256": "fdd4296c99dba7917f222eff7480e824bde3cea694172a0574400d18706ac74b"
+    },
+    {
+      "file": "moon.svg",
+      "sha256": "063c8bfc833d256ba3627cddba4acced9290d6d06d6ace98d1d7c9bb37ab33d9"
+    },
+    {
+      "file": "projectile.svg",
+      "sha256": "76c3e582b907f1d65bde7903d497b3e43b02888048c4584a8f359b7f0eca0b2f"
+    },
+    {
+      "file": "slash.svg",
+      "sha256": "fcabb841f99d2b572bebf03c33742efbfbb5573d6556fd732de5789dfefc7a84"
+    },
+    {
+      "file": "slime.svg",
+      "sha256": "fe9b94b1836ba3f93f4f460d010859f6982ae57ee6482ceb68b3e02c7df86bbe"
+    },
+    {
+      "file": "spark.svg",
+      "sha256": "96a27c634015739336bdd6bcfe88c0a73b9a0012f469ad5b980373bca3b371e3"
+    },
+    {
+      "file": "spikes.svg",
+      "sha256": "a177596eee6e455bfbd3f8974f0ac8ee2189142ccc35cd80e2f1db1e3f6d0c70"
+    },
+    {
+      "file": "spring.svg",
+      "sha256": "7613fca3d4a905b9f6bf36789e0a3c38ed8aa69fa600500d1bc776a8b062b697"
+    },
+    {
+      "file": "sword.svg",
+      "sha256": "5d615edb4dcdd40416902a13430445d2a613da1c01abfbfbd7d35bcbaf6b92d1"
+    },
+    {
+      "file": "underwater.svg",
+      "sha256": "94c4045fda9adead003b7667b578456e5968f98c33cd7ba34289be3f6435affd"
+    },
+    {
+      "file": "wand.svg",
+      "sha256": "8fa55e7f5e09df766c5b26be0ba9bf17ed030de9d630cdc4c8de4e8858946006"
+    },
+    {
+      "file": "water.svg",
+      "sha256": "9f2e83a90047741b0d889b0aac7d297fcfe22e51199dbefb3de5df68906b909d"
+    }
+  ]
+}

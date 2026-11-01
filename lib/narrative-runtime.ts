@@ -32,7 +32,7 @@ export function createNarrativeEngine() {
     const spawnAssets = spec.assets.filter(asset => ['groundEnemy', 'airEnemy', 'waterEnemy', 'normalObstacle', 'bounceObstacle', 'deathObstacle'].includes(asset.category))
       .map(asset => [asset.id, asset.category, asset.enabled, asset.levelIds, asset.motion?.mobility, ['normalObstacle', 'bounceObstacle', 'deathObstacle'].includes(asset.category) ? Boolean(asset.url) : undefined])
     const value = JSON.stringify(canonical([
-      spec.title, narrative,
+      ...(spec.creationLanguage === 'en' ? ['language:en'] : []), spec.title, narrative,
       [spec.hero.maxHealth, spec.hero.moveSpeed, spec.hero.jumpPower],
       [spec.weapon.mode, spec.weapon.meleeDamage, spec.weapon.rangedDamage, spec.weapon.cooldownMs, spec.weapon.projectileSpeed],
       spec.enemies.map((enemy, index) => [enemy.health, enemy.damage, enemy.speed, enemy.behavior, enemy.category || ['groundEnemy', 'airEnemy', 'waterEnemy'][index], enemy.assetId]),
@@ -57,7 +57,7 @@ export function createNarrativeEngine() {
   }
   const record = (state: StoryProgress, entry: StoryEntry): StoryProgress => !entry.text || state.history.some(item => item.id === entry.id) ? state : { ...state, history: [...state.history, entry].slice(-250) }
   const discoverClues = (spec: GameSpec, state: StoryProgress): StoryProgress => {
-    for (const clue of spec.narrative?.clues || []) if (clue.levelId === state.levelId) state = record(state, { id: `clue:${clue.id}:setup`, title: '发现线索', text: clue.setup, levelId: state.levelId })
+    for (const clue of spec.narrative?.clues || []) if (clue.levelId === state.levelId) state = record(state, { id: `clue:${clue.id}:setup`, title: spec.creationLanguage === 'en' ? 'Clue Discovered' : '发现线索', text: clue.setup, levelId: state.levelId })
     return state
   }
   const complete = (state: StoryProgress, objective: StoryObjective) => (state.counts[objective.id] || 0) >= objective.count
@@ -90,7 +90,7 @@ export function createNarrativeEngine() {
     const matches = plan.objectives.filter(o => o.kind === event.kind && o.target === event.target && !complete(previous, o) && (irreversible || eligible(previous, o, plan.objectives)))
     if (!matches.length && event.kind !== 'boss-approach') return previous
     let state: StoryProgress = { ...previous, counts: { ...previous.counts }, facts: [...(previous.facts || []), event].slice(-3000), events: [...previous.events, eventKey].slice(-3000) }
-    if (event.kind === 'boss-approach') return record(state, { id: `${event.levelId}:boss-before`, title: '决战之前', text: plan.bossBefore, levelId: event.levelId })
+    if (event.kind === 'boss-approach') return record(state, { id: `${event.levelId}:boss-before`, title: spec.creationLanguage === 'en' ? 'Before the Final Battle' : '决战之前', text: plan.bossBefore, levelId: event.levelId })
     // Physical pickups and defeated actors cannot be recreated. Keep these facts
     // until an earlier task unlocks their objective; interactions still require
     // a deliberate action after their prerequisites have been met.
@@ -100,7 +100,7 @@ export function createNarrativeEngine() {
       state.counts[o.id] = Math.min(o.count, Math.max(state.counts[o.id] || 0, count))
       if (complete(state, o)) state = record(state, { id: `${event.levelId}:objective:${o.id}`, title: o.description, text: o.feedback, levelId: event.levelId })
     }
-    if (event.kind === 'boss') state = record(state, { id: `${event.levelId}:boss-after`, title: '危机解除', text: plan.bossAfter, levelId: event.levelId })
+    if (event.kind === 'boss') state = record(state, { id: `${event.levelId}:boss-after`, title: spec.creationLanguage === 'en' ? 'The Threat Has Passed' : '危机解除', text: plan.bossAfter, levelId: event.levelId })
     if (event.kind === 'interact' || event.kind === 'reach' && event.target !== 'exit') state = discoverClues(spec, state)
     return state
   }
@@ -115,11 +115,11 @@ export function createNarrativeEngine() {
   const finish = (spec: GameSpec, previous: StoryProgress): StoryProgress => {
     const plan = chapter(spec, previous.levelId)
     if (!plan || !plan.objectives.every(o => complete(previous, o))) return previous
-    let state = record(previous, { id: `${previous.levelId}:departure`, title: '本关结束', text: plan.departure, levelId: previous.levelId })
-    for (const clue of spec.narrative?.clues || []) if (clue.payoffLevelId === state.levelId && state.history.some(entry => entry.id === `clue:${clue.id}:setup`)) state = record(state, { id: `clue:${clue.id}:payoff`, title: '线索的答案', text: clue.payoff, levelId: state.levelId })
+    let state = record(previous, { id: `${previous.levelId}:departure`, title: spec.creationLanguage === 'en' ? 'Level Complete' : '本关结束', text: plan.departure, levelId: previous.levelId })
+    for (const clue of spec.narrative?.clues || []) if (clue.payoffLevelId === state.levelId && state.history.some(entry => entry.id === `clue:${clue.id}:setup`)) state = record(state, { id: `clue:${clue.id}:payoff`, title: spec.creationLanguage === 'en' ? 'Clue Explained' : '线索的答案', text: clue.payoff, levelId: state.levelId })
     state = { ...state, completedLevels: [...new Set([...state.completedLevels, state.levelId])] }
     if (state.levelId === spec.levels.at(-1)?.id && spec.levels.every(level => state.completedLevels.includes(level.id))) {
-      state = record(state, { id: 'ending', title: '冒险结局', text: spec.narrative!.ending, levelId: state.levelId })
+      state = record(state, { id: 'ending', title: spec.creationLanguage === 'en' ? 'Adventure Ending' : '冒险结局', text: spec.narrative!.ending, levelId: state.levelId })
       state = { ...state, endingSeen: true }
     }
     return state

@@ -1,7 +1,10 @@
 'use client'
 import NarrativeOverlay from './ui/NarrativeOverlay'
+import { ensureEncounterClearance } from '@/lib/encounter-layout'
+import { createGameTranslator } from '@/lib/game-language'
 import { narrativeEngine, type StoryProgress, type StoryEntry } from '@/lib/narrative-runtime'
 import { enemyCombatRules } from '@/lib/enemy-combat'
+import { createTraversalHints } from '@/lib/traversal-hints'
 import { enemySpecForAsset } from '@/lib/enemy-identity'
 import { readCampaign, writeCampaign, clearCampaign, type CampaignSave } from '@/lib/campaign-save'
 
@@ -18,8 +21,9 @@ import {
   saveGameSettings,
 } from '@/lib/game-settings'
 import { normalizeAnimationSpec } from '@/lib/asset-catalog'
+import { usableSpriteClip } from '@/lib/sprite-clip-browser'
 import type { DisplaySize, GameSettings } from '@/lib/game-settings'
-import type { AnimationClipPose, AnimationPose, AssetCategory, AssetDefinition, AssetType, GameCanvasProps, ObstacleData } from '@/types'
+import type { AnimationClipPose, AnimationPose, AssetCategory, AssetDefinition, AssetType, GameCanvasProps, ObstacleData, SpawnPoint } from '@/types'
 
 const { Title, Text } = Typography
 const PLAYER_WIDTH = 54
@@ -185,7 +189,7 @@ function plannedSprite(
           ? Math.min(frameCount - 1, Math.floor(elapsed / Math.max(1, stateUntil - stateStartedAt) * frameCount))
           : Math.floor(elapsed / (1000 / (clip?.fps || animation.fps))) % frameCount
     const x = frameCount > 1 ? frame / (frameCount - 1) * 100 : 0
-    return <div role="img" aria-label={alt} style={{
+    return <ValidatedActionClip src={spriteUrl} frameCount={frameCount} fallback={fallback} alt={alt} style={{
       ...style,
       backgroundImage: `url("${spriteUrl}")`,
       backgroundSize: `${frameCount * 100}% 100%`,
@@ -217,6 +221,22 @@ function plannedSprite(
   }} />
 }
 
+function ValidatedActionClip({ src, frameCount, fallback, alt, style }: {
+  src: string; frameCount: number; fallback: ReactNode; alt: string; style: CSSProperties
+}) {
+  const [valid, setValid] = useState(false)
+  useEffect(() => {
+    let live = true
+    setValid(false)
+    const image = new Image()
+    image.onload = () => { if (live) setValid(usableSpriteClip(image, frameCount)) }
+    image.onerror = () => { if (live) setValid(false) }
+    image.src = src
+    return () => { live = false }
+  }, [src, frameCount])
+  return valid ? <div role="img" aria-label={alt} style={style} /> : <>{fallback}</>
+}
+
 function setActorAction(
   actor: { action: AnimationPose; actionStartedAt: number; actionUntil: number },
   action: AnimationPose,
@@ -242,8 +262,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     setGameState,
   } = useGameStore()
   const data = gameData.data
-  const level = data?.levels[currentLevelIndex]
+  const sourceLevel = data?.levels[currentLevelIndex]
+  const fallbackEnemyCount = data?.spec?.levels[currentLevelIndex]?.enemyCount ?? 3
+  const level = useMemo(() => sourceLevel ? ensureEncounterClearance(sourceLevel, fallbackEnemyCount) : undefined, [sourceLevel, fallbackEnemyCount])
   const spec = data?.spec
+  const t = useMemo(() => createGameTranslator(spec?.creationLanguage), [spec?.creationLanguage])
   const stageRef = useRef<HTMLDivElement>(null)
   const keysRef = useRef(new Set<string>())
   const playerRef = useRef<PlayerRuntime | null>(null)
@@ -265,9 +288,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
   const musicTimerRef = useRef<number | null>(null)
   const musicStepRef = useRef(0)
   const simulationTimeRef = useRef(0)
+  const traversalHintsRef = useRef(createTraversalHints())
   const [mode, setModeState] = useState<GameMode>('playing')
+  const lastPauseReasonRef = useRef('')
   const [renderTick, setRenderTick] = useState(0)
   const [banner, setBanner] = useState('')
+  // Viewport/image hydration can rerun initialization. Its cleanup must not
+  // cancel the only timer responsible for dismissing a visible level banner.
+  useEffect(() => {
+    if (!banner) return
+    const timer = window.setTimeout(() => setBanner(''), 1500)
+    return () => window.clearTimeout(timer)
+  }, [banner])
   const [viewportWidth, setViewportWidth] = useState(900)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settings, setSettings] = useState<GameSettings>(DEFAULT_GAME_SETTINGS)
@@ -275,7 +307,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
   const storyQueueRef = useRef<StoryEntry[]>([])
   const storyBlockedRef = useRef(false)
   const restoredCampaignRef = useRef<CampaignSave | null | undefined>(undefined)
-  const initializedWorldRef = useRef<{ storyKey: string; levelId: string; groundTop: number } | null>(null)
+  const initializedWorldRef = useRef<{ storyKey: string; levelId: string; groundTop: number; layoutVersion?: number } | null>(null)
   const levelScoreRef = useRef(0)
   const [storyQueue, setStoryQueue] = useState<StoryEntry[]>([])
   const [storyLogOpen, setStoryLogOpen] = useState(false)
@@ -308,17 +340,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     return () => { window.clearInterval(timer); window.removeEventListener('pagehide', saveCampaign); saveCampaign() }
   }, [saveCampaign])
 
-  const setMode = useCallback((next: GameMode) => {
+  const setMode = useCallback((next: GameMode, pauseReason = 'manual') => {
+    if (next === 'paused') lastPauseReasonRef.current = pauseReason
     if (next !== 'playing') keysRef.current.clear()
     modeRef.current = next
     setModeState(next)
   }, [])
   useEffect(() => {
     const pauseWhenHidden = () => {
-      if (modeRef.current === 'playing') setMode('paused')
+      if (modeRef.current === 'playing') setMode('paused', 'window-blur')
     }
     const onVisibilityChange = () => {
-      if (document.hidden) pauseWhenHidden()
+      if (document.hidden && modeRef.current === 'playing') setMode('paused', 'document-hidden')
     }
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('blur', pauseWhenHidden)
@@ -364,7 +397,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
   const displayPreset = DISPLAY_PRESETS[settings.displaySize]
   const stageHeight = displayPreset.stageHeight
   const groundTop = stageHeight - 122
-  const worldWidth = Math.max(1120, viewportWidth)
+  const worldWidth = Math.max(1120, viewportWidth, level?.worldWidth || 0)
   const exitX = worldWidth - EXIT_RIGHT_MARGIN - EXIT_WIDTH
   const exitY = groundTop - EXIT_HEIGHT
 
@@ -504,11 +537,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       enemiesRef.current.forEach(enemy => { enemy.y += dy; enemy.baseY += dy })
       collectiblesRef.current.forEach(item => { item.y += dy })
       obstaclesRef.current.forEach(obstacle => { obstacle.y += dy; if (obstacle.baseY !== undefined) obstacle.baseY += dy })
-      initializedWorldRef.current = { storyKey, levelId: level.id, groundTop }
+      initializedWorldRef.current = { storyKey, levelId: level.id, groundTop, layoutVersion: initialized.layoutVersion }
       return
     }
     if (storyRef.current && storyRef.current.storyKey !== storyKey) { storyRef.current = null; restoredCampaignRef.current = undefined }
-    initializedWorldRef.current = { storyKey, levelId: level.id, groundTop }
+    initializedWorldRef.current = { storyKey, levelId: level.id, groundTop, layoutVersion: level.layoutVersion }
     if (restoredCampaignRef.current === undefined) restoredCampaignRef.current = readCampaign(spec, selectedTheme)
     const saved = restoredCampaignRef.current?.levelIndex === currentLevelIndex ? restoredCampaignRef.current : null
     if (!storyRef.current) storyRef.current = saved ? saved.story : narrativeEngine.fresh(spec, level.id)
@@ -564,7 +597,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         phase: index * 1.3,
       })))
     }
-    const spawns = level.enemySpawns?.length
+    const spawns: SpawnPoint[] = level.enemySpawns?.length
       ? level.enemySpawns
       : Array.from({ length: spec.levels[currentLevelIndex]?.enemyCount ?? 3 }, (_, index) => ({
           id: `enemy-${index}`,
@@ -589,8 +622,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         damage: enemySpec.damage + currentLevelIndex * 2,
         speed: enemySpec.speed + currentLevelIndex * 0.08,
         direction: index % 2 ? -1 : 1,
-        patrolMin: Math.max(150, spawn.x - 100),
-        patrolMax: Math.min(worldWidth - 100, spawn.x + 100),
+        patrolMin: spawn.patrolMin ?? Math.max(150, spawn.x - 100),
+        patrolMax: Math.min(worldWidth - 100, spawn.patrolMax ?? spawn.x + 100),
         lastShotAt: 0,
         ranged: enemyCombatRules.usesRanged(enemySpec.behavior, mobility, index),
         isBoss: false,
@@ -646,8 +679,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       collected: false,
     }))
     if (saved) {
+      const patrols = new Map(enemiesRef.current.map(actor => [actor.id, actor]))
       playerRef.current = saved.actors.player as PlayerRuntime
-      enemiesRef.current = saved.actors.enemies as EnemyRuntime[]
+      enemiesRef.current = (saved.actors.enemies as EnemyRuntime[]).map(actor => {
+        const bounds = patrols.get(actor.id)
+        return bounds ? { ...actor, patrolMin: bounds.patrolMin, patrolMax: bounds.patrolMax,
+          x: enemyCombatRules.moveWithinPatrol(actor.x, 0, 0, bounds.patrolMin, bounds.patrolMax) } : actor
+      })
       collectiblesRef.current = saved.actors.collectibles as CollectibleRuntime[]
       scoreRef.current = saved.score
       powerRef.current = saved.power
@@ -658,16 +696,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     }
     projectilesRef.current = []
     effectsRef.current = []
+    traversalHintsRef.current.clear()
     keysRef.current.clear()
     simulationTimeRef.current = saved?.simulationTime || 0
     transitionRef.current = false
-    setBanner(`LEVEL ${currentLevelIndex + 1} — ${spec.levels[currentLevelIndex]?.name || ''}`)
+    setBanner(`${t('关卡')} ${currentLevelIndex + 1} — ${spec.levels[currentLevelIndex]?.name || ''}`)
     setMode('playing')
     commitStory(narrativeEngine.begin(spec, storyRef.current!, level.id))
-    const timer = window.setTimeout(() => setBanner(''), 1500)
     setRenderTick(0)
-    return () => window.clearTimeout(timer)
-  }, [assetById, assetFor, currentLevelIndex, data, exitX, groundTop, level, levelSpec, setMode, spec, worldWidth, selectedTheme, commitStory, setQueue])
+  }, [assetById, assetFor, currentLevelIndex, data, exitX, groundTop, level, levelSpec, setMode, spec, worldWidth, selectedTheme, commitStory, setQueue, t])
 
   useEffect(() => initializeLevel(), [initializeLevel])
 
@@ -702,12 +739,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     if (now < player.meleeReadyAt) return
     player.meleeReadyAt = now + currentSpec.weapon.cooldownMs
     setActorAction(player, 'meleeAttack', now, ATTACK_POSE_MS)
-    const hitbox = {
-      x: player.facing === 1 ? player.x + player.width - 4 : player.x - 88,
-      y: player.y - 4,
-      width: 92,
-      height: player.height + 8,
-    }
+    const hitbox = enemyCombatRules.meleeHitbox(player.x, player.y, player.width, player.height, player.facing)
     enemiesRef.current.forEach((enemy) => {
       if (enemy.health > 0 && intersects(hitbox, enemy)) damageEnemy(enemy, currentSpec.weapon.meleeDamage)
     })
@@ -779,8 +811,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       return
     }
     setMode('transition')
-    setBanner(`LEVEL ${currentLevelIndex + 1} CLEAR`)
-  }, [currentLevelIndex, setMode, totalLevels, spec, emitStory, commitStory])
+    setBanner(`${t('关卡')} ${currentLevelIndex + 1} · ${t('本关完成')}`)
+  }, [currentLevelIndex, setMode, totalLevels, spec, emitStory, commitStory, t])
 
   useEffect(() => {
     if (mode !== 'transition' || storyQueue.length || storyLogOpen) return
@@ -804,10 +836,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
   useEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase()
-      if (['arrowleft', 'arrowright', ' ', 'j', 'k', 'escape'].includes(key)) event.preventDefault()
+      if (['arrowleft', 'arrowright', 'arrowup', ' ', 'j', 'k', 'escape'].includes(key)) event.preventDefault()
       if (storyBlockedRef.current) return
       if (key === 'escape') {
-        if (modeRef.current === 'playing') setMode('paused')
+        if (modeRef.current === 'playing') setMode('paused', 'escape')
         else if (modeRef.current === 'paused') setMode('playing')
         return
       }
@@ -831,11 +863,36 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
   useEffect(() => {
     if (!data || !level || !spec) return
     let lastRealTime = performance.now()
+    let loopStep = 0
 
     const loop = (realNow: number) => {
       const elapsedRealMs = Math.min(34, Math.max(0, realNow - lastRealTime))
       lastRealTime = realNow
       const player = playerRef.current
+      if (stageRef.current) {
+        stageRef.current.dataset.loopStep = String(++loopStep)
+        stageRef.current.dataset.elapsedMs = String(elapsedRealMs)
+        stageRef.current.dataset.loopTime = String(Math.round(realNow))
+        stageRef.current.dataset.gameMode = modeRef.current
+        stageRef.current.dataset.storyBlocked = String(storyBlockedRef.current)
+        stageRef.current.dataset.lastPauseReason = lastPauseReasonRef.current
+        stageRef.current.dataset.documentHidden = String(document.hidden)
+        stageRef.current.dataset.documentFocused = String(document.hasFocus())
+        stageRef.current.dataset.simulationTime = String(Math.round(simulationTimeRef.current))
+        stageRef.current.dataset.playerHealth = String(player?.health)
+        stageRef.current.dataset.playerAction = String(player?.action)
+        stageRef.current.dataset.playerActionUntil = String(player?.actionUntil)
+        stageRef.current.dataset.pressedKeys = [...keysRef.current].join(',')
+        stageRef.current.dataset.playerOnGround = String(player?.onGround)
+        stageRef.current.dataset.playerVy = String(player?.vy)
+        stageRef.current.dataset.playerSize = player ? `${player.width},${player.height}` : ''
+        stageRef.current.dataset.jumpPower = String(spec.hero.jumpPower)
+        stageRef.current.dataset.weaponCooldown = String(spec.weapon.cooldownMs)
+        stageRef.current.dataset.groundTop = String(groundTop)
+        stageRef.current.dataset.worldWidth = String(worldWidth)
+        stageRef.current.dataset.layoutVersion = String(initializedWorldRef.current?.layoutVersion || 0)
+        stageRef.current.dataset.obstacleLayout = obstaclesRef.current.map(obstacle => `${obstacle.type}:${obstacle.x},${obstacle.width},${obstacle.height}`).join(';')
+      }
       if (modeRef.current === 'playing' && player && !storyBlockedRef.current) {
         simulationTimeRef.current += elapsedRealMs
         const now = simulationTimeRef.current
@@ -858,14 +915,29 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           if (!reactionLocked && jump && player.onGround) {
             player.vy = -spec.hero.jumpPower
             player.onGround = false
+            traversalHintsRef.current.clear()
           }
 
           let nextX = Math.max(0, Math.min(worldWidth - player.width, player.x + player.vx * delta))
           const horizontalBox = { ...player, x: nextX }
           const horizontalHit = obstaclesRef.current.find((obstacle) => intersects(horizontalBox, obstacle))
+          traversalHintsRef.current.observe(now, horizontalHit?.type, player.onGround && player.vx !== 0)
+          if (stageRef.current) {
+            stageRef.current.dataset.playerX = String(player.x)
+            stageRef.current.dataset.playerVx = String(player.vx)
+            stageRef.current.dataset.nextX = String(nextX)
+            stageRef.current.dataset.horizontalHit = horizontalHit ? `${horizontalHit.type}:${horizontalHit.x},${horizontalHit.y},${horizontalHit.width},${horizontalHit.height}` : ''
+            stageRef.current.dataset.enemyX = enemiesRef.current.filter(enemy => enemy.health > 0).map(enemy => enemy.x.toFixed(1)).join(',')
+          }
           if (horizontalHit?.type === 'deathObstacle') damagePlayer(player.maxHealth)
           else if (horizontalHit) nextX = player.x
           player.x = nextX
+          if (stageRef.current) {
+            stageRef.current.dataset.playerXAfter = String(player.x)
+            stageRef.current.dataset.playerY = String(player.y)
+            stageRef.current.dataset.moveSpeed = String(spec.hero.moveSpeed)
+            stageRef.current.dataset.motionFinite = String([player.x, player.y, player.vx, player.vy, delta, spec.hero.moveSpeed].every(Number.isFinite))
+          }
 
           const gravityScale = levelSpec?.platformMode === 'water' ? 0.34 : levelSpec?.platformMode === 'air' ? 0.68 : 1
           player.vy += 0.82 * gravityScale * delta
@@ -986,6 +1058,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           }
         })
 
+        if (stageRef.current) stageRef.current.dataset.enemyXAfter = enemiesRef.current.filter(enemy => enemy.health > 0).map(enemy => enemy.x.toFixed(3)).join(',')
         projectilesRef.current.forEach((shot) => {
           shot.x += shot.vx * delta
           if (shot.hostile) {
@@ -1081,7 +1154,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
   const openSettings = () => {
     resumeAfterSettingsRef.current = modeRef.current === 'playing'
-    if (resumeAfterSettingsRef.current) setMode('paused')
+    if (resumeAfterSettingsRef.current) setMode('paused', 'settings')
     setSettingsOpen(true)
   }
 
@@ -1095,7 +1168,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
   }
 
 
-  if (!data || !level || !spec) return <Card><Empty description="尚无可试玩的游戏数据"><Button onClick={backToMenu}>返回制作台</Button></Empty></Card>
+  if (!data || !level || !spec) return <Card><Empty description={t("尚无可试玩的游戏数据")}><Button onClick={backToMenu}>{t("返回制作台")}</Button></Empty></Card>
 
   const player = playerRef.current
   const cameraX = player ? Math.max(0, Math.min(worldWidth - viewportWidth, player.x - viewportWidth * 0.42)) : 0
@@ -1126,25 +1199,25 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
   const filterStyle = `${getGraphicsFilter(settings.graphicsQuality)} ${levelFilter}`.trim()
 
   return (
-    <>
+    <div data-no-ui-translation lang={spec.creationLanguage || 'zh-CN'}>
     <Card styles={{ body: { padding: 0 } }} style={{ overflow: 'hidden', background: '#080d1d', width: '100%', maxWidth: displayPreset.maxWidth, margin: '0 auto' }}>
       <div style={{ padding: '12px 16px', background: '#10182d', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <Space wrap>
           <Title level={4} style={{ color: '#fff', margin: 0 }}>{spec.title}</Title>
-          <Tag color="blue">Level {currentLevelIndex + 1}/{totalLevels}</Tag>
-          <Tag color={levelCleared ? 'green' : remaining ? 'red' : 'gold'}>{levelCleared ? '出口已开放' : remaining ? `${remaining} 名敌人 · 完成任务后开放出口` : '完成任务后开放出口'}</Tag>
-          <Tag color="gold">Score {scoreRef.current}</Tag>
-          {powerRef.current > 1 && <Tag color="purple">Power ×{powerRef.current.toFixed(2)}</Tag>}
+          <Tag color="blue">{t('关卡')} {currentLevelIndex + 1}/{totalLevels}</Tag>
+          <Tag color={levelCleared ? 'green' : remaining ? 'red' : 'gold'}>{levelCleared ? t('出口已开放') : remaining ? spec.creationLanguage === 'en' ? `${remaining} enemies · Complete the objectives to unlock the exit` : `${remaining} 名敌人 · 完成任务后开放出口` : t('完成任务后开放出口')}</Tag>
+          <Tag color="gold">{t('得分')} {scoreRef.current}</Tag>
+          {powerRef.current > 1 && <Tag color="purple">{t('强化')} ×{powerRef.current.toFixed(2)}</Tag>}
         </Space>
         <Space>
           <Button
             size="small"
             icon={mode === 'paused' ? <Play size={14} /> : <Pause size={14} />}
             onClick={() => setMode(mode === 'paused' ? 'playing' : 'paused')}
-            aria-label={mode === 'paused' ? '继续游戏' : '暂停游戏'}
+            aria-label={mode === 'paused' ? t('继续游戏') : t('暂停游戏')}
           />
-          <Button size="small" icon={<Settings size={14} />} onClick={openSettings} aria-label="打开游戏设置" />
-          <Button size="small" onClick={backToMenu}>Menu</Button>
+          <Button size="small" icon={<Settings size={14} />} onClick={openSettings} aria-label={t("打开游戏设置")} />
+          <Button size="small" onClick={backToMenu}>{t("Menu")}</Button>
         </Space>
       </div>
 
@@ -1160,7 +1233,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           />
         </div>
         <div>
-          <Text style={{ color: boss ? '#ff9c9c' : '#8892ad', fontSize: 12 }}>{boss ? spec.boss.name : 'Boss appears in the final arena'}</Text>
+          <Text style={{ color: boss ? '#ff9c9c' : '#8892ad', fontSize: 12 }}>{boss ? spec.boss.name : t('Boss appears in the final arena')}</Text>
           <Progress
             percent={boss ? Math.max(0, Math.round(boss.health / boss.maxHealth * 100)) : 0}
             showInfo={false}
@@ -1171,7 +1244,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         </div>
       </div>
 
-      <div ref={stageRef} style={{ position: 'relative', height: stageHeight, overflow: 'hidden', background: '#101527', touchAction: 'none' }}>
+      <div ref={stageRef} data-render-tick={renderTick} data-render-player-x={player?.x} data-render-enemy-x={enemiesRef.current.filter(enemy => enemy.health > 0).map(enemy => enemy.x.toFixed(3)).join(',')} style={{ position: 'relative', height: stageHeight, overflow: 'hidden', background: '#101527', touchAction: 'none' }}>
         <div style={{
           position: 'absolute',
           inset: 0,
@@ -1234,13 +1307,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
                   : assets.obstacle
             return (
             <div key={obstacle.id} style={{ position: 'absolute', left: obstacle.x, top: obstacle.y, width: obstacle.width, height: obstacle.height }}>
-              {renderImage(obstacleAsset?.url || obstacleUrl, obstacle.type, { width: '100%', height: '100%', objectFit: 'contain' }, fallbackSprite(obstacle.type === 'deathObstacle' ? 'SPIKE' : obstacle.type === 'bounceObstacle' ? 'BOUNCE' : 'BLOCK', obstacle.type === 'deathObstacle' ? '#a42036' : obstacle.type === 'bounceObstacle' ? '#8e44ad' : '#6d4c41', obstacle.width))}
+              {renderImage(obstacleAsset?.url || obstacleUrl, obstacle.type, { width: '100%', height: '100%', objectFit: 'contain' }, fallbackSprite(obstacle.type === 'deathObstacle' ? t('SPIKE') : obstacle.type === 'bounceObstacle' ? t('BOUNCE') : t('BLOCK'), obstacle.type === 'deathObstacle' ? '#a42036' : obstacle.type === 'bounceObstacle' ? '#8e44ad' : '#6d4c41', obstacle.width))}
             </div>
           )})}
 
           {collectiblesRef.current.filter((item) => !item.collected).map((item) => (
             <div key={item.id} style={{ position: 'absolute', left: item.x, top: item.y, width: 36, height: 36, filter: 'drop-shadow(0 0 8px #77f7ff)', animation: 'pulse 1s infinite alternate' }}>
-              {renderImage(assets.collectible, spec.collectible.name, { width: '100%', height: '100%', objectFit: 'contain' }, fallbackSprite('SEED', '#08a88a', 34))}
+              {renderImage(assets.collectible, spec.collectible.name, { width: '100%', height: '100%', objectFit: 'contain' }, fallbackSprite(t('SEED'), '#08a88a', 34))}
             </div>
           ))}
 
@@ -1261,7 +1334,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
                 enemy.actionUntil,
                 enemy.isBoss ? spec.boss.name : enemySpecForAsset(spec, enemyAsset).name,
                 { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${enemy.direction === 1 ? -1 : 1})`, filter: 'drop-shadow(0 5px 3px rgba(0,0,0,.55))' },
-                fallbackSprite(enemy.isBoss ? 'BOSS' : 'ENEMY', enemy.isBoss ? '#8e2145' : '#9b3a32', enemy.width),
+                fallbackSprite(enemy.isBoss ? t('BOSS') : t('ENEMY'), enemy.isBoss ? '#8e2145' : '#9b3a32', enemy.width),
                 enemy.vy < 0 || enemy.y < enemy.baseY ? 0 : 1,
               )}
             </div>
@@ -1269,13 +1342,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
           {projectilesRef.current.map((shot) => (
             <div key={shot.id} data-testid="game-projectile" data-hostile={shot.hostile ? 'true' : 'false'} style={{ position: 'absolute', left: shot.x, top: shot.y, width: shot.width, height: shot.height, filter: shot.hostile ? 'hue-rotate(150deg) drop-shadow(0 0 6px #ff3b64)' : 'drop-shadow(0 0 6px #6ee7ff)' }}>
-              {renderImage(assets.projectile, 'Projectile', { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${shot.vx < 0 ? -1 : 1})` }, fallbackSprite('•', shot.hostile ? '#ff365e' : '#1fb7f2', shot.width))}
+              {renderImage(assets.projectile, t('Projectile'), { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${shot.vx < 0 ? -1 : 1})` }, fallbackSprite('•', shot.hostile ? '#ff365e' : '#1fb7f2', shot.width))}
             </div>
           ))}
 
           {effectsRef.current.map((effect) => (
             <div key={effect.id} style={{ position: 'absolute', left: effect.x, top: effect.y, width: 92, height: 72 }}>
-              {renderImage(assets.attackEffect, 'Slash', { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${effect.facing})`, filter: 'drop-shadow(0 0 10px #9fffff)' }, <div style={{ fontSize: 54, color: '#8ff', transform: `scaleX(${effect.facing})` }}>◜</div>)}
+              {renderImage(assets.attackEffect, t('Slash'), { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${effect.facing})`, filter: 'drop-shadow(0 0 10px #9fffff)' }, <div style={{ fontSize: 54, color: '#8ff', transform: `scaleX(${effect.facing})` }}>◜</div>)}
             </div>
           ))}
 
@@ -1289,7 +1362,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
               opacity: renderTick < player.invulnerableUntil && Math.floor(renderTick / 80) % 2 ? 0.35 : 1,
               filter: 'drop-shadow(0 5px 3px rgba(0,0,0,.6))',
             }}>
-              {plannedSprite(heroAsset, assets.character, player.action, renderTick, player.actionStartedAt, player.actionUntil, spec.hero.name, { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${player.facing})` }, fallbackSprite('HERO', '#2664c9', 54), player.vy < 0 ? 0 : 1)}
+              {plannedSprite(heroAsset, assets.character, player.action, renderTick, player.actionStartedAt, player.actionUntil, spec.hero.name, { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${player.facing})` }, fallbackSprite(t('HERO'), '#2664c9', 54), player.vy < 0 ? 0 : 1)}
               <div style={{ position: 'absolute', left: player.facing === 1 ? 34 : -14, top: 25, width: 34, height: 20 }}>
                 {renderImage(player.action === 'rangedAttack' ? rangedWeaponAsset?.url || assets.rangedWeapon : player.action === 'meleeAttack' ? meleeWeaponAsset?.url || assets.weapon : '', spec.weapon.name, { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${player.facing}) rotate(${player.facing === 1 ? -10 : 10}deg)` }, null)}
               </div>
@@ -1305,7 +1378,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
               background: levelCleared ? 'radial-gradient(#9dffe0, #0b6c7a 65%, #051c35)' : '#222938',
               boxShadow: levelCleared ? '0 0 24px #52ffc8' : 'none',
             }} />
-            <Text style={{ position: 'absolute', bottom: -24, color: '#fff', fontSize: 11 }}>{levelCleared ? 'EXIT' : 'LOCKED'}</Text>
+            <Text style={{ position: 'absolute', bottom: -24, color: '#fff', fontSize: 11 }}>{levelCleared ? t('EXIT') : t('LOCKED')}</Text>
           </div>
         </div>
 
@@ -1313,25 +1386,28 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           const x = 120 + (exitX - 220) * point.position - cameraX
           return <button key={point.id} className="narrative-world-point" style={{ left: x, top: groundTop - 85 }} aria-label={point.name} onClick={interactStory}>✦<small>{point.name} · E</small></button>
         })}
-        {spec?.narrative && <div className="narrative-objectives" aria-label="当前关卡任务"><strong>{storyChapter?.title}</strong>{storyTasks.map(task => <div key={task.id} data-objective={task.id} data-complete={task.complete}>{task.complete ? '✓' : task.available ? '○' : '·'} {task.description} {task.count > 1 ? `${task.current}/${task.count}` : ''}</div>)}<Button size="small" onClick={() => { keysRef.current.clear(); storyBlockedRef.current = true; setStoryLogOpen(true) }}>剧情记录</Button><Button size="small" onClick={interactStory}>交互 E</Button></div>}
-        <NarrativeOverlay queue={storyQueue} history={storyProgress?.history || []} logOpen={storyLogOpen} onNext={() => setQueue(storyQueueRef.current.slice(1))} onSkip={() => setQueue([])} onClose={() => { setStoryLogOpen(false); storyBlockedRef.current = storyQueueRef.current.length > 0; keysRef.current.clear() }} />
+        {spec?.narrative && <div className="narrative-objectives" aria-label={t("当前关卡任务")}><strong>{storyChapter?.title}</strong>{storyTasks.map(task => <div key={task.id} data-objective={task.id} data-complete={task.complete}>{task.complete ? '✓' : task.available ? '○' : '·'} {task.description} {task.count > 1 ? `${task.current}/${task.count}` : ''}</div>)}<Button size="small" onClick={() => { keysRef.current.clear(); storyBlockedRef.current = true; setStoryLogOpen(true) }}>{t("剧情记录")}</Button><Button size="small" onClick={interactStory}>{t("交互 E")}</Button></div>}
+        <NarrativeOverlay creationLanguage={spec.creationLanguage} queue={storyQueue} history={storyProgress?.history || []} logOpen={storyLogOpen} onNext={() => setQueue(storyQueueRef.current.slice(1))} onSkip={() => setQueue([])} onClose={() => { setStoryLogOpen(false); storyBlockedRef.current = storyQueueRef.current.length > 0; keysRef.current.clear() }} />
+        {mode === 'playing' && !storyBlockedRef.current && (player?.health || 0) > 0 && traversalHintsRef.current.message(simulationTimeRef.current) && <div role="status" data-testid="traversal-hint" style={{ position: 'absolute', left: '50%', bottom: 72, transform: 'translateX(-50%)', zIndex: 14, width: 'max-content', maxWidth: 'calc(100% - 32px)', padding: '10px 16px', borderRadius: 8, color: '#fff4ba', background: 'rgba(28,34,46,.95)', border: '1px solid #e5c46b', pointerEvents: 'none', textAlign: 'center', fontWeight: 700 }}>
+          {t(traversalHintsRef.current.message(simulationTimeRef.current)!)}
+        </div>}
         {banner && <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}><div style={{ padding: '14px 28px', color: '#fff', background: 'rgba(5,10,25,.82)', border: '2px solid #61dafb', fontSize: 24, fontWeight: 900, letterSpacing: 2 }}>{banner}</div></div>}
 
         {playerNearExit && (
           <div style={{ position: 'absolute', left: '50%', bottom: 92, transform: 'translateX(-50%)', zIndex: 14, padding: '8px 14px', borderRadius: 8, color: '#fff', background: levelCleared ? 'rgba(5,112,92,.92)' : 'rgba(120,35,45,.9)', border: `1px solid ${levelCleared ? '#66ffd0' : '#ff8792'}`, fontWeight: 700 }}>
-            {levelCleared ? '出口已开启：走入传送门继续冒险' : `出口锁定：${storyTasks.find(task => !task.complete && task.target !== 'exit')?.description || `还需击败 ${remaining} 个敌人`}`}
+            {levelCleared ? t('出口已开启：走入传送门继续冒险') : `${t('出口锁定：')}${storyTasks.find(task => !task.complete && task.target !== 'exit')?.description || (spec.creationLanguage === 'en' ? `Defeat ${remaining} more enemies` : `还需击败 ${remaining} 个敌人`)}`}
           </div>
         )}
 
         {(mode === 'paused' || mode === 'dead' || mode === 'victory' || mode === 'transition') && (
           <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(3,6,16,.68)', zIndex: 20 }}>
             <div style={{ textAlign: 'center', color: '#fff', padding: 28 }}>
-              <Title style={{ color: '#fff' }}>{mode === 'paused' ? '游戏已暂停' : mode === 'dead' ? '主角倒下了' : mode === 'victory' ? '冒险完成' : '本关完成'}</Title>
-              {mode === 'victory' && <Text style={{ color: '#ffe985', display: 'block', marginBottom: 18 }}>得分：{scoreRef.current} · 所有关卡已完成</Text>}
-              {mode === 'dead' && <Button onClick={() => { if (spec && storyRef.current && level) { storyRef.current = narrativeEngine.begin(spec, storyRef.current, level.id, true); setStoryProgress(storyRef.current); setQueue(storyRef.current.history.filter(entry => entry.id === `${level.id}:arrival`)); } scoreRef.current = levelScoreRef.current; playerRef.current = null; restoredCampaignRef.current = null; initializeLevel() }}>重试本关</Button>}
-              {mode === 'paused' && <Button type="primary" icon={<Play size={15} />} onClick={() => setMode('playing')}>Resume</Button>}
-              {(mode === 'dead' || mode === 'victory') && <Button type="primary" icon={<RotateCcw size={15} />} onClick={restartCampaign}>重新开始冒险</Button>}
-              {mode === 'victory' && spec.narrative && <Button style={{ marginLeft: 10 }} onClick={() => { keysRef.current.clear(); storyBlockedRef.current = true; setStoryLogOpen(true) }}>回看故事</Button>}
+              <Title style={{ color: '#fff' }}>{mode === 'paused' ? t('游戏已暂停') : mode === 'dead' ? t('主角倒下了') : mode === 'victory' ? t('冒险完成') : t('本关完成')}</Title>
+              {mode === 'victory' && <Text style={{ color: '#ffe985', display: 'block', marginBottom: 18 }}>{t("得分：")}{scoreRef.current} {t("· 所有关卡已完成")}</Text>}
+              {mode === 'dead' && <Button onClick={() => { if (spec && storyRef.current && level) { storyRef.current = narrativeEngine.begin(spec, storyRef.current, level.id, true); setStoryProgress(storyRef.current); setQueue(storyRef.current.history.filter(entry => entry.id === `${level.id}:arrival`)); } scoreRef.current = levelScoreRef.current; playerRef.current = null; restoredCampaignRef.current = null; initializeLevel() }}>{t("重试本关")}</Button>}
+              {mode === 'paused' && <Button type="primary" icon={<Play size={15} />} onClick={() => setMode('playing')}>{t("Resume")}</Button>}
+              {(mode === 'dead' || mode === 'victory') && <Button type="primary" icon={<RotateCcw size={15} />} onClick={restartCampaign}>{t("重新开始冒险")}</Button>}
+              {mode === 'victory' && spec.narrative && <Button style={{ marginLeft: 10 }} onClick={() => { keysRef.current.clear(); storyBlockedRef.current = true; setStoryLogOpen(true) }}>{t("回看故事")}</Button>}
             </div>
           </div>
         )}
@@ -1358,28 +1434,28 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
             onPointerDown={() => pressMovement(' ', true)}
             onPointerUp={() => pressMovement(' ', false)}
             onPointerLeave={() => pressMovement(' ', false)}
-          >Jump</Button>
+          >{t("Jump")}</Button>
         </div>
         <div style={{ position: 'absolute', right: 16, bottom: 14, display: 'flex', gap: 8, zIndex: 12 }}>
-          <Button danger size="large" icon={<Swords size={17} />} onClick={meleeAttack}>Slash</Button>
-          <Button type="primary" size="large" icon={<Crosshair size={17} />} onClick={rangedAttack}>Shoot</Button>
+          <Button danger size="large" icon={<Swords size={17} />} onClick={meleeAttack}>{t("Slash")}</Button>
+          <Button type="primary" size="large" icon={<Crosshair size={17} />} onClick={rangedAttack}>{t("Shoot")}</Button>
         </div>
       </div>
 
       <div style={{ padding: '10px 16px', background: '#0b1122', color: '#aeb8d0', fontSize: 12 }}>
         <Space wrap split={<span>•</span>}>
-          <span>A/D or ←/→ move</span>
-          <span>W/Space jump</span>
-          <span>J melee</span>
-          <span>K/F ranged</span>
-          <span>ESC pause</span>
-          <span>{spec.narrative ? '完成本关任务后，进入出口继续冒险' : '击败所有敌人后，出口开放'}</span>
+          <span>{t("A/D or ←/→ move")}</span>
+          <span>{t("W/Space jump")}</span>
+          <span>{t("J melee")}</span>
+          <span>{t("K/F ranged")}</span>
+          <span>{t("ESC pause")}</span>
+          <span>{spec.narrative ? t('完成本关任务后，进入出口继续冒险') : t('击败所有敌人后，出口开放')}</span>
         </Space>
       </div>
     </Card>
     <Drawer
       className="game-settings-drawer"
-      title={<span style={{ color: '#fff' }}>游戏设置</span>}
+      title={<span data-no-ui-translation style={{ color: '#fff' }}>{t("游戏设置")}</span>}
       open={settingsOpen}
       onClose={closeSettings}
       width={440}
@@ -1388,36 +1464,36 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         body: { background: '#0b1122', color: '#fff' },
       }}
     >
-      <Space direction="vertical" size={24} style={{ width: '100%' }}>
+      <Space data-no-ui-translation direction="vertical" size={24} style={{ width: '100%' }}>
         <section>
-          <Title level={5} style={{ color: '#fff', marginTop: 0 }}>画面</Title>
-          <Text style={{ color: '#aeb8d0', display: 'block', marginBottom: 10 }}>画面大小</Text>
+          <Title level={5} style={{ color: '#fff', marginTop: 0 }}>{t("画面")}</Title>
+          <Text style={{ color: '#aeb8d0', display: 'block', marginBottom: 10 }}>{t("画面大小")}</Text>
           <Segmented
             block
             value={settings.displaySize}
-            options={(Object.entries(DISPLAY_PRESETS) as Array<[DisplaySize, typeof DISPLAY_PRESETS[DisplaySize]]>).map(([value, preset]) => ({ label: preset.label, value }))}
+            options={(Object.entries(DISPLAY_PRESETS) as Array<[DisplaySize, typeof DISPLAY_PRESETS[DisplaySize]]>).map(([value, preset]) => ({ label: t(preset.label), value }))}
             onChange={(value) => updateSetting('displaySize', value as DisplaySize)}
           />
-          <Text style={{ color: '#aeb8d0', display: 'block', margin: '18px 0 10px' }}>画面效果</Text>
+          <Text style={{ color: '#aeb8d0', display: 'block', margin: '18px 0 10px' }}>{t("画面效果")}</Text>
           <Segmented
             block
             value={settings.graphicsQuality}
             options={[
-              { label: '流畅', value: 'low' },
-              { label: '标准', value: 'medium' },
-              { label: '鲜明', value: 'high' },
+              { label: t('流畅'), value: 'low' },
+              { label: t('标准'), value: 'medium' },
+              { label: t('鲜明'), value: 'high' },
             ]}
             onChange={(value) => updateSetting('graphicsQuality', value as GameSettings['graphicsQuality'])}
           />
         </section>
 
         <section>
-          <Title level={5} style={{ color: '#fff', marginTop: 0 }}>音乐</Title>
+          <Title level={5} style={{ color: '#fff', marginTop: 0 }}>{t("音乐")}</Title>
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-            <Text style={{ color: '#aeb8d0' }}>启用背景音乐</Text>
+            <Text style={{ color: '#aeb8d0' }}>{t("启用背景音乐")}</Text>
             <Switch checked={settings.musicEnabled} onChange={(checked) => updateSetting('musicEnabled', checked)} />
           </Space>
-          <Text style={{ color: '#aeb8d0', display: 'block', margin: '16px 0 6px' }}>音乐音量：{settings.masterVolume}%</Text>
+          <Text style={{ color: '#aeb8d0', display: 'block', margin: '16px 0 6px' }}>{t("音乐音量：")}{settings.masterVolume}%</Text>
           <Slider
             min={0}
             max={100}
@@ -1428,27 +1504,27 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         </section>
 
         <section>
-          <Title level={5} style={{ color: '#fff', marginTop: 0 }}>基本操作指南</Title>
+          <Title level={5} style={{ color: '#fff', marginTop: 0 }}>{t("基本操作指南")}</Title>
           <Space direction="vertical" size={10} style={{ width: '100%' }}>
-            <Text style={{ color: '#dce5f8' }}><Tag color="blue">A / D　← / →</Tag>左右移动</Text>
-            <Text style={{ color: '#dce5f8' }}><Tag color="cyan">W / Space / ↑</Tag>跳跃</Text>
-            <Text style={{ color: '#dce5f8' }}><Tag color="volcano">J</Tag>近战攻击</Text>
-            <Text style={{ color: '#dce5f8' }}><Tag color="purple">K / F</Tag>远程攻击</Text>
-            <Text style={{ color: '#dce5f8' }}><Tag>ESC</Tag>暂停或继续</Text>
-            <Text style={{ color: '#dce5f8' }}>完成当前关卡任务、解除敌人阻拦后，走入右侧传送门继续冒险；靠近线索标记按 E 交互。</Text>
+            <Text style={{ color: '#dce5f8' }}><Tag color="blue">A / D　← / →</Tag>{t("左右移动")}</Text>
+            <Text style={{ color: '#dce5f8' }}><Tag color="cyan">W / Space / ↑</Tag>{t("跳跃")}</Text>
+            <Text style={{ color: '#dce5f8' }}><Tag color="volcano">J</Tag>{t("近战攻击")}</Text>
+            <Text style={{ color: '#dce5f8' }}><Tag color="purple">K / F</Tag>{t("远程攻击")}</Text>
+            <Text style={{ color: '#dce5f8' }}><Tag>ESC</Tag>{t("暂停或继续")}</Text>
+            <Text style={{ color: '#dce5f8' }}>{t("完成当前关卡任务、解除敌人阻拦后，走入右侧传送门继续冒险；靠近线索标记按 E 交互。")}</Text>
           </Space>
         </section>
 
         <section>
-          <Title level={5} style={{ color: '#fff', marginTop: 0 }}>冒险故事与剧情记录</Title>
+          <Title level={5} style={{ color: '#fff', marginTop: 0 }}>{t("冒险故事与剧情记录")}</Title>
           <Card size="small" style={{ background: '#121c33', borderColor: '#2b3b61' }}>
             <Text style={{ color: '#dce5f8', whiteSpace: 'pre-wrap', lineHeight: 1.75 }}>{spec.narrative?.opening || spec.backgroundStory}</Text>
           </Card>
-          <Button onClick={() => { setSettingsOpen(false); storyBlockedRef.current = true; setStoryLogOpen(true) }} style={{ marginTop: 12 }}>查看已发生的剧情</Button>
+          <Button onClick={() => { setSettingsOpen(false); storyBlockedRef.current = true; setStoryLogOpen(true) }} style={{ marginTop: 12 }}>{t("查看已发生的剧情")}</Button>
         </section>
       </Space>
     </Drawer>
-    </>
+    </div>
   )
 }
 

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { formatGenerationError, mapUpstreamHttpStatus } from '@/lib/format-generation-error'
-import { buildAnimationClipPrompt, buildGamePrompt, buildModerationSafeAnimationClipPrompt, buildModerationSafePlannedAssetPrompt, buildPlannedAssetPrompt, getCutoutMode, getNegativeTemplate } from '@/lib/game-prompts'
+import { buildAnimationClipPrompt, buildGamePrompt, buildPlannedAssetPrompt, getCutoutMode, getNegativeTemplate } from '@/lib/game-prompts'
 import { animationClipPoses, createActionStripAnimation, generationTypeForAsset, normalizeAnimationSpec } from '@/lib/asset-catalog'
 import { createFallbackGameSpec, normalizeGameSpec } from '@/lib/game-spec'
+import { normalizeCreationLanguage } from '@/lib/creation-language'
 import {
   getImageProvider,
   normalizeProviderRequest,
@@ -16,6 +17,7 @@ import type { AnimationClipPose, AssetDefinition, AssetType, GameSpec, LevelData
 import { CustomEndpointError, validateCustomBaseUrl } from '@/lib/custom-endpoint.server'
 import { ImageQualityError, inspectSpriteImage, processGeneratedImage, readGeneratedImage } from '@/lib/image-quality.server'
 import { getProviderConfig } from '@/configs/image-providers'
+import type { GenerateImageParams } from '@/lib/image-providers/types'
 
 interface GenerateRequest {
   theme: string
@@ -82,28 +84,6 @@ async function generateAsset(
   return processImageCutout(originalUrl, type, providerId, model, baseUrl)
 }
 
-function isRetryable(error: unknown): boolean {
-  if (error instanceof Error && /daily free allocation|insufficient_quota|credit_balance_exhausted|insufficient credits|not available in your region/i.test(error.message)) return false
-  return error instanceof UpstreamApiError && (
-    error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500
-  )
-}
-
-function isModerationError(error: unknown): boolean {
-  if (!(error instanceof UpstreamApiError)) return false
-  const detail = error.message.toLowerCase()
-  return error.status === 400 && (
-    detail.includes('protected content')
-    || detail.includes('request moderated')
-    || detail.includes('content policy')
-    || detail.includes('content_policy')
-    || detail.includes('moderation')
-    || detail.includes('flagged')
-    || detail.includes('code":3030')
-    || detail.includes('code 3030')
-  )
-}
-
 async function generatePlannedAsset(
   providerId: ProviderId,
   model: string,
@@ -127,7 +107,7 @@ async function generatePlannedAsset(
   const animation = asset.kind === 'spriteSheet' ? normalizeAnimationSpec(asset.animation) : undefined
   const clip = animationPose && animation?.layoutVersion === 3 ? animation.clips?.[animationPose] : undefined
   const frameCount = clip?.frameCount || (animationPose ? createActionStripAnimation().clips?.[animationPose]?.frameCount : undefined) || 1
-  let prompt = animationPose
+  const prompt = animationPose
     ? buildAnimationClipPrompt(asset, animationPose, theme, spec, providerId, model)
     : buildPlannedAssetPrompt(asset, type, theme, spec, levelIndex, providerId, model)
   const negativePrompt = asset.kind === 'spriteSheet'
@@ -149,45 +129,42 @@ async function generatePlannedAsset(
   const referenceGuidance = safeReferenceImages.length
     ? ` Reference image 1 is the exact character identity and proportions. ${safeReferenceImages.length > 1 ? 'The remaining references are exact project-made weapon, projectile or effect assets; reproduce and physically align them with the character, do not redesign them.' : 'Keep this exact identity in the new action strip.'}`
     : ''
-  prompt += referenceGuidance
-  let usedModerationRewrite = false
-  let lastError: unknown
-  for (let attempt = 0; attempt < (onAttempt ? 1 : 2); attempt++) {
-    try {
-      if (onAttempt) await onAttempt()
-      const originalUrl = await provider.generateImage({
-        prompt,
-        negativePrompt,
-        assetType: type,
-        apiKey,
-        model,
-        baseUrl: customBaseUrl,
-        layout: animationPose ? 'animation-strip' : asset.kind === 'spriteSheet' ? 'sprite-sheet' : 'single',
-        frameCount,
-        referenceImages: safeReferenceImages,
-        signal,
-      })
-      const processedUrl = await processImageCutout(
-        originalUrl, type, providerId, model, baseUrl, asset.kind === 'spriteSheet',
-        animationPose ? frameCount : asset.kind === 'spriteSheet' ? 6 : undefined,
-        animationPose ? 1 : asset.kind === 'spriteSheet' ? 6 : 1,
-        animationPose === 'idle' && ['hero', 'groundEnemy', 'boss'].includes(asset.category),
-      )
-      return processedUrl
-    } catch (error) {
-      lastError = error
-      if (isModerationError(error) && !usedModerationRewrite) {
-        prompt = animationPose
-          ? buildModerationSafeAnimationClipPrompt(asset, animationPose, providerId, model) + referenceGuidance
-          : buildModerationSafePlannedAssetPrompt(asset, type, providerId, model)
-        usedModerationRewrite = true
-        continue
-      }
-      if (!isRetryable(error) || onAttempt || attempt === 1) throw error
-      await new Promise((resolve) => setTimeout(resolve, 700 * 2 ** attempt))
-    }
+  // Quality rejection permits one repair request on the same model. Other
+  // provider failures never trigger another paid request here.
+  if (onAttempt) await onAttempt()
+  const imageRequest: GenerateImageParams = {
+    prompt: prompt + referenceGuidance,
+    negativePrompt,
+    assetType: type,
+    apiKey,
+    model,
+    baseUrl: customBaseUrl,
+    layout: animationPose ? 'animation-strip' : asset.kind === 'spriteSheet' ? 'sprite-sheet' : 'single',
+    frameCount,
+    referenceImages: safeReferenceImages,
+    signal,
   }
-  throw lastError
+  const process = (url: string) => processImageCutout(
+    url, type, providerId, model, baseUrl, asset.kind === 'spriteSheet',
+    animationPose ? frameCount : asset.kind === 'spriteSheet' ? 6 : undefined,
+    animationPose ? 1 : asset.kind === 'spriteSheet' ? 6 : 1,
+    animationPose === 'idle' && ['hero', 'groundEnemy', 'boss'].includes(asset.category),
+  )
+  try {
+    return await process(await provider.generateImage(imageRequest))
+  } catch (error) {
+    if (!(error instanceof ImageQualityError) || signal?.aborted) throw error
+    // One bounded repair attempt for malformed artwork. Keep the same model and
+    // identity; a second rejection is handled by the client as builtin art.
+    const background = getCutoutMode(providerId, type, model) === 'chroma-green'
+      ? 'a perfectly flat bright green chroma background with a broad green margin on every edge'
+      : getCutoutMode(providerId, type, model) === 'checkerboard'
+        ? 'the requested flat checkerboard transparency background with a broad empty margin on every edge'
+        : 'a transparent alpha background with a broad empty margin on every edge'
+    const repairPrompt = `${prompt} ${referenceGuidance} QUALITY REPAIR: The previous render was rejected because it could not be used as a clean game asset. Keep the exact subject identity, palette and requested action. For isolated objects or characters, draw one complete subject centered at about half the canvas size on ${background}. For animation strips, give each cell the same centered character with separate empty margins. For backgrounds, draw only the requested scenery. No card, floor, room, landscape behind an object, border, broad glow or full-bleed illustration.`
+    if (onAttempt) await onAttempt()
+    return process(await provider.generateImage({ ...imageRequest, prompt: repairPrompt }))
+  }
 }
 
 function spreadSpawns(prefix: string, count: number, start = 260, end = 850, y = 352): SpawnPoint[] {
@@ -272,7 +249,7 @@ export async function POST(request: NextRequest) {
     modelId = normalized.model
     const apiKey = resolveApiKey(providerId, body.apiKey)
     const customBaseUrl = providerId === 'custom' ? validateCustomBaseUrl(body.customBaseUrl || '') : undefined
-    const fallback = createFallbackGameSpec(prompt, theme, levelCount)
+    const fallback = createFallbackGameSpec(prompt, theme, levelCount, normalizeCreationLanguage(body.spec?.creationLanguage))
     const spec = normalizeGameSpec(body.spec || fallback, fallback, levelCount)
     const baseUrl = request.nextUrl.origin
 
@@ -300,6 +277,7 @@ export async function POST(request: NextRequest) {
             url,
             status: 'success' as const,
             error: undefined,
+            source: undefined,
           },
         },
       } : animation
@@ -311,6 +289,7 @@ export async function POST(request: NextRequest) {
         url: completedAnimation?.clips?.idle?.url || (asset.kind === 'spriteSheet' ? undefined : url),
         status: asset.kind === 'spriteSheet' ? completedClipUrls ? 'success' : 'pending' : 'success',
         error: undefined,
+        source: undefined,
         animation: completedAnimation,
       }
       const completedSpec: GameSpec = {

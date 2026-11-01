@@ -1,7 +1,11 @@
 import { offlineNarrativeRuntimeSource } from './narrative-runtime'
+import { createGameTranslator, offlineGameLanguageSource } from './game-language'
 import { offlineEnemyCombatSource } from './enemy-combat'
+import { offlineTraversalHintSource } from './traversal-hints'
 import { buildGameDataFromSpec } from './virtual-levels'
 import { animationClipPoses, normalizeAnimationSpec } from '@/lib/asset-catalog'
+import {templateAttributionText,templateAttributionHtml} from './template-attribution'
+import offlineEngine from '@/configs/offline-engine-source.json'
 import type { AssetDefinition, GameSpec } from '@/types'
 
 const encoder = new TextEncoder()
@@ -21,6 +25,7 @@ function extensionFor(contentType: string, url: string): string {
   if (contentType.includes('webp')) return 'webp'
   if (contentType.includes('jpeg') || contentType.includes('jpg')) return 'jpg'
   if (contentType.includes('gif')) return 'gif'
+  if (contentType.includes('svg')) return 'svg'
   const match = url.match(/\.([a-z0-9]{2,5})(?:[?#]|$)/i)
   return match?.[1]?.toLowerCase() || 'png'
 }
@@ -107,12 +112,15 @@ const OFFLINE_STYLE_V2 = `${OFFLINE_STYLE}.bar button{margin-left:auto;font:700 
 const OFFLINE_GAME_V2 = String.raw`
 (() => {
   const spec = JSON.parse(document.getElementById('project-data').textContent)
+  const t = createGameTranslator(spec.creationLanguage)
   const runtimeLevels = JSON.parse(document.getElementById('runtime-data').textContent).levels
   const canvas = document.querySelector('canvas'), c = canvas.getContext('2d'), pauseButton = document.querySelector('[data-pause]')
   c.imageSmoothingEnabled = false
-  const W = 1152, H = 648, G = 555, images = {}, keys = {}
+  const VIEW_WIDTH = 1152, H = 648, G = 555, images = {}, keys = {}
+  let W = VIEW_WIDTH
   let level = 0, score = 0, sim = 0, lastReal = performance.now(), paused = false, won = false
   let player, enemies = [], shots = [], items = [], effects = [], obstacles = []
+  const traversalHints = createTraversalHints()
   const active = (category) => spec.assets.find((asset) => asset.enabled && asset.category === category && (!asset.levelIds.length || asset.levelIds.includes(spec.levels[level].id)))
   const rect = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y
   const setAction = (actor, action, duration = 0) => { if (actor.action !== action) { actor.action = action; actor.actionStart = sim } actor.actionUntil = duration ? sim + duration : 0 }
@@ -124,14 +132,25 @@ const OFFLINE_GAME_V2 = String.raw`
     const row = (value, fallback) => Math.max(0, Math.min(5, Number.isFinite(Number(value)) ? Math.round(Number(value)) : fallback))
     return { columns: 6, rows: 6, fps: raw.fps || 8, states: { idle: row(raw.states.idle, 0), walk: row(raw.states.walk, 1), jump: row(raw.states.jump, 2), attack: row(raw.states.attack, 3), hit: row(raw.states.hit, 4), death: row(raw.states.death, 5) } }
   }
+  const usableClip = (image, count) => {
+    if (!image || image.width % count || image.width / count / image.height < .65 || image.width / count / image.height > 1.6) return false
+    try {
+      const probe = document.createElement('canvas'); probe.width = 32; probe.height = 32
+      const context = probe.getContext('2d', { willReadFrequently: true }); if (!context) return false
+      context.drawImage(image, 0, 0, 32, 32)
+      const pixels = context.getImageData(0, 0, 32, 32).data
+      let clear = 0; for (let i = 3; i < pixels.length; i += 4) if (pixels[i] < 64) clear++
+      return clear >= 82
+    } catch { return false }
+  }
   const sprite = (id, x, y, w, h, actor, face = 1) => {
     const asset = spec.assets.find((candidate) => candidate.id === id)
     if (asset && asset.animation) {
       const animation = animationFor(asset), requestedState = actor.action || 'idle', state = requestedState === 'attack' ? 'meleeAttack' : requestedState
       if (animation.actionStrips) {
         const clip = animation.clips[state] || animation.clips.idle || {}, image = images[id + ':clip:' + state] || images[id + ':clip:idle'] || images[id]
-        if (!image) { c.fillStyle = actor.mobility === 'boss' ? '#c94c8f' : actor.mobility ? '#df7154' : '#5ba5df'; c.fillRect(x, y, w, h); return }
         const count = Math.max(1, Number(clip.frameCount) || 1), elapsed = Math.max(0, sim - (actor.actionStart || 0)), duration = Math.max(1, (actor.actionUntil || 0) - (actor.actionStart || 0))
+        if (!usableClip(image, count)) { c.fillStyle = actor.mobility === 'boss' ? '#c94c8f' : actor.mobility ? '#df7154' : '#5ba5df'; c.fillRect(x, y, w, h); return }
         const oneShot = state === 'meleeAttack' || state === 'rangedAttack' || state === 'death'
         const frame = state === 'idle' || state === 'hit' ? 0 : state === 'jump' ? Math.min(count - 1, actor.vy < 0 ? 0 : 1) : oneShot ? Math.min(count - 1, Math.floor(elapsed / duration * count)) : Math.floor(elapsed / (1000 / (clip.fps || 5))) % count
         const cellW = image.width / count
@@ -156,6 +175,7 @@ const OFFLINE_GAME_V2 = String.raw`
   }))
   const reset = (retry = false) => {
     const current = spec.levels[level], layout = runtimeLevels[level]; sim = 0
+    W = Math.max(VIEW_WIDTH, layout.worldWidth || VIEW_WIDTH)
     if (retry) { score = levelScore; storyState = storyEngine.begin(spec, storyState, current.id, true) }
     else levelScore = score
     player = { x: 55, y: G - 64, vx: 0, vy: 0, w: 54, h: 64, hp: spec.hero.maxHealth, face: 1, on: true, invulnerable: 0, meleeReady: 0, rangedReady: 0, action: 'idle', actionStart: 0, actionUntil: 0 }
@@ -169,26 +189,26 @@ const OFFLINE_GAME_V2 = String.raw`
         || spec.enemies.find((enemy, enemyIndex) => asset && (enemy.category || ['groundEnemy', 'airEnemy', 'waterEnemy'][enemyIndex]) === asset.category)
         || spec.enemies[0]
       const y = mobility === 'air' ? G - 190 - index % 2 * 42 : mobility === 'water' ? G - 58 : G - 54
-      return { uid: spawn.id, x: spawn.x, patrolMin: Math.max(170, spawn.x - 100), patrolMax: Math.min(W - 120, spawn.x + 100), y, baseY: y, w: 52, h: 54, hp: enemySpec.health + level * 8, damage: enemySpec.damage + level * 2, behavior: enemySpec.behavior, id: asset && asset.id, mobility, face: index % 2 ? -1 : 1, phase: index * 1.15, vy: 0, on: mobility === 'ground', lastAttack: 0, nextJump: 1500 + index * 350, removeAt: 0, action: 'idle', actionStart: 0, actionUntil: 0 }
+      return { uid: spawn.id, x: spawn.x, patrolMin: spawn.patrolMin ?? Math.max(170, spawn.x - 100), patrolMax: Math.min(W - 120, spawn.patrolMax ?? spawn.x + 100), y, baseY: y, w: 52, h: 54, hp: enemySpec.health + level * 8, damage: enemySpec.damage + level * 2, behavior: enemySpec.behavior, id: asset && asset.id, mobility, face: index % 2 ? -1 : 1, phase: index * 1.15, vy: 0, on: mobility === 'ground', lastAttack: 0, nextJump: 1500 + index * 350, removeAt: 0, action: 'idle', actionStart: 0, actionUntil: 0 }
     })
     if (layout.bossSpawn) { const boss = spec.assets.find(asset => asset.id === layout.bossSpawn.kind); enemies.push({ uid: layout.bossSpawn.id, x: layout.bossSpawn.x, patrolMin: Math.max(600, layout.bossSpawn.x - 180), patrolMax: Math.min(W - 120, layout.bossSpawn.x + 180), y: G - 94, baseY: G - 94, w: 94, h: 94, hp: spec.boss.health, id: boss?.id || layout.bossSpawn.kind, mobility: 'boss', face: -1, phase: 0, vy: 0, on: true, lastAttack: 0, nextJump: 1800, removeAt: 0, action: 'idle', actionStart: 0, actionUntil: 0 }) }
-    items = (layout.collectibleSpawns || []).map(spawn => ({ uid: spawn.id, x: spawn.x, y: Math.min(G - 42, spawn.y + (G - 438)), w: 34, h: 34, taken: false })); shots = []; effects = []
+    items = (layout.collectibleSpawns || []).map(spawn => ({ uid: spawn.id, x: spawn.x, y: Math.min(G - 42, spawn.y + (G - 438)), w: 34, h: 34, taken: false })); shots = []; effects = []; traversalHints.clear()
   }
   let storyState = storyEngine.fresh(spec), unread = [], levelScore = 0, storyLog = false, bootSave = null
   const saveKey = 'pixel-world-offline-campaign:' + storyEngine.key(spec)
   try { const raw = JSON.parse(localStorage.getItem(saveKey) || 'null'); if (raw && raw.key === storyEngine.key(spec) && spec.levels[raw.level] && raw.player && Array.isArray(raw.enemies) && Array.isArray(raw.items)) bootSave = raw } catch {}
-  const storyBox = document.createElement('section'); storyBox.className = 'offline-story'; storyBox.setAttribute('role','dialog'); storyBox.setAttribute('aria-label','冒险剧情')
+  const storyBox = document.createElement('section'); storyBox.className = 'offline-story'; storyBox.setAttribute('role','dialog'); storyBox.setAttribute('aria-label',t('冒险剧情'))
   const storyTitle = document.createElement('h2'), storyText = document.createElement('div'), storyFooter = document.createElement('footer'), nextStory = document.createElement('button'), skipStory = document.createElement('button')
-  nextStory.textContent = '继续冒险'; skipStory.textContent = '跳过剧情'; storyText.className = 'offline-story-text'; storyFooter.append(skipStory,nextStory); storyBox.append(storyTitle,storyText,storyFooter); document.body.append(storyBox)
-  const objectivesBox = document.createElement('section'); objectivesBox.className = 'offline-objectives'; objectivesBox.setAttribute('aria-label','当前关卡任务'); document.querySelector('.shell').append(objectivesBox)
-  const logButton = document.createElement('button'), interactButton = document.createElement('button'), restartButton = document.createElement('button');logButton.textContent='剧情记录';interactButton.textContent='交互 E';restartButton.textContent='重新开始';document.querySelector('.bar').append(logButton,interactButton,restartButton)
+  nextStory.textContent = t('继续冒险'); skipStory.textContent = t('跳过剧情'); storyText.className = 'offline-story-text'; storyFooter.append(skipStory,nextStory); storyBox.append(storyTitle,storyText,storyFooter); document.body.append(storyBox)
+  const objectivesBox = document.createElement('section'); objectivesBox.className = 'offline-objectives'; objectivesBox.setAttribute('aria-label',t('当前关卡任务')); document.querySelector('.shell').append(objectivesBox)
+  const logButton = document.createElement('button'), interactButton = document.createElement('button'), restartButton = document.createElement('button');logButton.textContent=t('剧情记录');interactButton.textContent=t('交互 E');restartButton.textContent=t('重新开始');document.querySelector('.bar').append(logButton,interactButton,restartButton)
   const blocked = () => unread.length > 0 || storyLog
   const clearKeys = () => Object.keys(keys).forEach(k => keys[k] = false)
   const renderStory = () => {
-    storyBox.style.display = blocked() ? 'flex' : 'none'; storyTitle.textContent = storyLog ? '剧情记录' : unread[0]?.title || ''
+    storyBox.style.display = blocked() ? 'flex' : 'none'; storyTitle.textContent = storyLog ? t('剧情记录') : unread[0]?.title || ''
     storyText.replaceChildren()
     ;(storyLog ? storyState.history : unread.slice(0,1)).forEach(entry => { const article=document.createElement('article'),title=document.createElement('h3'),p=document.createElement('p');title.textContent=entry.title;p.textContent=entry.text;if(storyLog)article.append(title);article.append(p);storyText.append(article) })
-    skipStory.style.display=storyLog?'none':'';nextStory.textContent=storyLog?'关闭记录':'继续冒险'
+    skipStory.style.display=storyLog?'none':'';nextStory.textContent=storyLog?t('关闭记录'):t('继续冒险')
     objectivesBox.replaceChildren();storyEngine.objectives(spec,storyState).forEach(o=>{const row=document.createElement('div');row.dataset.objective=o.id;row.dataset.complete=String(o.complete);row.textContent=(o.complete?'✓ ':o.available?'○ ':'· ')+o.description+(o.count>1?' '+o.current+'/'+o.count:'');objectivesBox.append(row)})
   }
   const commitStory = next => { if(next===storyState)return;const added=next.history.filter(e=>!storyState.history.some(old=>old.id===e.id));storyState=next;unread.push(...added);if(added.length)clearKeys();renderStory() }
@@ -199,15 +219,15 @@ const OFFLINE_GAME_V2 = String.raw`
   const interactStory = () => { if(blocked()||paused||won)return;const available=storyEngine.objectives(spec,storyState);const point=points().filter(p=>p.kind==='interact'&&available.some(task=>task.target===p.id&&task.available&&!task.complete)&&Math.abs(player.x-pointX(p))<95).sort((a,b)=>Math.abs(player.x-pointX(a))-Math.abs(player.x-pointX(b)))[0];if(point)emitStory('interact',point.id,point.id) }
   nextStory.onclick=()=>{if(storyLog)storyLog=false;else unread.shift();clearKeys();renderStory()};skipStory.onclick=()=>{unread=[];clearKeys();renderStory()};logButton.onclick=()=>{storyLog=true;clearKeys();renderStory()};interactButton.onclick=interactStory
   restartButton.onclick=()=>{localStorage.removeItem(saveKey);level=0;score=0;unread=[];storyLog=false;won=false;storyState=storyEngine.fresh(spec);document.querySelector('.overlay').classList.remove('show');reset();beginStory()}
-  const completedRestart=document.createElement('button'),completedLog=document.createElement('button'),completedActions=document.createElement('div');completedRestart.textContent='重新开始冒险';completedLog.textContent='回看故事';completedRestart.onclick=()=>restartButton.onclick();completedLog.onclick=()=>logButton.onclick();completedActions.className='offline-completed-actions';completedActions.append(completedRestart,completedLog);document.querySelector('.overlay').append(completedActions)
+  const completedRestart=document.createElement('button'),completedLog=document.createElement('button'),completedActions=document.createElement('div');completedRestart.textContent=t('重新开始冒险');completedLog.textContent=t('回看故事');completedRestart.onclick=()=>restartButton.onclick();completedLog.onclick=()=>logButton.onclick();completedActions.className='offline-completed-actions';completedActions.append(completedRestart,completedLog);document.querySelector('.overlay').append(completedActions)
   const saveStory = () => { if(!player||player.hp<=0)return;try{localStorage.setItem(saveKey,JSON.stringify({key:storyEngine.key(spec),level,levelScore,score,sim,player,enemies,items,story:storyState,unread,won}))}catch{} }
   setInterval(saveStory,750);addEventListener('pagehide',saveStory)
   const bossReady = () => !storyEngine.objectives(spec,storyState).some(task=>task.kind==='boss'&&!task.available)
   const hurtEnemy = (enemy, damage) => { if (enemy.hp <= 0 || enemy.mobility === 'boss' && !bossReady()) return; enemy.hp = Math.max(0, enemy.hp - damage); if (!enemy.hp) { setAction(enemy, 'death', 720); enemy.removeAt = sim + 720; score += enemy.mobility === 'boss' ? 1000 : 150; if(enemy.mobility==='boss')emitStory('boss-approach','boss','approach');emitStory(enemy.mobility==='boss'?'boss':'defeat',enemy.mobility==='boss'?'boss':'enemies',enemy.uid) } else setAction(enemy, 'hit', 260) }
   const hurtPlayer = (damage) => { if (player.hp <= 0 || sim < player.invulnerable) return; player.hp = Math.max(0, player.hp - damage); player.invulnerable = sim + 850; setAction(player, player.hp ? 'hit' : 'death', player.hp ? 260 : 720) }
   const shoot = () => { if (paused || won || blocked() || player.hp <= 0 || sim < player.rangedReady || player.action === 'hit') return; player.rangedReady = sim + Math.max(240, spec.weapon.cooldownMs * 1.2); setAction(player, 'rangedAttack', 320); shots.push({ x: player.face > 0 ? player.x + player.w : player.x - 24, y: player.y + 25, w: 24, h: 14, vx: spec.weapon.projectileSpeed * player.face, damage: spec.weapon.rangedDamage, hostile: false }) }
-  const slash = () => { if (paused || won || blocked() || player.hp <= 0 || sim < player.meleeReady || player.action === 'hit') return; player.meleeReady = sim + spec.weapon.cooldownMs; setAction(player, 'meleeAttack', 320); const hitbox = { x: player.face > 0 ? player.x + 44 : player.x - 76, y: player.y, w: 82, h: 70 }; enemies.forEach((enemy) => { if (enemy.hp > 0 && rect(hitbox, enemy)) hurtEnemy(enemy, spec.weapon.meleeDamage) }); effects.push({ x: hitbox.x, y: hitbox.y, expires: sim + 180 }) }
-  const togglePause = () => { if (won) return; paused = !paused; Object.keys(keys).forEach((key) => { keys[key] = false }); pauseButton.textContent = paused ? 'Resume' : 'Pause'; pauseButton.classList.toggle('paused-label', paused) }
+  const slash = () => { if (paused || won || blocked() || player.hp <= 0 || sim < player.meleeReady || player.action === 'hit') return; player.meleeReady = sim + spec.weapon.cooldownMs; setAction(player, 'meleeAttack', 320); const box = enemyCombatRules.meleeHitbox(player.x,player.y,player.w,player.h,player.face), hitbox = { x:box.x,y:box.y,w:box.width,h:box.height }; enemies.forEach((enemy) => { if (enemy.hp > 0 && rect(hitbox, enemy)) hurtEnemy(enemy, spec.weapon.meleeDamage) }); effects.push({ x: hitbox.x, y: hitbox.y, expires: sim + 180 }) }
+  const togglePause = () => { if (won) return; paused = !paused; Object.keys(keys).forEach((key) => { keys[key] = false }); pauseButton.textContent = paused ? t('Resume') : t('Pause'); pauseButton.classList.toggle('paused-label', paused) }
   const pauseWhenAway = () => { if (!paused && !won) { togglePause(); saveStory() } }
   document.addEventListener?.('visibilitychange', () => { if (document.hidden) pauseWhenAway() })
   addEventListener('blur', pauseWhenAway)
@@ -222,9 +242,10 @@ const OFFLINE_GAME_V2 = String.raw`
       const locked = (player.action === 'meleeAttack' || player.action === 'rangedAttack' || player.action === 'hit') && sim < player.actionUntil
       const left = keys.a || keys.arrowleft, right = keys.d || keys.arrowright, jump = keys.w || keys[' '] || keys.arrowup
       player.vx = locked ? 0 : ((right ? 1 : 0) - (left ? 1 : 0)) * spec.hero.moveSpeed; if (player.vx) player.face = player.vx > 0 ? 1 : -1
-      if (!locked && jump && player.on) { player.vy = -spec.hero.jumpPower; player.on = false }
+      if (!locked && jump && player.on) { player.vy = -spec.hero.jumpPower; player.on = false; traversalHints.clear() }
       let nextX = Math.max(0, Math.min(W - player.w, player.x + player.vx * delta))
       const horizontalHit = obstacles.find(obstacle => rect({ ...player, x: nextX }, obstacle))
+      traversalHints.observe(sim, horizontalHit?.type, player.on && player.vx !== 0)
       if (horizontalHit?.type === 'deathObstacle') hurtPlayer(player.hp)
       else if (horizontalHit) nextX = player.x
       player.x = nextX
@@ -275,7 +296,9 @@ const OFFLINE_GAME_V2 = String.raw`
     }
   }
   const render = () => {
-    const current = spec.levels[level], background = active('levelBackground'); c.clearRect(0, 0, W, H)
+    const current = spec.levels[level], background = active('levelBackground'); c.clearRect(0, 0, VIEW_WIDTH, H)
+    const camera = Math.max(0, Math.min(W - VIEW_WIDTH, player.x - VIEW_WIDTH * .32))
+    c.save(); c.translate(-camera, 0)
     if (background && images[background.id]) c.drawImage(images[background.id], 0, 0, W, H); else { c.fillStyle = '#17304c'; c.fillRect(0, 0, W, H) }
     c.fillStyle = current.platformMode === 'water' ? '#087f9a88' : '#36502e'; c.fillRect(0, G, W, H - G)
     obstacles.forEach(obstacle => { if (obstacle.id) sprite(obstacle.id, obstacle.x, obstacle.y, obstacle.w, obstacle.h, { action: 'idle', actionStart: 0, actionUntil: 0 }); else { c.fillStyle = obstacle.type === 'deathObstacle' ? '#cf5362' : obstacle.type === 'bounceObstacle' ? '#6bdcc5' : '#ad8157'; c.fillRect(obstacle.x, obstacle.y, obstacle.w, obstacle.h) } })
@@ -288,21 +311,33 @@ const OFFLINE_GAME_V2 = String.raw`
     if (heldWeapon && images[heldWeapon.id]) { c.save(); if (player.face < 0) { c.translate(player.x + player.w, player.y); c.scale(-1, 1); c.drawImage(images[heldWeapon.id], -16, 22, 52, 26) } else c.drawImage(images[heldWeapon.id], player.x + 34, player.y + 22, 52, 26); c.restore() }
     const availablePoints = storyEngine.objectives(spec,storyState);points().filter(p=>availablePoints.some(task=>task.target===p.id&&(task.available||task.complete))).forEach(p=>{c.fillStyle='#ffe292';c.fillRect(pointX(p),G-60,26,55);c.fillStyle='#fff';c.font='14px sans-serif';c.fillText(p.name+' · E',pointX(p)-30,G-72)});
     c.fillStyle = storyEngine.exitReady(spec,storyState,enemies.length) ? '#6fffc2' : '#677084'; c.fillRect(W - 68, G - 90, 48, 90)
-    if (paused) { c.fillStyle = '#030610aa'; c.fillRect(0, 0, W, H); c.fillStyle = '#fff'; c.font = '700 54px system-ui'; c.textAlign = 'center'; c.fillText('Paused', W / 2, H / 2) }
-    document.querySelector('#level').textContent = 'Level ' + (level + 1) + '/' + spec.levels.length; document.querySelector('#score').textContent = 'Score ' + score
+    c.restore()
+    const traversalMessage = !paused && !blocked() && player.hp > 0 && traversalHints.message(sim)
+    if (traversalMessage) { c.save(); c.fillStyle = '#1c222ef2'; c.fillRect(36, H - 124, VIEW_WIDTH - 72, 46); c.fillStyle = '#fff4ba'; c.font = '700 18px system-ui'; c.textAlign = 'center'; c.fillText(t(traversalMessage), VIEW_WIDTH / 2, H - 94); c.restore() }
+    if (paused) { c.fillStyle = '#030610aa'; c.fillRect(0, 0, VIEW_WIDTH, H); c.fillStyle = '#fff'; c.font = '700 54px system-ui'; c.textAlign = 'center'; c.fillText(t('游戏已暂停'), VIEW_WIDTH / 2, H / 2) }
+    document.querySelector('#level').textContent = t('关卡') + ' ' + (level + 1) + '/' + spec.levels.length; document.querySelector('#score').textContent = t('得分') + ' ' + score
   }
   let pendingLevel=false
   const loop = (realNow) => { const elapsed = Math.min(34, Math.max(0, realNow - lastReal)); lastReal = realNow; if(pendingLevel&&!blocked()){pendingLevel=false;level++;reset();beginStory()} if (!paused && !won && !blocked()) { sim += elapsed; update(Math.min(2, elapsed / 16.67)) } render(); requestAnimationFrame(loop) }
   // Canvas actors have no DOM nodes. Return copies for read-only playtest and
   // accessibility tooling; callers cannot mutate the running actors.
-  globalThis.__pixelWorldReadOnlySnapshot = () => player ? JSON.parse(JSON.stringify({ level, levelScore, score, sim, player, enemies, items, story: storyState, won })) : null
-  load().then(() => { if(bootSave){level=bootSave.level;score=bootSave.score;reset();player=bootSave.player;enemies=bootSave.enemies;items=bootSave.items;sim=bootSave.sim;levelScore=bootSave.levelScore;storyState=storyEngine.restore(spec,bootSave.story);unread=bootSave.unread||[];won=Boolean(bootSave.won);if(won)document.querySelector('.overlay').classList.add('show');renderStory()}else{reset();beginStory()} requestAnimationFrame(loop) })
+  globalThis.__pixelWorldReadOnlySnapshot = () => player ? JSON.parse(JSON.stringify({ level, levelScore, score, sim, player, enemies, items, story: storyState, won, worldWidth: W, viewportWidth: VIEW_WIDTH, layoutVersion: runtimeLevels[level].layoutVersion, obstacles })) : null
+  load().then(() => { if(bootSave){level=bootSave.level;score=bootSave.score;reset();const patrols=new Map(enemies.map(enemy=>[enemy.uid,enemy]));player=bootSave.player;enemies=bootSave.enemies.map(enemy=>{const bounds=patrols.get(enemy.uid);return bounds?{...enemy,patrolMin:bounds.patrolMin,patrolMax:bounds.patrolMax,x:enemyCombatRules.moveWithinPatrol(enemy.x,0,0,bounds.patrolMin,bounds.patrolMax)}:enemy});items=bootSave.items;sim=bootSave.sim;levelScore=bootSave.levelScore;storyState=storyEngine.restore(spec,bootSave.story);unread=bootSave.unread||[];won=Boolean(bootSave.won);if(won)document.querySelector('.overlay').classList.add('show');renderStory()}else{reset();beginStory()} requestAnimationFrame(loop) })
 })()
 `
 
-export function offlineGameRuntimeSource(): string {
-  return offlineNarrativeRuntimeSource() + '\n' + offlineEnemyCombatSource() + '\n' + OFFLINE_GAME_V2
+export function buildOfflineGameRuntimeSource(): string {
+  return offlineGameLanguageSource() + '\n' + offlineNarrativeRuntimeSource() + '\n' + offlineEnemyCombatSource() + '\n' + offlineTraversalHintSource() + '\n' + OFFLINE_GAME_V2
 }
+
+/** Stable bytes across browser/server minifiers; regenerate after engine edits. */
+export function offlineGameRuntimeSource():string{return offlineEngine.source}
+
+export function buildOfflineGameStylesSource():string{
+  return OFFLINE_STYLE_V2 + '\n' + OFFLINE_STORY_STYLE + '\n.offline-completed-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:12px;margin-top:18px}.offline-completed-actions button{padding:10px 15px;border:1px solid #acd0b9;border-radius:8px;background:#398a70;color:#fffdf3;font:inherit;cursor:pointer}'
+}
+
+export function offlineGameStylesSource():string{return offlineEngine.styles}
 
 export async function exportGameZip(spec: GameSpec): Promise<void> {
   const missing = spec.assets.flatMap((asset) => {
@@ -340,12 +375,16 @@ export async function exportGameZip(spec: GameSpec): Promise<void> {
   }
   const json = JSON.stringify(exported, null, 2)
   const safeJson = json.replace(/<\//g, '<\\/')
-  const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${spec.title.replace(/[<>&"]/g, '')}</title><link rel="stylesheet" href="styles.css"></head><body><main class="shell"><div class="bar"><b>${spec.title.replace(/[<>&"]/g, '')}</b><span id="level"></span><span id="score"></span><small class="hint">A/D 移动 · 空格跳跃 · J 近战 · K 远程 · E 交互 · ESC 暂停</small><button data-pause>Pause</button></div><canvas width="1152" height="648"></canvas><div class="controls"><div><button data-key="a">←</button><button data-key="d">→</button><button data-key=" ">Jump</button></div><div><button data-key="slash">Slash</button><button data-key="shoot">Shoot</button></div></div></main><div class="overlay">冒险完成！</div><script type="application/json" id="project-data">${safeJson}</script><script src="game.js"></script></body></html>`
+  const t = createGameTranslator(spec.creationLanguage)
+  const html = `<!doctype html><html lang="${spec.creationLanguage === 'en' ? 'en' : 'zh-CN'}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${spec.title.replace(/[<>&"]/g, '')}</title><link rel="stylesheet" href="styles.css"></head><body><main class="shell"><div class="bar"><b>${spec.title.replace(/[<>&"]/g, '')}</b><span id="level"></span><span id="score"></span><small class="hint">${t('A/D 移动 · 空格跳跃 · J 近战 · K 远程 · E 交互 · ESC 暂停')}</small><button data-pause>${t('Pause')}</button></div><canvas width="1152" height="648"></canvas><div class="controls"><div><button data-key="a">←</button><button data-key="d">→</button><button data-key=" ">${t('Jump')}</button></div><div><button data-key="slash">${t('Slash')}</button><button data-key="shoot">${t('Shoot')}</button></div></div></main><div class="overlay">${t('冒险完成！')}</div><script type="application/json" id="project-data">${safeJson}</script><script src="game.js"></script></body></html>`
   const runtimeJson = JSON.stringify({ levels: buildGameDataFromSpec(exported).data?.levels || [] }).replace(/<\//g, '<\\/')
-  const htmlWithRuntime = html.replace('<script src="game.js"></script>', `<script type="application/json" id="runtime-data">${runtimeJson}</script><script src="game.js"></script>`)
+  const creditedHtml=html.replace('</main>',`${templateAttributionHtml(spec.templateSources,spec.creationLanguage)}</main>`)
+  const htmlWithRuntime = creditedHtml.replace('<script src="game.js"></script>', `<script type="application/json" id="runtime-data">${runtimeJson}</script><script src="game.js"></script>`)
+  const attribution=templateAttributionText(spec.templateSources,spec.creationLanguage)
+  if(attribution)entries.push({name:'ATTRIBUTION.txt',bytes:encoder.encode(attribution)})
   entries.push(
     { name: 'index.html', bytes: encoder.encode(htmlWithRuntime) },
-    { name: 'styles.css', bytes: encoder.encode(OFFLINE_STYLE_V2 + '\n' + OFFLINE_STORY_STYLE + '\n.offline-completed-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:12px;margin-top:18px}.offline-completed-actions button{padding:10px 15px;border:1px solid #acd0b9;border-radius:8px;background:#398a70;color:#fffdf3;font:inherit;cursor:pointer}') },
+    { name: 'styles.css', bytes: encoder.encode(offlineGameStylesSource()) },
     { name: 'game.js', bytes: encoder.encode(offlineGameRuntimeSource()) },
     { name: 'project.json', bytes: encoder.encode(json) },
   )

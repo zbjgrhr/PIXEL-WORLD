@@ -19,6 +19,16 @@ function preparedRun(): AgentRun {
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 
 describe('dependency-scoped draft updates', () => {
+  it('revokes approval and invalidates requirements when the creation language changes', () => {
+    const run = preparedRun()
+    const nextSpec = { ...currentRunSpec(run)!, creationLanguage: 'en' as const }
+    expect(changedDraftGroups(currentRunSpec(run)!, nextSpec)).toContain('requirements')
+    const next = reviseAgentDraft(run, nextSpec, input)
+    expect(next.approved).toBe(false)
+    expect(next.creationLanguage).toBe('en')
+    expect(next.pendingRevision?.invalidatedRoles).toContain('director')
+    expect(next.artifacts.productionSpec).toBeUndefined()
+  })
   it('turns an Agent planned aerial enemy into a spawnable second enemy', () => {
     const seed = spec()
     const request: AgentExecuteRequest = {
@@ -224,6 +234,18 @@ describe('dependency-scoped draft updates', () => {
     expect(restored.animation!.clips!.walk!.url).toBe(hero.animation!.clips!.walk!.url)
     expect(restored.prompt).toBe(after.assets.find(asset => asset.id === hero.id)!.prompt)
     expect(restored.animation!.clips!.walk!.status).toBe('success')
+  })
+  it('does not carry old artwork into a different story or changed asset identity', () => {
+    const before = spec(), after = clone(before)
+    const hero = before.assets.find(asset => asset.category === 'hero')!
+    hero.url = 'data:image/png;base64,b2xk'; hero.status = 'success'
+    hero.animation!.clips!.walk!.url = 'data:image/png;base64,b2xk'; hero.animation!.clips!.walk!.status = 'success'
+    after.narrative!.source.originalStory = '另一位主角的新故事'
+    expect(preservePlanningMedia(after, before).assets.find(asset => asset.id === hero.id)!.url).toBeUndefined()
+    const sameStory = spec()
+    sameStory.assets.find(asset => asset.id === hero.id)!.prompt = '一只围蓝围巾的小企鹅'
+    const result = preservePlanningMedia(sameStory, before).assets.find(asset => asset.id === hero.id)!
+    expect(result.animation!.clips!.walk!.url).toBeUndefined()
   })
   it('preserves an explicit new art direction and supplies it as an override of older wording', () => {
     const seed = spec(), newDirection = '暖橙夕照与青蓝阴影，保留主角的红色围巾。'

@@ -4,6 +4,7 @@ import { separateStoryIntroduction } from './story-introduction'
 import { normalizeNarrativeSuggestions } from './narrative-suggestions'
 import { enabledEnemyNamesForLevel } from './enemy-identity'
 import { extractStoryAnchors } from './story-anchors'
+import { createEnglishNarrative, englishNarrativeSpec } from './narrative-en'
 
 type RecordValue = Record<string, unknown>
 const object = (value: unknown): RecordValue => value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {}
@@ -84,6 +85,7 @@ function namedField(value: string): string {
 
 /** A complete authored baseline. It is also used when an AI gives only part of a plan. */
 export function createNarrative(spec: GameSpec, sourcePrompt = '', originalStory?: string): NarrativeSpec {
+  if (spec.creationLanguage === 'en') return createEnglishNarrative(spec, sourcePrompt, originalStory)
   const playerFields = fields(sourcePrompt)
   const labels = { premise: '故事概念', incitingIncident: '事件起因', motivation: '主角动机', conflict: '主要冲突', bossRelation: 'Boss与故事的关系', resolution: '结局方向', opening: '开场剧情', ending: '结局剧情' }
   for (const [key, label] of Object.entries(labels)) if (playerFields[label]) playerFields[`narrative.${key}`] = playerFields[label]
@@ -267,6 +269,7 @@ export function createNarrative(spec: GameSpec, sourcePrompt = '', originalStory
 
 /** Normalize a partial model/player narrative without letting unknown task kinds run. */
 export function normalizeNarrative(value: unknown, spec: GameSpec, fallback = createNarrative(spec)): NarrativeSpec {
+  const en = spec.creationLanguage === 'en'
   const raw = object(value), source = object(raw.source)
   const lockedFields = Object.fromEntries(Object.entries(object(source.lockedFields)).filter(([, value]) => typeof value === 'string').map(([key, value]) => [key, String(value).slice(0, 12000)]))
   const result: NarrativeSpec = { ...fallback, source: { ...fallback.source, originalTitle: line(source.originalTitle, fallback.source.originalTitle), originalStory: line(source.originalStory, fallback.source.originalStory, 12000), playerFields: { ...fallback.source.playerFields, ...Object.fromEntries(Object.entries(object(source.playerFields)).filter(([, value]) => typeof value === 'string')) } as Record<string, string>, lockedFields, generatedFields: list(source.generatedFields).filter((v): v is string => typeof v === 'string'), origin: source.origin === 'model' || source.origin === 'player' ? source.origin : fallback.source.origin }, chapters: [] }
@@ -279,12 +282,12 @@ export function normalizeNarrative(value: unknown, spec: GameSpec, fallback = cr
     const points = Array.isArray(candidate.points) ? candidate.points.slice(0, 6).map((v, i) => {
       const p = object(v)
       const prior = base.points.find(point => point.id === p.id) || (!p.id ? base.points[i] : undefined)
-      return { id: id(p.id, prior?.id || `${level.id}-point-${i}`), kind: p.kind === 'reach' || p.kind === 'interact' ? p.kind : prior?.kind || 'interact', name: line(p.name, prior?.name || '线索标记', 40), description: line(p.description, prior?.description || '调查这里留下的线索。', 300), position: Math.max(.15, Math.min(.85, Number(p.position) || prior?.position || .5)) } as StoryPoint
+      return { id: id(p.id, prior?.id || `${level.id}-point-${i}`), kind: p.kind === 'reach' || p.kind === 'interact' ? p.kind : prior?.kind || 'interact', name: line(p.name, prior?.name || (en ? 'Clue marker' : '线索标记'), en ? 100 : 40), description: line(p.description, prior?.description || (en ? 'Examine the clue left here.' : '调查这里留下的线索。'), en ? 600 : 300), position: Math.max(.15, Math.min(.85, Number(p.position) || prior?.position || .5)) } as StoryPoint
     }) : base.points
     const objectives = Array.isArray(candidate.objectives) && candidate.objectives.length ? candidate.objectives.slice(0, 12).map((v, i) => {
       const o = object(v)
       const prior = base.objectives.find(task => task.id === o.id) || (!o.id ? base.objectives[i] : undefined)
-      return { id: id(o.id, prior?.id || `${level.id}-objective-${i}`), kind: line(o.kind, prior?.kind || 'unknown'), target: line(o.target, prior?.target || ''), count: Math.max(1, Math.min(20, Math.round(Number(o.count) || prior?.count || 1))), description: line(o.description, prior?.description || '未说明任务'), feedback: line(o.feedback, prior?.feedback || '任务完成。'), prerequisites: Array.isArray(o.prerequisites) ? list(o.prerequisites).filter((v): v is string => typeof v === 'string') : prior?.prerequisites || [] } as StoryObjective
+      return { id: id(o.id, prior?.id || `${level.id}-objective-${i}`), kind: line(o.kind, prior?.kind || 'unknown'), target: line(o.target, prior?.target || ''), count: Math.max(1, Math.min(20, Math.round(Number(o.count) || prior?.count || 1))), description: line(o.description, prior?.description || (en ? 'Unspecified objective' : '未说明任务')), feedback: line(o.feedback, prior?.feedback || (en ? 'Objective complete.' : '任务完成。')), prerequisites: Array.isArray(o.prerequisites) ? list(o.prerequisites).filter((v): v is string => typeof v === 'string') : prior?.prerequisites || [] } as StoryObjective
     }) : base.objectives
     // Explicit actions in the player's story cannot disappear when a model
     // replaces a chapter with generic tasks.
@@ -330,9 +333,9 @@ export function normalizeNarrative(value: unknown, spec: GameSpec, fallback = cr
     return next
   })
   result.characters = list(raw.characters).length ? list(raw.characters).slice(0, 12).map((v, i) => {
-    const c = object(v), role = line(c.role, '角色', 40)
+    const c = object(v), role = line(c.role, en ? 'Character' : '角色', en ? 100 : 40)
     const characterId = /主角|protagonist|^hero$/i.test(`${c.id || ''} ${role}`) ? 'hero' : /boss|最终对手|反派|最终首领/i.test(`${c.id || ''} ${role}`) ? 'boss' : id(c.id, `character-${i}`)
-    return { id: characterId, name: line(c.name, '未命名角色', 40), role, motivation: line(c.motivation, characterId === 'hero' ? fallback.motivation : ''), relationship: line(c.relationship, '', 300) }
+    return { id: characterId, name: line(c.name, en ? 'Unnamed character' : '未命名角色', en ? 100 : 40), role, motivation: line(c.motivation, characterId === 'hero' ? fallback.motivation : ''), relationship: line(c.relationship, '', en ? 600 : 300) }
   }) : fallback.characters
   result.clues = list(raw.clues).length ? list(raw.clues).slice(0, 12).map((v, i) => { const c = object(v); return { id: id(c.id, `clue-${i}`), setup: line(c.setup, '', 300), payoff: line(c.payoff, '', 300), levelId: line(c.levelId, spec.levels[0].id), payoffLevelId: line(c.payoffLevelId, spec.levels.at(-1)!.id) } }) : fallback.clues
   const retainLocked = <T extends { id: string }>(items: T[], original: T[], prefix: string) => {
@@ -354,6 +357,10 @@ export function normalizeNarrative(value: unknown, spec: GameSpec, fallback = cr
 /** Upgrade legacy/local drafts while preserving non-generic model/player choices. */
 export function ensureNarrative(spec: GameSpec, sourcePrompt = '', originalStory?: string): GameSpec {
   const fallback = createNarrative(spec, sourcePrompt, originalStory)
+  if (spec.creationLanguage === 'en') {
+    const narrative = spec.narrative ? normalizeNarrative(spec.narrative, spec, fallback) : fallback
+    return alignNarrativeCast(englishNarrativeSpec(spec, narrative), spec)
+  }
   const anchors = extractStoryAnchors(fallback.source.originalStory)
   const selectedTheme = chooseWorld(`${fallback.source.originalStory} ${spec.title}`)
   const usePlayerPlace = Boolean(anchors.place && (selectedTheme === WORLDS[WORLDS.length - 1] || explicitSetting(anchors.place)))

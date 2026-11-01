@@ -54,6 +54,9 @@ export const INSPIRATION_PACKS: readonly InspirationPack[] = [
 ]
 
 export function selectedInspirationTexts(source: string): string[] {
-  return INSPIRATION_PACKS.flatMap((pack) => pack.ideas.flatMap((idea) => idea.variants))
+  const known = INSPIRATION_PACKS.flatMap((pack) => pack.ideas.flatMap((idea) => idea.variants))
     .filter((text) => source.includes(text))
+  const marked = [...source.matchAll(/(?:【已选灵感】|\[Selected inspiration\])([^\n]+)/g)]
+    .map(match => match[1].replace(/[。]+$/, '').trim()).filter(Boolean)
+  return [...new Set([...known, ...marked])]
 }

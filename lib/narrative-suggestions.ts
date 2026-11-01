@@ -77,9 +77,17 @@ export function stageNarrativeSuggestions(previous: GameSpec, candidate: GameSpe
   const before = previous.narrative
   if (!before || !candidate.narrative) return candidate
   const protectedPaths = new Set(Object.keys(before.source.lockedFields))
-  for (const [key, value] of Object.entries(before.source.playerFields)) if (key.startsWith('narrative.') && value.trim()) protectedPaths.add(key.slice('narrative.'.length))
   const original = before.source.originalStory.split('【已选灵感】')[0].trim()
-  if (original.length > 160 || separateStoryIntroduction(original).ending) Object.keys(GLOBAL_LABELS).forEach(path => protectedPaths.add(path))
+  // A new English work may start with a Chinese brief. Its generated baseline
+  // is not the author's exact English wording; allow the model to express those
+  // facts in English while still honoring manually locked text and identities.
+  const translateBrief = previous.creationLanguage === 'en' && /[\u3400-\u9fff]/.test(original) && before.source.origin === 'rules'
+  for (const [key, value] of Object.entries(before.source.playerFields)) {
+    if (!key.startsWith('narrative.') || !value.trim()) continue
+    const path = key.slice('narrative.'.length)
+    if (!translateBrief || /\.name$/.test(path) || !/[\u3400-\u9fff]/.test(value)) protectedPaths.add(path)
+  }
+  if (!translateBrief && (original.length > 160 || separateStoryIntroduction(original).ending)) Object.keys(GLOBAL_LABELS).forEach(path => protectedPaths.add(path))
   let narrative = preserveRecords(before, { ...candidate.narrative, source: { ...before.source, origin: 'model' } }, protectedPaths)
   const proposals = normalizeNarrativeSuggestions(before.suggestions, before)
   const added = new Set<string>()
@@ -103,7 +111,7 @@ export function stageNarrativeSuggestions(previous: GameSpec, candidate: GameSpe
   narrative = { ...narrative, suggestions: normalizeNarrativeSuggestions(reconciled, narrative) }
   const hero = narrative.characters.find(c => c.id === 'hero'), boss = narrative.characters.find(c => c.id === 'boss')
   const place = extractStoryAnchors(before.source.originalStory).place?.replace(/世界$/, '')
-  const world = place && !candidate.world.includes(place) ? previous.world : candidate.world
+  const world = !translateBrief && place && !candidate.world.includes(place) ? previous.world : candidate.world
   const keepHeroArt = changedVisualIdentity(extractStoryAnchors(before.source.originalStory).hero, candidate.hero.appearance)
   const keepBossArt = changedVisualIdentity(extractStoryAnchors(before.source.originalStory).antagonist, candidate.boss.appearance)
   const assets = keepHeroArt || keepBossArt ? candidate.assets.map(asset => {

@@ -1,5 +1,10 @@
 /** Keep this factory self-contained: exported games run the same rules without imports. */
 function createEnemyCombatRules() {
+  function meleeHitbox(x: number, y: number, width: number, height: number, facing: number) {
+    // Include the actor's body so an enemy that overlaps at point-blank range
+    // does not fall behind the sword's forward-only hitbox. Forward reach stays 88px.
+    return { x: facing >= 0 ? x : x - 88, y: y - 4, width: width + 88, height: height + 8 }
+  }
   function usesRanged(behavior: string, mobility: string, spawnIndex: number): boolean {
     return behavior === 'ranged' || mobility !== 'ground' || spawnIndex % 3 === 2
   }
@@ -26,7 +31,7 @@ function createEnemyCombatRules() {
     return usesRanged(behavior, actor.mobility, spawnIndex)
   }
 
-  return { usesRanged, attackKind, projectileDamage, moveWithinPatrol, restoredRanged }
+  return { meleeHitbox, usesRanged, attackKind, projectileDamage, moveWithinPatrol, restoredRanged }
 }
 
 export const enemyCombatRules = createEnemyCombatRules()

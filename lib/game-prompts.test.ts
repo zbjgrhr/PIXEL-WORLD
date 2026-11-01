@@ -48,3 +48,15 @@ describe('separate background and playable ground', () => {
     expect(prompt).not.toMatch(/Wide readable traversal lane/i)
   })
 })
+
+describe('saved obstacle draft prompt', () => {
+  it('adds the current isolation contract when the draft still stores the old short description', () => {
+    const spec = createFallbackGameSpec('小企鹅找妈妈', '小企鹅找妈妈', 3)
+    const original = spec.assets.find(asset => asset.category === 'normalObstacle')!
+    const asset = { ...original, prompt: 'One solid collision-friendly obstacle.' }
+    const prompt = buildPlannedAssetPrompt(asset, 'obstacle', spec.title, spec, 0, 'openrouter', 'bytedance-seed/seedream-5-0-flash')
+    expect(prompt).toContain('One solid collision-friendly obstacle.')
+    expect(prompt).toContain('Solid refers to the obstacle itself')
+    expect(prompt).toContain('green background margin on all four sides')
+  })
+})

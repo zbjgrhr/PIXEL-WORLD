@@ -1,5 +1,6 @@
 import { animationIsComplete, createActionStripAnimation, normalizeAnimationSpec } from '@/lib/asset-catalog'
 import type { AnimationClipPose, AssetDefinition } from '@/types'
+import { usableSpriteClip, validSpriteClipGeometry } from './sprite-clip-browser'
 
 const MAX_BYTES = 10 * 1024 * 1024
 const MAX_SIDE = 4096
@@ -24,6 +25,16 @@ export async function readUploadedImage(file: File, frameCount = 1, isStrip = fa
     throw new Error('图片宽高都必须在 1–4096 像素之间。')
   }
   if (dimensions.width % frameCount !== 0) throw new Error(`横向帧条宽度必须能被 ${frameCount} 帧整除。`)
+  if (isStrip) {
+    if (!validSpriteClipGeometry(dimensions.width, dimensions.height, frameCount)) throw new Error('动作帧条的每格应接近正方形；请上传横向排列的完整角色帧。')
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image()
+      element.onload = () => resolve(element)
+      element.onerror = () => reject(new Error('动作图片无法打开。'))
+      element.src = url
+    })
+    if (!usableSpriteClip(image, frameCount)) throw new Error('动作图片带有背景或缺少透明边缘，请先抠图。')
+  }
   return url
 }
 

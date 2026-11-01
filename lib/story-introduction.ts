@@ -1,5 +1,6 @@
 /** Keep the player's full story in provenance; do not reveal its ending at entry. */
 export function separateStoryIntroduction(story: string): { introduction: string; ending?: string } {
+  if (!/\p{Script=Han}/u.test(story)) return separateEnglishStoryIntroduction(story)
   const conclusion = /(?:^|[。！？\n]|[，,])\s*((?:最后(?!的|一(?:关|个|段|座|次|名|件|张))|最终|从此|自此|结局[是为：:])[^。！？\n]{4,})/g
   let endingAt = -1
   for (const match of story.matchAll(conclusion)) {
@@ -43,5 +44,26 @@ export function separateStoryIntroduction(story: string): { introduction: string
   // The opening establishes the situation. The full synopsis remains available
   // for editing, and later discoveries belong to chapters rather than the intro.
   const introduction = sentences.length > 2 ? sentences.slice(0, 2).join('') : setup
+  return { introduction: introduction.trim(), ...(endingAt >= 0 ? { ending: story.slice(endingAt).trim() } : {}) }
+}
+
+function separateEnglishStoryIntroduction(story: string): { introduction: string; ending?: string } {
+  let endingAt = -1
+  for (const match of story.matchAll(/\b(finally|in the end|at last|ending\s*:)\s*,?\s*/gi)) {
+    const rest = story.slice(match.index! + match[0].length)
+    const firstClause = rest.split(/[,;.!?\n]/)[0]
+    const explicitLabel = /^ending/i.test(match[1])
+    // A wish, final objective or question is still setup, not a completed outcome.
+    if (!explicitLabel && /\b(?:must|needs?|wants?|hopes?|plans?|intends?|aims?|tries?|will|would|can|could|should|whether|goal|objective|question|if)\b/i.test(firstClause)) continue
+    const markerAt = match.index!
+    if (markerAt < 12) continue
+    const previousStop = Math.max(story.lastIndexOf('.', markerAt - 1), story.lastIndexOf('!', markerAt - 1), story.lastIndexOf('?', markerAt - 1), story.lastIndexOf('\n', markerAt - 1))
+    const prefix = story.slice(previousStop + 1, markerAt).trim()
+    endingAt = previousStop >= 0 && prefix.length < 90 && !/\b(?:and|but|then)\s*$/i.test(prefix) ? previousStop + 1 : markerAt
+    break
+  }
+  const setup = (endingAt >= 0 ? story.slice(0, endingAt) : story).trim().replace(/(?:[,;]\s*)?(?:and|then)\s*$/i, '').replace(/[,;]$/, '.')
+  const sentences = setup.match(/[^.!?\n]+[.!?]?/g) || []
+  const introduction = sentences.length > 2 ? sentences.slice(0, 2).join(' ') : setup
   return { introduction: introduction.trim(), ...(endingAt >= 0 ? { ending: story.slice(endingAt).trim() } : {}) }
 }

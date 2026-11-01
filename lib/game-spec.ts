@@ -2,11 +2,14 @@ import { ANIMATION_CLIP_POSES, ASSET_CATALOG, createAssetPlan, normalizeAnimatio
 import { stabilizeGameSpec } from '@/lib/game-spec-guardrails'
 import { extractStoryAnchors } from '@/lib/story-anchors'
 import { alignNarrativeCast, ensureNarrative, normalizeNarrative } from '@/lib/narrative'
+import { normalizeCreationLanguage } from '@/lib/creation-language'
+import {readTemplateAttributions} from '@/lib/template-attribution'
 import type {
   AssetCategory,
   AssetDefinition,
   BossSpec,
   CollectibleSpec,
+  CreationLanguage,
   EnemySpec,
   GameSpec,
   HeroSpec,
@@ -181,7 +184,7 @@ function customizeAssetPrompts(
   })
 }
 
-export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel World', requestedLevelCount = 3): GameSpec {
+export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel World', requestedLevelCount = 3, creationLanguage: CreationLanguage = 'zh-CN'): GameSpec {
   const prompt = sourcePrompt.trim()
   const creativeFields = parseStructuredFields(prompt)
   const creativeBrief = {
@@ -309,6 +312,7 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
 
   return ensureNarrative(stabilizeGameSpec({
     version: 3,
+    creationLanguage: normalizeCreationLanguage(creationLanguage),
     title: structuredField(prompt, ['游戏标题', 'game title']) || themeName.trim() || 'Pixel World',
     world,
     backgroundStory,
@@ -322,7 +326,7 @@ export function createFallbackGameSpec(sourcePrompt: string, themeName = 'Pixel 
     hero: { name: storyAnchors.hero || 'Hero', appearance: heroAppearance, maxHealth: 100, moveSpeed: 5, jumpPower: 15 },
     weapon: { name: 'Seedblade', appearance: weaponAppearance, mode: 'hybrid', meleeDamage: 24, rangedDamage: 16, cooldownMs: 420, projectileSpeed: 10 },
     enemies: [{ name: 'World Stalker', appearance: enemyAppearance, health: 48, damage: 12, speed: 1.4, behavior: 'chase' }],
-    boss: { name: storyAnchors.antagonist || 'World Guardian', appearance: bossAppearance, health: 280, damage: 20, speed: 1.1, attackPattern: '移动接近主角，间隔发射弹射物，并定时跳跃。' },
+    boss: { name: storyAnchors.antagonist || 'World Guardian', appearance: bossAppearance, health: 280, damage: 20, speed: 1.1, attackPattern: creationLanguage === 'en' ? 'Approaches the player, fires projectiles at intervals, and jumps periodically.' : '移动接近主角，间隔发射弹射物，并定时跳跃。' },
     collectible: { name: storyAnchors.collectible || 'Inner Seed', appearance: collectibleAppearance, effect: 'score', value: 100 },
     projectile,
     attackEffect,
@@ -509,6 +513,7 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
       kind,
       status,
       url: url || undefined,
+      source: asset.source === 'builtin-fallback' ? 'builtin-fallback' : undefined,
       error: text(asset.error, '') || undefined,
       animation,
       sound: asset.sound || base.sound,
@@ -518,6 +523,8 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
 
   return alignNarrativeCast({
     version: 3,
+    templateSources:readTemplateAttributions(fallback.templateSources) || readTemplateAttributions(input.templateSources),
+    creationLanguage: normalizeCreationLanguage(fallback.creationLanguage),
     narrative: normalizeNarrative({ ...input.narrative, opening: input.narrative?.opening || input.backgroundStory || fallback.narrative?.opening, source: fallback.narrative?.source || input.narrative?.source }, { ...fallback, levels }, fallback.narrative),
     title: text(input.title, fallback.title),
     creativeBrief: {

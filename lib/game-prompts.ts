@@ -7,7 +7,7 @@ export type CutoutMode = 'checkerboard' | 'chroma-green'
 
 const COMMON_STYLE = '2D side-scrolling game asset, cohesive 16-bit pixel art, crisp hard pixel edges, no antialiasing, orthographic side view, game-ready readability'
 const COLOR_CONTRACT = 'bright high-saturation color harmony, luminous clean midtones, strong warm-cool separation, colorful readable shadows, crisp contrast, no gray veil, no muddy brown wash, no faded pastel fog; even night and dungeon scenes use vivid colored lighting and clearly separated layers unless the user explicitly requests monochrome art'
-const ISOLATED_BASE = 'exactly one isolated subject, centered, fully visible, generous empty margin, no crop, no text, no logo, no UI, no frame, no border, no scene'
+const ISOLATED_BASE = 'exactly one isolated subject occupying about half the canvas, centered and fully visible, a wide uninterrupted chroma background margin on every edge, no crop, no text, no logo, no UI, no frame, no border, no scene'
 const SCENE_NEGATIVE = 'people, characters, hero, enemies, monsters, creatures, weapons, pickups, obstacles in foreground, UI, text, logo, border, frame'
 const SPRITE_NEGATIVE = 'environment, scenery, landscape, sky, ground, floor, platform, architecture, buildings, trees, plants, furniture, multiple subjects, duplicate subject, border, frame, card, UI panel, text, logo, watermark, cast shadow extending into a scene'
 const ORIGINALITY = 'original non-branded design, no recognizable franchise character, no trademarked symbol'
@@ -74,7 +74,7 @@ export function getPositiveTemplate(
     case 'attackEffect':
       return `${isolated}, one compact combat visual effect only, clear horizontal direction, no character, no weapon`
     case 'collectible':
-      return `${isolated}, one small collectible pickup icon only, readable glowing silhouette, no pedestal`
+      return `${isolated}, one small collectible pickup icon only, compact readable silhouette, large empty border on all four sides, no glow filling the canvas, no pedestal`
     case 'obstacle':
       return `${isolated}, one solid collision obstacle only, flat frontal view, simple compact silhouette`
   }
@@ -169,7 +169,13 @@ export function buildPlannedAssetPrompt(
   if (asset.category === 'levelBackground') {
     return `${base}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. Distant environment only: ${requestedAsset}. This is a backdrop layer, not a collision surface. Put story landmarks such as bridges and towers far behind the action plane. Keep the lower quarter as uninterrupted distant scenery so a separate horizontal ground layer can cover it. No nearby walkable deck, foreground bridge, diagonal path, floor, platform, character, enemy, pickup, UI or text.`
   }
-  return `${base}. ${COLOR_CONTRACT}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. This asset only: ${requestedAsset}. Generate only this one category and never merge it with a character, scene, weapon, creature, platform, obstacle, projectile, pickup, or effect from another category.`
+  const collectibleIsolation = asset.category === 'collectible'
+    ? ' Draw just one small pickup item in the center, occupying less than half of the canvas; leave a wide uniform green margin on every side. No display card, pedestal, floor, horizon, scenery, floating particles or broad halo.'
+    : ''
+  const obstacleIsolation = generationType === 'obstacle'
+    ? ' Show one complete solid obstacle, such as a compact crate or stone block, centered and occupying about 60% of the canvas. Solid refers to the obstacle itself; leave a wide, uninterrupted green background margin on all four sides for clean cutout. No ground plane, wall, room, landscape, card frame or edge-to-edge texture.'
+    : ''
+  return `${base}. ${COLOR_CONTRACT}. ${ORIGINALITY}. Shared visual contract: ${sharedStyle}. This asset only: ${requestedAsset}. Generate only the requested item; do not add a second subject or unrelated scene, character, prop, platform, projectile or effect.${collectibleIsolation}${obstacleIsolation}`
 }
 
 function animationActionInstruction(pose: AnimationClipPose, asset: AssetDefinition, spec: GameSpec): string {
@@ -193,7 +199,7 @@ function animationActionInstruction(pose: AnimationClipPose, asset: AssetDefinit
       ? `Three ordered ranged poses: aim, fire, recoil. In every frame the character visibly grips and uses the same ranged weapon described as: ${ranged}. The muzzle and hands must align naturally.`
       : `Three ordered ranged-attack poses: aim, release, recoil. The projectile origin must be clearly visible and anatomically connected to the character. Related effect concept: ${enemyEffect || asset.prompt}.`
     case 'hit': return 'One readable hit-reaction pose with a brief backward recoil. No injury detail, no extra effect, and no attack.'
-    case 'death': return 'Two ordered defeat poses: losing balance, then fully collapsed or powered down. Keep the complete body visible in both frames.'
+    case 'death': return 'Two ordered non-graphic defeat poses: first a small backward wobble, then a seated, slumped powered-down pose. Keep the same complete character upright enough to fit inside each cell, centered with clear empty space around head, feet and clothing. Do not show a fallen body stretched across the frame or add scenery.'
   }
 }
 

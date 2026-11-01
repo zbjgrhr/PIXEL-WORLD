@@ -11,6 +11,17 @@ describe.each([
   ['online', enemyCombatRules],
   ['offline', new Function(`${offlineEnemyCombatSource()}return enemyCombatRules`)() as typeof enemyCombatRules],
 ] as const)('%s enemy combat rules', (_name, rules) => {
+  it('can strike an overlapping enemy without adding reach behind or beyond the forward attack', () => {
+    const intersects = (a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) => a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+    for (const facing of [-1,1]) {
+      const hitbox = rules.meleeHitbox(200,100,54,64,facing)
+      expect(intersects(hitbox, { x:203,y:100,width:44,height:50 })).toBe(true)
+      expect(intersects(hitbox, { x: facing > 0 ? 280 : 140,y:100,width:30,height:50 })).toBe(true)
+      expect(intersects(hitbox, { x: facing > 0 ? 100 : 300,y:100,width:30,height:50 })).toBe(false)
+      expect(intersects(hitbox, { x: facing > 0 ? 343 : 50,y:100,width:30,height:50 })).toBe(false)
+      expect(intersects(hitbox, { x:203,y:0,width:44,height:50 })).toBe(false)
+    }
+  })
   it('keeps melee, ranged, flying and boss roles across survivor/save changes', () => {
     expect([0, 1, 2, 3].map(i => rules.usesRanged('patrol', 'ground', i))).toEqual([false, false, true, false])
     expect(rules.usesRanged('ranged', 'ground', 0)).toBe(true)

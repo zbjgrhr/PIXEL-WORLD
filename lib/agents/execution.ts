@@ -9,6 +9,8 @@ import { playtestCoverage } from '@/lib/playtest-evidence'
 import { normalizeModelGameSpec } from '@/lib/model-game-spec'
 import { carryPendingNarrativeSuggestions } from '@/lib/narrative-suggestions'
 import { alignGeneratedPassages } from '@/lib/narrative'
+import { agentCreationLanguage } from './prompts'
+import { assertEnglishProse } from '@/lib/creation-language'
 import type { AgentExecuteRequest, AgentExecuteResponse, AgentIssue, AgentRole, EnemySpec, GameSpec } from '@/types'
 
 export interface ChatPayload {
@@ -70,7 +72,7 @@ export function hasUsableRevisionPatch(artifact: Record<string, unknown>): boole
 
 
 function currentSpec(request: AgentExecuteRequest): GameSpec {
-  const deterministicFallback = createFallbackGameSpec(request.sourcePrompt, request.projectName, request.levelCount)
+  const deterministicFallback = createFallbackGameSpec(request.sourcePrompt, request.projectName, request.levelCount, agentCreationLanguage(request))
   const candidate = request.artifacts.productionSpec
     || request.artifacts.revisedSpec
     || request.artifacts.mergedSpec
@@ -78,7 +80,12 @@ function currentSpec(request: AgentExecuteRequest): GameSpec {
   if (!candidate) return deterministicFallback
   const source = request.baseSpec?.narrative?.source || candidate.narrative?.source
   const baseline = source && deterministicFallback.narrative ? { ...deterministicFallback, narrative: { ...deterministicFallback.narrative, source } } : deterministicFallback
-  return stabilizeGameSpec(normalizeGameSpec(candidate, baseline, request.levelCount))
+  return { ...stabilizeGameSpec(normalizeGameSpec(candidate, baseline, request.levelCount)), creationLanguage: agentCreationLanguage(request) }
+}
+
+/** Do not accept a Chinese narrative as a successful English creation step. */
+export function assertAgentOutputLanguage(request: AgentExecuteRequest, parsed: unknown): void {
+  assertEnglishProse(parsed, agentCreationLanguage(request))
 }
 
 function normalizedSpec(request: AgentExecuteRequest, candidate: unknown): GameSpec {
@@ -191,12 +198,17 @@ export function localIntegratorResponse(request: AgentExecuteRequest, error: unk
   const source = request.provider === 'ollama' || request.provider === 'lmstudio' || request.provider === 'gpt4all' || request.provider === 'jan' || request.provider === 'webllm'
     ? '本机模型未输出合格结构'
     : '文字服务未返回可用的整合结果'
+  const english = agentCreationLanguage(request) === 'en'
+  const noExtraCall = String(reason).includes('无需再次调用')
   return {
     success: true,
     data: {
       role: request.role,
       artifact: { spec, localFallback: !String(reason).includes('无需再次调用'), execution: 'program' },
-      summary: request.role === 'integrator'
+      summary: english ? request.role === 'integrator'
+        ? `Story, mechanics, art direction and level plans were integrated and checked locally; no additional integration model was called.${noExtraCall ? '' : ` The model result was unavailable: ${reason}`}`.slice(0, 1200)
+        : `The current GameSpec V3 was retained and revalidated locally. You can continue. Model response: ${reason}`.slice(0, 1200)
+        : request.role === 'integrator'
         ? `已整合故事、玩法、美术与关卡成果，并完成程序检查；未调用额外整合模型。${String(reason).includes('无需再次调用') ? '' : `服务情况：${source}，${reason}`}`.slice(0, 1200)
         : `${source}，已保留并重新校验当前 GameSpec V3，后续流程可以继续。原因：${reason}`.slice(0, 1200),
       issues,
@@ -214,7 +226,7 @@ export function deterministicAgentResponse(request: AgentExecuteRequest): AgentE
   if (request.role === 'playtest' || request.role === 'publisher' || (request.role === 'visualQa' && (!request.imageUrls?.length || !agentModelSupportsVision(request.provider, request.model)))) {
     const { artifact, issues } = normalizeArtifact(request, { artifact: {} })
     return { success: true, data: { role: request.role, artifact: { ...artifact, execution: 'program' }, issues,
-      summary: String(artifact.summary || '仅完成素材元数据检查；当前没有可供视觉模型检查的图片。'),
+      summary: String(artifact.summary || (agentCreationLanguage(request) === 'en' ? 'Only asset metadata was checked; no images were available for visual model inspection.' : '仅完成素材元数据检查；当前没有可供视觉模型检查的图片。')),
       usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, provider: request.provider, model: request.model }, timestamp: new Date().toISOString() }
   }
   if (request.role !== 'engineQa' && !(request.role === 'revision' && !(request.artifacts.reviewIssues || []).some((item) => item.severity !== 'info'))) return null
@@ -226,7 +238,10 @@ export function deterministicAgentResponse(request: AgentExecuteRequest): AgentE
       role: request.role,
       artifact: request.role === 'engineQa' ? { issues } : { spec },
       issues,
-      summary: request.role === 'engineQa'
+      summary: agentCreationLanguage(request) === 'en' ? request.role === 'engineQa'
+        ? `Engine rules were checked locally; ${countBlockingIssues(issues)} blocking issues were found. No text model was called.`
+        : 'The review required no further revisions. The current specification was retained; no text model was called.'
+        : request.role === 'engineQa'
         ? `引擎规则已在本地检查，发现 ${countBlockingIssues(issues)} 个阻断项；此步骤未调用文字模型。`
         : '评审没有需要修订的内容，已保留当前规格；此步骤未调用文字模型。',
       usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
@@ -240,6 +255,7 @@ export function normalizeArtifact(
   request: AgentExecuteRequest,
   parsed: Record<string, unknown>,
 ): { artifact: Record<string, unknown>; issues: AgentIssue[] } {
+  assertAgentOutputLanguage(request, parsed)
   const untrustedArtifact = parsed.artifact && typeof parsed.artifact === 'object' && !Array.isArray(parsed.artifact)
     ? parsed.artifact as Record<string, unknown>
     : parsed
@@ -380,12 +396,12 @@ export function normalizeArtifact(
     const reported = Array.isArray(rawArtifact.checkedAssets) ? rawArtifact.checkedAssets.filter(label => typeof label === 'string') : []
     const checked = canInspect ? (request.imageLabels || []).slice(0, request.imageUrls?.length || 0).filter(label => reported.includes(label)) : []
     const total = spec.assets.filter(a => a.enabled && (a.kind === 'image' || a.kind === 'spriteSheet')).reduce((sum, a) => sum + (a.kind === 'spriteSheet' ? Object.values(a.animation?.clips || {}).filter(c => c?.enabled !== false).length || 1 : 1), 0)
-    issues = dedupeIssues([...issues, ...inspectVisualAssets(spec), ...(checked.length < total ? [{ id: 'visual-coverage', source: 'visualQa' as const, severity: 'warning' as const, path: 'visual.coverage', message: `视觉抽查 ${checked.length}/${total} 张；未抽查的素材不能判定画面合格。`, suggestion: '在素材工坊逐项查看剩余图片和动作；抽查不能代替完整人工验收。' }] : [])])
+    issues = dedupeIssues([...issues, ...inspectVisualAssets(spec), ...(checked.length < total ? [{ id: 'visual-coverage', source: 'visualQa' as const, severity: 'warning' as const, path: 'visual.coverage', message: agentCreationLanguage(request) === 'en' ? `${checked.length}/${total} images were visually sampled. Unsampled assets have not been verified.` : `视觉抽查 ${checked.length}/${total} 张；未抽查的素材不能判定画面合格。`, suggestion: agentCreationLanguage(request) === 'en' ? 'Inspect the remaining images and actions in the Asset Workshop. Sampling does not replace a complete manual review.' : '在素材工坊逐项查看剩余图片和动作；抽查不能代替完整人工验收。' }] : [])])
     artifact = { ...rawArtifact, issues, checkedAssets: checked, coverage: { checked: checked.length, total, status: !checked.length ? 'not-inspected' : checked.length < total ? 'sampled' : 'inspected' }, blockingCount: countBlockingIssues(issues) }
   } else if (request.role === 'playtest') {
     const spec = currentSpec(request)
     const coverage = playtestCoverage(spec, request.playtestEvidence)
-    issues = dedupeIssues([...issues, ...inspectPlayability(spec), ...(coverage.status === 'observed-complete' ? [] : [{ id: 'playtest-evidence', source: 'playtest' as const, severity: 'warning' as const, path: 'playtest.coverage', message: coverage.summary, suggestion: '在右栏实际试玩，完成各关任务和结局后重新检查。' }])])
+    issues = dedupeIssues([...issues, ...inspectPlayability(spec), ...(coverage.status === 'observed-complete' ? [] : [{ id: 'playtest-evidence', source: 'playtest' as const, severity: 'warning' as const, path: 'playtest.coverage', message: coverage.summary, suggestion: agentCreationLanguage(request) === 'en' ? 'Play the game in the preview, complete every level and the ending, then run the checks again.' : '在右栏实际试玩，完成各关任务和结局后重新检查。' }])])
     artifact = { ...rawArtifact, ...coverage, summary: coverage.summary, verdict: coverage.status, issues, blockingCount: countBlockingIssues(issues) }
   } else if (request.role === 'publisher') {
     const shared = [
@@ -398,7 +414,11 @@ export function normalizeArtifact(
     artifact = {
       ...rawArtifact,
       ready: countBlockingIssues(issues) === 0 && request.artifacts.playtestReport?.status === 'observed-complete' && request.artifacts.visualReport?.coverage != null,
-      summary: countBlockingIssues(issues) ? '存在制作或运行配置问题，请先处理。' : request.artifacts.playtestReport?.status !== 'observed-complete' ? '规格检查完成，但真实试玩尚未全部完成。你可以继续试玩与导出，不能据此宣称已全面验收。' : '已记录本浏览器的任务与通关过程。请结合视觉抽查范围，人工确认画面、操作手感和离线版本。',
+      summary: agentCreationLanguage(request) === 'en'
+        ? countBlockingIssues(issues) ? 'Production or runtime configuration issues require attention.'
+          : request.artifacts.playtestReport?.status !== 'observed-complete' ? 'Specification checks are complete, but actual playtesting remains incomplete. You can play and export; this does not establish full acceptance.'
+            : 'This browser recorded objective completion and game completion. Review the visual inspection coverage, controls and offline version manually.'
+        : countBlockingIssues(issues) ? '存在制作或运行配置问题，请先处理。' : request.artifacts.playtestReport?.status !== 'observed-complete' ? '规格检查完成，但真实试玩尚未全部完成。你可以继续试玩与导出，不能据此宣称已全面验收。' : '已记录本浏览器的任务与通关过程。请结合视觉抽查范围，人工确认画面、操作手感和离线版本。',
       blockingIssues: issues.filter((item) => item.severity === 'blocking'),
       warnings: issues.filter((item) => item.severity === 'warning'),
     }
@@ -411,6 +431,7 @@ export function prepareAgentRequest(body: AgentExecuteRequest): AgentExecuteRequ
   const submittedSourcePrompt = String(body.sourcePrompt || '').trim().slice(0, 50000)
   return {
     ...body,
+    creationLanguage: agentCreationLanguage(body),
     sourcePrompt: isStructuredPromptBlank(submittedSourcePrompt)
       ? 'Complete and review an original colorful pixel platform adventure using the supplied GameSpec V3. Fill all missing requirements without overriding established choices.'
       : submittedSourcePrompt,

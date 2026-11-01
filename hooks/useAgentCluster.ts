@@ -26,10 +26,12 @@ import type {
   AgentRole,
   AgentRun,
   AgentTask,
+  CreationLanguage,
   GameSpec,
 } from '@/types'
 
 interface UseAgentClusterOptions {
+  creationLanguage?: CreationLanguage
   projectId: string
   sourcePrompt: string
   projectName: string
@@ -57,6 +59,7 @@ function createRun(options: UseAgentClusterOptions, modelLock: AgentModelLock): 
   const now = Date.now()
   return {
     version: 1,
+    creationLanguage: options.creationLanguage || options.baseSpec?.creationLanguage || 'zh-CN',
     id: runId(),
     projectId: options.projectId,
     sourcePrompt: options.sourcePrompt,
@@ -171,7 +174,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
       if (recovered && interrupted) await saveAgentRun(recovered)
       if (!active) return
       // A shared project id must not attach approval from a different story.
-      const matches = Boolean(recovered && options.projectName.trim() && recovered.sourcePrompt === options.sourcePrompt && recovered.levelCount === options.levelCount)
+      const matches = Boolean(recovered && options.projectName.trim() && recovered.sourcePrompt === options.sourcePrompt && recovered.levelCount === options.levelCount && (recovered.creationLanguage || recovered.planningSpec?.creationLanguage || 'zh-CN') === (options.creationLanguage || options.baseSpec?.creationLanguage || 'zh-CN'))
       setSavedRun(matches ? null : recovered)
       if (!matches) return
       setRunState(recovered)
@@ -186,13 +189,13 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
   }, [options.projectId])
 
   useEffect(() => {
-    if (restoring || run || !savedRun || !options.baseSpec || savedRun.sourcePrompt !== options.sourcePrompt || savedRun.projectName !== options.projectName || savedRun.levelCount !== options.levelCount) return
+    if (restoring || run || !savedRun || !options.baseSpec || savedRun.sourcePrompt !== options.sourcePrompt || savedRun.projectName !== options.projectName || savedRun.levelCount !== options.levelCount || (savedRun.creationLanguage || 'zh-CN') !== (options.creationLanguage || options.baseSpec.creationLanguage || 'zh-CN')) return
     const previous = currentRunSpec(savedRun)
     if (!previous || changedDraftGroups(previous, options.baseSpec).length) return
     setRunState(savedRun)
     setSavedRun(null)
     if (savedRun.approved) options.onApprovedRestored?.(options.baseSpec)
-  }, [restoring, run, savedRun, options.baseSpec, options.sourcePrompt, options.projectName, options.levelCount, options.onApprovedRestored])
+  }, [restoring, run, savedRun, options.baseSpec, options.sourcePrompt, options.projectName, options.levelCount, options.creationLanguage, options.onApprovedRestored])
 
   const callTask = useCallback(async (current: AgentRun, task: AgentTask, apiKey: string, baseSpec?: GameSpec): Promise<AgentCallResult> => {
     if (current.modelLock.provider === 'managed') return { task: { ...task, status: 'failed', error: '站点云端体验已移除；请新建运行并选择其他文字工具。' }, error: '站点云端体验已移除。', recoverable: false }
@@ -200,6 +203,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
       role: task.role,
       round: task.round,
       sourcePrompt: current.sourcePrompt,
+      creationLanguage: current.creationLanguage || baseSpec?.creationLanguage || 'zh-CN',
       projectName: current.projectName,
       levelCount: current.levelCount,
       modelLock: current.modelLock,
@@ -226,6 +230,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
           apiKey,
           baseUrl: current.modelLock.baseUrl,
           sourcePrompt: current.sourcePrompt,
+          creationLanguage: current.creationLanguage || baseSpec?.creationLanguage || 'zh-CN',
           projectName: current.projectName,
           levelCount: current.levelCount,
           baseSpec: baseSpec ? task.phase === 'quality' ? assetMetadataForReview(baseSpec) : stripLargeAssetUrls(baseSpec) : undefined,
@@ -419,7 +424,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
     const next: AgentRun = {
       ...createRun(options, modelLock),
       archivedTasks: run?.reviewMode !== 'local-draft' ? [...(run?.archivedTasks || []), ...(run?.tasks.filter(task => task.status === 'completed' || task.status === 'needs-review') || [])].slice(-150) : run.archivedTasks,
-      ...(run?.reviewMode === 'local-draft' && run.sourcePrompt === options.sourcePrompt ? { id: run.id, createdAt: run.createdAt, archivedTasks: run.archivedTasks } : {}),
+      ...(run?.reviewMode === 'local-draft' && run.sourcePrompt === options.sourcePrompt && (run.creationLanguage || 'zh-CN') === (options.creationLanguage || baseSpec.creationLanguage || 'zh-CN') ? { id: run.id, createdAt: run.createdAt, archivedTasks: run.archivedTasks } : {}),
       status: 'awaiting_approval',
       reviewMode: 'local-draft',
       tasks: [{ id: taskId('engineQa', 1), role: 'engineQa', phase: 'review', round: 1, dependencies: [],
@@ -484,12 +489,13 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
 
   const approve = useCallback(async () => {
     if (!run || run.status !== 'awaiting_approval' || approvalInFlight.current) return null
-    if (blockingIssues(run).length) return null
+    if (blockingIssues(run).length) throw new Error('还有阻断问题，请先处理再批准。')
     const spec = run.artifacts.productionSpec || run.artifacts.revisedSpec || run.artifacts.mergedSpec
-    if (!spec || pendingNarrativeSuggestions(spec).length) return null
+    if (!spec) throw new Error('当前运行缺少可批准的 GameSpec，请重新检查草案。')
+    if (pendingNarrativeSuggestions(spec).length) throw new Error('模型修改建议尚未同步到审核记录，请重新处理建议或检查草案。')
     const inputsMatch = () => {
       const current = liveOptions.current
-      return current.baseSpec && run.sourcePrompt === current.sourcePrompt && run.projectName === current.projectName && run.levelCount === current.levelCount && !changedDraftGroups(spec, current.baseSpec).length
+      return current.baseSpec && (run.creationLanguage || 'zh-CN') === (current.creationLanguage || current.baseSpec.creationLanguage || 'zh-CN') && run.sourcePrompt === current.sourcePrompt && run.projectName === current.projectName && run.levelCount === current.levelCount && !changedDraftGroups(spec, current.baseSpec).length
     }
     if (!inputsMatch()) throw new Error('草案与本次审核的输入不一致，请重新点击“检查草案并进入审核”后再批准。')
     approvalInFlight.current = true
@@ -503,7 +509,7 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
       options.onApproved?.(approvedSpec)
       return approvedRun
     } finally { approvalInFlight.current = false; setApproving(false) }
-  }, [options.baseSpec, options.sourcePrompt, options.projectName, options.levelCount, options.projectId, options.onApproved, publish, run])
+  }, [options.baseSpec, options.sourcePrompt, options.projectName, options.levelCount, options.creationLanguage, options.projectId, options.onApproved, publish, run])
 
   const runQualityChecks = useCallback(async (spec: GameSpec, apiKey: string) => {
     if (!run?.approved) return null
@@ -541,6 +547,10 @@ export function useAgentCluster(options: UseAgentClusterOptions) {
   const reconcileInputs = useCallback(async () => {
     if (!run) return null
     if (['planning', 'reviewing', 'quality_check'].includes(run.status) || run.tasks.some(task => task.status === 'running')) return run
+    if ((run.creationLanguage || 'zh-CN') !== (options.creationLanguage || options.baseSpec?.creationLanguage || 'zh-CN')) {
+      if (run.tasks.some(task => task.output)) setSavedRun(run)
+      return publish(createRun(options, run.modelLock))
+    }
     if (!options.baseSpec) {
       if (run.tasks.some(task => task.output)) setSavedRun(run)
       return publish(createRun(options, run.modelLock))

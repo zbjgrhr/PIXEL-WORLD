@@ -65,8 +65,8 @@ export async function webLlmCompletion(model: string, system: string, user: stri
     usage: { prompt_tokens: response.usage?.prompt_tokens || 0, completion_tokens: response.usage?.completion_tokens || 0, total_tokens: response.usage?.total_tokens || 0 } }
 }
 
-export async function createWebLlmCreativePatch(model: string, projectName: string, story: string, inspirations: string[]): Promise<WebLlmCreativePatch> {
-  const prompt = buildWebLlmCreativeRequest(projectName, story, inspirations)
+export async function createWebLlmCreativePatch(model: string, projectName: string, story: string, inspirations: string[], creationLanguage: 'zh-CN' | 'en' = 'zh-CN'): Promise<WebLlmCreativePatch> {
+  const prompt = buildWebLlmCreativeRequest(projectName, story, inspirations, creationLanguage)
   const payload = await webLlmCompletion(model, prompt.system, prompt.user, 480)
   const content = payload.choices?.[0]?.message?.content
   return parseWebLlmCreativePatch(typeof content === 'string' ? content : '')

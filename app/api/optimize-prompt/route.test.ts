@@ -4,6 +4,47 @@ import { buildStructuredPrompt } from '@/lib/asset-catalog'
 import { createFallbackGameSpec } from '@/lib/game-spec'
 
 describe('POST /api/optimize-prompt', () => {
+  it('produces a complete English rule-based draft without a paid request', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    try {
+      const response = await POST(new Request('http://localhost/api/optimize-prompt', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ theme: 'Penguin Homeward', story: 'A little penguin travels through Japan, defeats a panda boss, and finally finds its mother.', creationLanguage: 'en', levelCount: 3 }),
+      }) as never)
+      const data = await response.json()
+      expect(data.data.source).toBe('local')
+      expect(data.data.spec.creationLanguage).toBe('en')
+      expect(data.data.spec.narrative.ending).toContain('mother')
+      expect(data.data.spec.narrative.opening).not.toMatch(/[\u3400-\u9fff]/)
+      expect(fetchMock).not.toHaveBeenCalled()
+    } finally { fetchMock.mockRestore() }
+  })
+
+  it('sends the selected language to the cloud optimizer and keeps English through normalization', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ narrative: { incitingIncident: 'A storm separates the little penguin from its mother.' } }) } }] }), { status: 200 }))
+    try {
+      const response = await POST(new Request('http://localhost/api/optimize-prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ theme: 'Penguin Homeward', story: 'A little penguin travels through Japan to find its mother.', creationLanguage: 'en', levelCount: 3, provider: 'dashscope', model: 'qwen-max', apiKey: 'test-key' }) }) as never)
+      const data = await response.json()
+      const sent = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
+      expect(sent.messages[0].content).toContain('WORK LANGUAGE: English')
+      expect(sent.messages[0].content).not.toContain('Write player-facing story in natural Chinese')
+      expect(data.data.source).toBe('ai')
+      expect(data.data.spec.creationLanguage).toBe('en')
+      expect(data.data.spec.narrative.incitingIncident).toContain('A storm')
+    } finally { fetchMock.mockRestore() }
+  })
+
+  it('retains an English fallback if the cloud model returns Chinese prose, without retrying', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ narrative: { opening: '小企鹅离开村庄，穿过竹林，准备寻找自己失踪的母亲。' } }) } }] }), { status: 200 }))
+    try {
+      const response = await POST(new Request('http://localhost/api/optimize-prompt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ theme: 'Penguin Homeward', story: 'A little penguin travels through Japan to find its mother.', creationLanguage: 'en', provider: 'dashscope', apiKey: 'test-key' }) }) as never)
+      const data = await response.json()
+      expect(data.data.source).toBe('local')
+      expect(data.data.spec.narrative.opening).not.toMatch(/[\u3400-\u9fff]/)
+      expect(data.data.warning).toContain('Chinese prose')
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally { fetchMock.mockRestore() }
+  })
   it('explains a missing key for the selected cloud model and keeps the local draft', async () => {
     const request = new Request('http://localhost/api/optimize-prompt', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

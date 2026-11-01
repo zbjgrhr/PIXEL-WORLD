@@ -3,6 +3,17 @@ import type { AnimationClipPose, AssetDefinition } from '@/types'
 
 export interface AssetGenerationJob { id: string; assetId: string; pose?: AnimationClipPose; dependencies: string[] }
 
+/** Explicit API regeneration discards old pictures but keeps the approved plan. */
+export function resetVisualAssetsForGeneration<T extends { assets: AssetDefinition[] }>(spec: T): T {
+  return { ...spec, assets: spec.assets.map(asset => {
+    if (!asset.enabled || (asset.kind !== 'image' && asset.kind !== 'spriteSheet')) return asset
+    if (asset.kind === 'image') return { ...asset, url: undefined, source: undefined, status: 'pending' as const, error: undefined }
+    const animation = normalizeAnimationSpec(asset.animation)
+    const clips = Object.fromEntries(Object.entries(animation.clips || {}).map(([pose, clip]) => [pose, clip ? { ...clip, url: undefined, source: undefined, status: 'pending', error: undefined } : clip]))
+    return { ...asset, url: undefined, source: undefined, status: 'pending' as const, error: undefined, animation: { ...animation, clips } }
+  }) }
+}
+
 export function createGenerationJobs(assets: AssetDefinition[]): AssetGenerationJob[] {
   const jobs: AssetGenerationJob[] = assets.filter(asset => asset.enabled && (asset.kind === 'image' || asset.kind === 'spriteSheet')).flatMap(asset => {
     if (asset.kind === 'image') return !asset.url || ['failed', 'cancelled'].includes(asset.status) ? [{ id: asset.id, assetId: asset.id, dependencies: [] }] : []

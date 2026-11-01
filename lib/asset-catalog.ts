@@ -156,6 +156,7 @@ export function normalizeAnimationSpec(value: unknown): AnimationSpec {
         status: ['generating', 'failed', 'cancelled'].includes(String(clip.status)) ? clip.status as AnimationClipSpec['status'] : clip.url ? 'success' : 'pending',
         url: typeof clip.url === 'string' && clip.url ? clip.url : undefined,
         error: typeof clip.error === 'string' && clip.error ? clip.error : undefined,
+        source: clip.source === 'builtin-fallback' ? 'builtin-fallback' as const : undefined,
       }]
     })) as Record<AnimationClipPose, AnimationClipSpec>
     return { ...base, clips }

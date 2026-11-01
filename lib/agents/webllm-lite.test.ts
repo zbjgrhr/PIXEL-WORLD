@@ -3,6 +3,18 @@ import { applyWebLlmCreativePatch, buildWebLlmCreativeRequest, estimateWebLlmPro
 import { createFallbackGameSpec } from '@/lib/game-spec'
 
 describe('WebLLM lightweight planning', () => {
+  it('requests the selected story language while retaining English visual prompts', () => {
+    const en = buildWebLlmCreativeRequest('Penguin', 'A penguin finds its mother.', [], 'en')
+    expect(en.system).toContain('story in idiomatic English')
+    expect(en.system).toContain('art-direction prompts remain concise English')
+    expect(buildWebLlmCreativeRequest('企鹅', '企鹅找妈妈', []).system).toContain('natural Simplified Chinese')
+  })
+  it('does not replace an English draft with wrong-language browser narration', () => {
+    const base = { ...createFallbackGameSpec('', 'Penguin', 1), creationLanguage: 'en' as const }
+    const before = JSON.stringify(base)
+    expect(() => applyWebLlmCreativePatch(base, { backgroundStory: '小企鹅穿过海边的村庄，一直寻找失散已久的母亲。' })).toThrow('Chinese prose')
+    expect(JSON.stringify(base)).toBe(before)
+  })
   it('keeps the browser prompt focused on the player brief instead of a GameSpec', () => {
     const request = buildWebLlmCreativeRequest('星潮群岛', '地图师要收集星火，重新点亮灯塔。', ['群岛会随着潮汐缓缓升降'])
     expect(request.user).toContain('地图师')

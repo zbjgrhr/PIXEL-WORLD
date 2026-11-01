@@ -5,6 +5,15 @@ import { normalizeModelGameSpec } from './model-game-spec'
 import { pendingNarrativeSuggestions } from './narrative-suggestions'
 
 describe('opening and ending separation', () => {
+  it.each(['Finally, she finds the fleet and sails home.', 'In the end, she discovers that her mother has died.', 'At last, she returns to the old harbor.'])('retains an explicit English outcome: %s', ending => {
+    const setup = 'A young cartographer searches the islands for a missing fleet. '
+    expect(separateStoryIntroduction(setup + ending)).toEqual({ introduction: setup.trim(), ending })
+  })
+  it.each(['Finally, she needs to find the fleet.', 'In the end, she wants to return home.', 'At last, can she find her mother?', 'Finally, her objective is to restore the lights.'])('does not turn an English final objective or question into an outcome: %s', goal => {
+    const story = 'A young cartographer reaches the islands. ' + goal
+    expect(separateStoryIntroduction(story).ending).toBeUndefined()
+    expect(separateStoryIntroduction(story).introduction).toContain(goal)
+  })
   it('keeps a completed rescue before the final clause in the ending', () => {
     const story = '钟表匠林澈带着妹妹阿遥来到倒走的城。守钟机械带走阿遥。林澈穿过三处街巷，修好三枚钟芯，击败守钟机械，救回阿遥，最后把中央钟调回正向。'
     const parts = separateStoryIntroduction(story)

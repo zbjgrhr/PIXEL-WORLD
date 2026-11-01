@@ -4,23 +4,26 @@ import { useEffect, useState } from 'react'
 import { Button } from 'antd'
 import { Check, Plus, RefreshCw, Sparkles } from 'lucide-react'
 import { INSPIRATION_PACKS, type InspirationTarget } from '@/configs/inspiration-packs'
+import { translateUiText } from '@/lib/ui-locale'
 
 export type { InspirationTarget } from '@/configs/inspiration-packs'
 
 interface InspirationLibraryProps {
+  creationLanguage?: 'zh-CN' | 'en'
   story: string
   prompt: string
   onApply: (target: InspirationTarget, text: string) => void
 }
 
-function packForContent(content: string): number {
-  return INSPIRATION_PACKS.findIndex((pack) => pack.ideas.some((idea) => idea.variants.some((text) => content.includes(text))))
+function packForContent(content: string, language?: 'zh-CN' | 'en'): number {
+  return INSPIRATION_PACKS.findIndex((pack) => pack.ideas.some((idea) => idea.variants.some((text) => content.includes(text) || (language === 'en' && content.includes(translateUiText(text) || text)))))
 }
 
-export default function InspirationLibrary({ story, prompt, onApply }: InspirationLibraryProps) {
-  const [packIndex, setPackIndex] = useState(() => Math.max(0, packForContent(`${story}\n${prompt}`)))
+export default function InspirationLibrary({ story, prompt, onApply, creationLanguage = 'zh-CN' }: InspirationLibraryProps) {
+  const selected = (text: string) => story.includes(text) || prompt.includes(text) || (creationLanguage === 'en' && `${story}\n${prompt}`.includes(translateUiText(text) || text))
+  const [packIndex, setPackIndex] = useState(() => Math.max(0, packForContent(`${story}\n${prompt}`, creationLanguage)))
   const [variantIndex, setVariantIndex] = useState(0)
-  const selectedPack = packForContent(`${story}\n${prompt}`)
+  const selectedPack = packForContent(`${story}\n${prompt}`, creationLanguage)
 
   useEffect(() => {
     if (selectedPack >= 0 && selectedPack !== packIndex) { setPackIndex(selectedPack); setVariantIndex(0) }
@@ -28,7 +31,7 @@ export default function InspirationLibrary({ story, prompt, onApply }: Inspirati
 
   const pack = INSPIRATION_PACKS[packIndex]
   const lockedToPack = selectedPack >= 0
-  const chosen = pack.ideas.flatMap((idea) => idea.variants).filter((text) => story.includes(text) || prompt.includes(text))
+  const chosen = pack.ideas.flatMap((idea) => idea.variants).filter(selected)
 
   const refresh = () => {
     if (lockedToPack) setVariantIndex((index) => 1 - index)
@@ -44,7 +47,7 @@ export default function InspirationLibrary({ story, prompt, onApply }: Inspirati
     <div className="inspiration-grid">
       {pack.ideas.map((idea) => {
         const text = idea.variants[variantIndex]
-        const applied = story.includes(text) || prompt.includes(text)
+        const applied = selected(text)
         return <article className={`inspiration-card tone-${idea.tone}`} key={`${pack.id}-${idea.kind}`}>
           <span className="inspiration-kind">{idea.kind}</span>
           <p>{text}</p>

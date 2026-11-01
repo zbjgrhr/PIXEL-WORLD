@@ -106,7 +106,10 @@ export interface AgentArtifacts {
   releaseReport?: Record<string, unknown>
 }
 
+export type CreationLanguage = 'zh-CN' | 'en'
+
 export interface AgentRun {
+  creationLanguage?: CreationLanguage
   version: 1
   id: string
   projectId: string
@@ -136,6 +139,7 @@ export interface AgentRun {
 export type AgentDraftChangeGroup = 'requirements' | 'story' | 'characters' | 'gameplay' | 'chapters' | 'art' | 'assets' | 'locks'
 
 export interface AgentExecuteRequest {
+  creationLanguage?: CreationLanguage
   runId: string
   taskId: string
   role: AgentRole
@@ -217,6 +221,7 @@ export interface AnimationClipSpec {
   status: AssetStatus
   url?: string
   error?: string
+  source?: 'builtin-fallback'
 }
 
 export interface AnimationSpec {
@@ -256,6 +261,7 @@ export interface AssetDefinition {
   status: AssetStatus
   url?: string
   error?: string
+  source?: 'builtin-fallback'
   animation?: AnimationSpec
   sound?: SoundSpec
   motion?: MotionSpec
@@ -405,7 +411,29 @@ export interface NarrativeSpec {
   chapters: StoryChapter[]
 }
 
+export interface TemplateAttribution {
+  postId:string
+  revision:string
+  authorId:string
+  authorName:string
+  license:'remix-with-credit'
+}
+
+export interface TemplateReuseSelection {
+  title:string
+  story:string
+  language:CreationLanguage
+  levelCount:number
+  prompt:string
+  spec:GameSpec | null
+  templateSources:TemplateAttribution[]
+}
+
 export interface GameSpec {
+  /** Attribution retained when adapting a reviewed community template. */
+  templateSources?:TemplateAttribution[]
+  /** Work language; independent of the current interface language. Legacy works default to Chinese. */
+  creationLanguage?: CreationLanguage
   narrative?: NarrativeSpec
   creativeBrief?: { heroGoal?: string; difficulty?: string; pacing?: string; identityRules?: string }
   version: 3
@@ -456,6 +484,8 @@ export interface SpawnPoint {
   x: number
   y: number
   kind: string
+  patrolMin?: number
+  patrolMax?: number
 }
 
 export interface LevelData {
@@ -467,6 +497,9 @@ export interface LevelData {
   enemySpawns: SpawnPoint[]
   collectibleSpawns: SpawnPoint[]
   bossSpawn?: SpawnPoint
+  worldWidth?: number
+  combatStartX?: number
+  layoutVersion?: number
 }
 
 export interface GameAssets {
@@ -521,6 +554,10 @@ export interface GenerateImageRequest {
 }
 
 export interface ThemeCustomizerProps {
+  onTemplateApply?: (selection:TemplateReuseSelection) => boolean
+  templateSources?:TemplateAttribution[]
+  creationLanguage?: CreationLanguage
+  onCreationLanguageChange?: (language: CreationLanguage) => void
   inspiration?: ReactNode
   customThemeName: string
   onThemeNameChange: (name: string) => void

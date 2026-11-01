@@ -19,6 +19,7 @@ export default function GameSpecSummary({ spec, imageJobs, onEdit }: { spec: Gam
     <h3>{spec.title}</h3>
     <p>{spec.narrative?.opening || spec.backgroundStory}</p>
     <dl>
+      <dt>作品语言</dt><dd>{spec.creationLanguage === 'en' ? 'English' : '简体中文'}</dd>
       <dt>世界</dt><dd>{spec.world}</dd>
       <dt>主角</dt><dd>{spec.hero.name} · {spec.narrative?.motivation || spec.hero.appearance}</dd>
       {spec.creativeBrief?.heroGoal && <><dt>主角目标</dt><dd>{spec.creativeBrief.heroGoal}</dd></>}

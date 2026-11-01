@@ -21,8 +21,8 @@ describe('generated encounter layout', () => {
     expect(spec.levels[2].hasBoss).toBe(true)
     for (const level of levels.slice(0, 2)) {
       const hazard = level.obstacles.find(obstacle => obstacle.type === 'deathObstacle')
-      expect(hazard?.x).toBe(810)
-      expect(hazard!.x).toBeGreaterThan(Math.max(...level.enemySpawns.map(enemy => enemy.x)))
+      expect(hazard!.x).toBeGreaterThanOrEqual(Math.max(...level.enemySpawns.map(enemy => (enemy.patrolMax || enemy.x) + 52)) + 70)
+      expect(hazard!.x + hazard!.width).toBeLessThanOrEqual(level.worldWidth! - 230)
     }
     expect(levels[2].obstacles.some(obstacle => obstacle.type === 'deathObstacle')).toBe(false)
     expect(levels[2].obstacles.length).toBeGreaterThan(0)

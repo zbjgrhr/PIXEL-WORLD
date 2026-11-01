@@ -19,7 +19,8 @@ function clean(value?: string): string | undefined {
 
 /** Conservative hints for the no-model draft; uncertain details stay generic. */
 export function extractStoryAnchors(story: string): StoryAnchors {
-  const source = story.slice(0, 2000)
+  const source = story.replace(/【已选灵感】/g, '[Selected inspiration]').slice(0, 2000)
+  if (!/\p{Script=Han}/u.test(source)) return extractEnglishStoryAnchors(source)
   const roleNamedHero = source.match(/^(?:一名|一位|一个|一只)?(?:钟表匠|邮差|信使|地图师|护林人|领航员|骑士|维修员|机械师|画家|探险家|猎人)([\p{Script=Han}]{2,4})(?=带着|带领|与|和|在|来到|发现|决定|为了|前往|踏上)/u)?.[1]
   const introducedSubject = source.match(/^(?:一只|一位|一名|一个)([^，,。；]{2,28})[，,]\s*(?:在|来到|前往|决定|为了|想要|必须|需要|试图)/u)?.[1]?.split('的').at(-1)
   const openingSubject = source.match(/(?:^|[。！？；])\s*([^，。！？；\s]{2,16}?)在[^，。！？；]{1,28}?(?:发现|追踪|打败|击败|寻找|找回|拯救|救出|修复|收集|探索|送出|送达|寄出|冒险|战斗)/u)?.[1]
@@ -51,4 +52,24 @@ export function extractStoryAnchors(story: string): StoryAnchors {
     || source.match(/(?:^|[。！？；])\s*[^，。！？；\s]{2,16}在([^，。！？；]{1,22}?)(?:发现|追踪|打败|击败|寻找|找回|拯救|救出|修复|收集|探索|送出|送达|寄出|冒险|战斗)/u)?.[1]
     || source.match(/(?:^|[，。！？；,])\s*在([^，。！？；]{1,22}?)(?:[，,]|发现|追踪|打败|击败|寻找|找回|拯救|救出|修复|收集|探索|送出|送达|寄出|冒险|战斗)/u)?.[1])
   return { hero, antagonist, enemy, collectible, place }
+}
+
+/** English subject/role hints only; this is not a general-purpose translator. */
+export function extractEnglishStoryAnchors(story: string): StoryAnchors {
+  const source = story.replace(/\s+/g, ' ').trim().slice(0, 2000)
+  const phrase = (value?: string) => {
+    const result = value?.trim().replace(/^(?:a|an|the)\s+/i, '').replace(/[\s,.;:!?]+$/, '').trim()
+    return result && result.length <= 90 && result.split(' ').length <= 10 ? result : undefined
+  }
+  const hero = phrase(source.match(/\b(?:protagonist|hero)\s*(?:is|:|=)\s*([^,.;!?]+?)(?=\s+(?:in|from|who|must|wants|needs|travels|sets|finds|fights)\b|[,.;!?]|$)/i)?.[1]
+    || source.match(/^(?:a|an|the)\s+(.+?)\s+(?:is\s+(?:a|an|the)|travels?|journeys?|explores?|ventures?|sets? out|must|wants?|needs?|tries?|fights?|defeats?|searches?|looks?|finds?|in\b)/i)?.[1]
+    || source.match(/^([A-Z][\w'-]*(?:\s+[A-Z][\w'-]*){0,3})\s+(?:travels?|journeys?|explores?|ventures?|sets? out|must|wants?|needs?|tries?|fights?|defeats?|searches?|looks?|finds?|in\b)/)?.[1]
+    || source.match(/^([^,.;!?]{1,70}?)\s+(?:travels?|journeys?|explores?|ventures?|sets? out|must|wants?|needs?|tries?|fights?|defeats?|searches?|looks?|finds?|in\b)/i)?.[1])
+  const antagonist = phrase(source.match(/\b(?:boss|antagonist)\s*(?:is|:|=|named|called)\s*([^,.;!?]+?)(?=\s+(?:who|that|and|to)\b|[,.;!?]|$)/i)?.[1]
+    || source.match(/\b(?:a|an|the)\s+([^,.;!?]+?)\s+boss\b/i)?.[1]?.split(/\b(?:and|defeat|defeats|fight|fights|with|against)\b/i).at(-1)
+    || source.match(/(?:^|\b(?:and|defeat|defeats|fight|fights|confront|confronts))\s+([^,.;!?]{1,45}?)\s+boss\b/i)?.[1]?.split(/\band\b/i).at(-1)
+    || source.match(/\b(?:defeat|defeats|fight|fights|confront|confronts)\s+(?:a|an|the)\s+([^,.;!?]+?)(?=\s+(?:to|and|before|then|so)\b|[,.;!?]|$)/i)?.[1])
+  const place = phrase(source.match(/\b(?:in|through|across|to|enters?|reaches?)\s+([^,.;!?]+?)(?=\s+(?:to|where|while|and|must|who|defeat|defeats|fight|fights|find|finds|search|searches|looking|seeking)\b|[,.;!?]|$)/i)?.[1])
+  const collectible = phrase(source.match(/\bcollects?\s+(?:(?:\d+|one|two|three|four|five|six)\s+)?([^,.;!?]+?)(?=\s+(?:to|and|before|then|while)\b|[,.;!?]|$)/i)?.[1])
+  return { hero, antagonist, place, collectible }
 }

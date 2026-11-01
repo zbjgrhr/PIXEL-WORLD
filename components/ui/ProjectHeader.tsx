@@ -2,6 +2,7 @@
 
 import React from 'react'
 import type { ProjectHeaderProps } from '@/types'
+import LanguageSwitcher from './LanguageSwitcher'
 
 const NAV_ITEMS = [
   { label: '世界主页', href: '#world-home' },
@@ -10,6 +11,7 @@ const NAV_ITEMS = [
 
 const ProjectHeader: React.FC<ProjectHeaderProps> = ({ className }) => (
   <header className={`${className || ''} portal-header`}>
+    <LanguageSwitcher />
     <div className="portal-header-copy">
       <span className="portal-eyebrow">PROMPT PLAY · 像素世界制作器</span>
       <h1>PIXEL WORLD</h1>

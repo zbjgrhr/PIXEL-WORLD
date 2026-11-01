@@ -6,6 +6,38 @@ export interface PromptTemplate {
   prompt: string
 }
 
+/** Authored English starter briefs; schema headings remain stable for the compiler. */
+const ENGLISH_STARTERS = [
+  { title: 'Castle of Dragons: The Ember Crown', hero: 'Eileen', boss: 'The Ancient Ember Dragon', item: 'starlight crystals',
+    story: 'The Ember Crown has shattered, cutting five regions off from one another. Eileen, an adult knight, must recover the starlight crystals, cross the ruined kingdom, and defeat the Ancient Ember Dragon that seized the crown’s core. At last, she recovers the core, and the kingdom begins to recover.',
+    heroArt: 'An adult knight with a blue cape, practical silver armor, and a blue-flame rune blade',
+    bossArt: 'A massive red-and-gold dragon with a crown-shaped crest and bright ember scales',
+    places: ['Twilight Gate', 'Ruined Throne Hall', 'Underground River', 'Sky Tower', 'Ember Sanctuary'] },
+  { title: 'The Tidal Lighthouse', hero: 'Lan', boss: 'The Deep-Sea Lord', item: 'tidal shells',
+    story: 'Lan, a young lighthouse keeper, discovers that the blue flame has been stolen and sea fog has hidden the shipping lanes. Her father’s fishing boat is still at sea. She must gather tidal shells, cross the harbor and underwater ruins, and defeat the Deep-Sea Lord at the lighthouse. Finally, Lan restores the blue flame and guides the fishing boat home.',
+    heroArt: 'A young lighthouse keeper in a yellow raincoat and blue scarf, carrying a short brass-handled knife',
+    bossArt: 'An imposing sea creature with dark blue scales and a coral crown',
+    places: ['Old Harbor', 'Submerged Ruins', 'Lighthouse Summit'] },
+  { title: 'The Moonlit Forest', hero: 'Aya', boss: 'The Shadowvine King', item: 'moonlight seeds',
+    story: 'Aya, an apprentice gardener, travels through a forest where the trees have stopped flowering. The Shadowvine King has taken a fragment of the moon. Aya must gather moonlight seeds and cross the mushroom village and treetop paths to reclaim it. In the end, she defeats the Shadowvine King, returns the fragment, and the forest blooms again.',
+    heroArt: 'An apprentice gardener in a green cloak with an orange hair clip and a wooden sword',
+    bossArt: 'An ancient tree creature crowned with purple vines, with a distinct trunk-shaped body',
+    places: ['Mushroom Village', 'Treetop Paths', 'Ancient Tree Core'] },
+  { title: 'The Lost Neon City', hero: 'Lei', boss: 'The Rogue Security Core', item: 'data chips',
+    story: 'Lei, a courier in a neon city, learns that the central network has shut down. His sister is trapped in a hospital running on emergency power. He must recover data chips, cross the night market, waterways, and elevated railway, and defeat the Rogue Security Core. Finally, Lei restores the power grid, and the hospital is safe.',
+    heroArt: 'A courier wearing a blue motorcycle jacket and an orange helmet, carrying a compact energy baton',
+    bossArt: 'An armored security machine with a luminous central eye and a compact, readable silhouette',
+    places: ['Night Market', 'City Waterways', 'Elevated Railway', 'Central Server Room'] },
+]
+
+export function getPromptTemplates(language: 'zh-CN' | 'en'): PromptTemplate[] {
+  if (language !== 'en') return PROMPT_TEMPLATES
+  return ENGLISH_STARTERS.map((item, index) => ({
+    id: PROMPT_TEMPLATES[index].id, name: `${item.title} · ${item.places.length} levels`, themeName: item.title, levelCount: item.places.length,
+    prompt: `游戏标题：${item.title}\n世界观与故事：${item.story}\n背景故事：${item.story}\n主角姓名（可选）：${item.hero}\n对手姓名（可选）：${item.boss}\n整体像素风格：Cohesive bright 16-bit side-view pixel art with crisp silhouettes and consistent character proportions.\n主角 / Hero：${item.heroArt}; one full-body side-view character, isolated, no background.\nBOSS：${item.bossArt}; one full-body side-view boss, isolated, no background.\n收集品：One isolated ${item.item.replace(/s$/, '')} pickup, no background.\n\n${item.places.map((name, i) => `关卡 ${i + 1}：${name}\n背景：A layered side-view pixel environment depicting ${name}; leave the movement area clear.\n平台类型：${/Submerged|Underground River|Waterways/.test(name) ? 'water' : /Sky|Treetop/.test(name) ? 'air' : 'ground'}\n敌人数：${Math.min(6, i + 3)}\n收集品数：${i + 2}`).join('\n\n')}`,
+  }))
+}
+
 export const PROMPT_TEMPLATES: PromptTemplate[] = [{
   id: 'pixel-world-odyssey',
   name: '龙之城堡：余烬王冠 · 5 关完整冒险',

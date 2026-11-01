@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Button, Input, Select, Space, Alert, message } from 'antd'
+import { Button, Input, Select, Space, Alert, Popconfirm, message } from 'antd'
 import { useGameStore } from '@/lib/store'
 import { isPresetTheme } from '@/lib/theme-utils'
 import { ActionButtons, AgentStudio, AssetPlanner, ModelSelector, ThemeCustomizer } from './ui/index'
@@ -20,7 +20,7 @@ import {
 } from '@/lib/asset-catalog'
 import { cacheAssetUrl, cacheSpecAssets, hydrateSpecAssets, removeCachedAssetClips, stripLargeAssetUrls } from '@/lib/asset-db'
 import { prepareAnimationReferenceImages } from '@/lib/animation-references'
-import { createGenerationJobs, runGenerationJobs, type AssetGenerationJob } from '@/lib/asset-generation-queue'
+import { createGenerationJobs, resetVisualAssetsForGeneration, runGenerationJobs, type AssetGenerationJob } from '@/lib/asset-generation-queue'
 import { ASSET_TYPES } from '@/types'
 import { BUILTIN_ART, buildBuiltinGameSpec } from '@/lib/builtin-game'
 import { DEFAULT_COMFY_SETTINGS, discoverComfyCheckpoints, generateComfyImage, type ComfySettings } from '@/lib/comfyui-client'
@@ -46,6 +46,10 @@ import { sameSpecExceptSuggestions } from '@/lib/narrative-suggestions'
 import { preservePlanningMedia } from '@/lib/agents/draft-revision'
 import { normalizeGameSpec } from '@/lib/game-spec'
 import { mergeCompletedDraft } from '@/lib/completed-draft'
+import { normalizeCreationLanguage } from '@/lib/creation-language'
+import { translateUiText } from '@/lib/ui-locale'
+import {readTemplateAttributions} from '@/lib/template-attribution'
+import type {TemplateAttribution,TemplateReuseSelection} from '@/types'
 import { selectedInspirationTexts } from '@/configs/inspiration-packs'
 import type {
   AnimationClipPose,
@@ -56,6 +60,7 @@ import type {
   AssetDefinition,
   GameData,
   GameSpec,
+  CreationLanguage,
   GameTheme,
   GenerateImageRequest,
   ProviderId,
@@ -92,6 +97,8 @@ export interface SideMenuProps {
 const EMPTY_GENERATING = Object.fromEntries(ASSET_TYPES.map((type) => [type, false])) as RegeneratingImages
 const ALL_GENERATING = Object.fromEntries(ASSET_TYPES.map((type) => [type, true])) as RegeneratingImages
 const DRAFT_KEY = 'pixel-world-v3-generation-draft'
+const DRAFT_FIELDS_KEY = 'pixel-world-current-fields'
+const DRAFT_ACTIVE_KEY = 'pixel-world-current-draft-generated'
 const DRAFT_PROJECT_ID = 'active-draft'
 
 interface SavedDraft {
@@ -148,6 +155,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
   } = useGameStore()
   const [customThemeName, setCustomThemeName] = useState('')
   const [customStory, setCustomStory] = useState('')
+  const [creationLanguage, setCreationLanguage] = useState<CreationLanguage>('zh-CN')
   const [isThemeCreated, setIsThemeCreated] = useState(false)
   const [optimizedSpec, setOptimizedSpec] = useState<GameSpec | null>(null)
   const [planningLabel, setPlanningLabel] = useState('尚未补全')
@@ -171,9 +179,11 @@ const SideMenu: React.FC<SideMenuProps> = ({
   const [generationProgress, setGenerationProgress] = useState(0)
   const [isTesting, setIsTesting] = useState(false)
   const [savedDraft, setSavedDraft] = useState<SavedDraft | null>(null)
+  const [briefLoaded, setBriefLoaded] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const optimizedInputRef = useRef<{ source: string; generated: string } | null>(null)
   const briefRevisionRef = useRef(0)
+  const templateSourcesRef=useRef<TemplateAttribution[]>([])
   const [inputRevision, setInputRevision] = useState(0)
   const [agentReviewTarget, setAgentReviewTarget] = useState<HTMLDivElement | null>(null)
 
@@ -222,25 +232,59 @@ const SideMenu: React.FC<SideMenuProps> = ({
   useEffect(() => { onComfySettingsChange?.({ endpoint: comfyEndpoint, checkpoint: comfyCheckpoint }) }, [comfyEndpoint, comfyCheckpoint, onComfySettingsChange])
 
   useEffect(() => {
-    // Opening the creator always starts from an empty field skeleton. A previous
-    // generation draft stays available, but it must never overwrite a new idea.
+    // A fresh visit starts empty; a browser refresh resumes the same draft.
     setCustomPrompt(buildStructuredPrompt(levelCount))
     setCustomThemeName('')
     setCustomStory('')
     setOptimizedSpec(null)
     try {
+      const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
+      const reload = navigation?.type === 'reload'
+      const fieldRecord = sessionStorage.getItem(DRAFT_FIELDS_KEY)
+      const fields = fieldRecord ? JSON.parse(fieldRecord) as { name: string; story: string; prompt: string; levelCount: number; creationLanguage?: CreationLanguage; templateSources?:TemplateAttribution[] } : null
+      let restoredSpec = false
       const raw = localStorage.getItem(DRAFT_KEY)
       if (raw) {
         const draft = JSON.parse(raw) as SavedDraft
-        if (draft.spec?.version === 3) setSavedDraft(draft)
+        if (draft.spec?.version === 3) {
+          const matchesActive = !fields || (fields.name === (draft.name || draft.spec.title) && fields.story === (draft.story || draft.spec.backgroundStory || '') && normalizeCreationLanguage(fields.creationLanguage) === normalizeCreationLanguage(draft.spec.creationLanguage))
+          if (reload && sessionStorage.getItem(DRAFT_ACTIVE_KEY) === 'true' && matchesActive) {
+            restoredSpec = true
+            const prompt = draft.prompt?.trim() || buildStructuredPrompt(draft.spec.levels.length)
+            setCustomThemeName(draft.name || draft.spec.title)
+            setCustomStory(draft.story || draft.spec.backgroundStory || '')
+            setCustomPrompt(prompt)
+            setLevelCount(draft.spec.levels.length)
+            setOptimizedSpec(draft.spec)
+            templateSourcesRef.current=readTemplateAttributions(draft.spec.templateSources) || []
+            setCreationLanguage(normalizeCreationLanguage(draft.spec.creationLanguage))
+            optimizedInputRef.current = typeof draft.sourcePrompt === 'string' && draft.sourcePrompt !== prompt
+              ? { source: draft.sourcePrompt, generated: prompt } : null
+            onStageChange('agents')
+            void hydrateSpecAssets(DRAFT_PROJECT_ID, draft.spec).then(setOptimizedSpec).catch(() => setSavedDraft(draft))
+          } else setSavedDraft(draft)
+        }
+      }
+      if (reload && !restoredSpec && fields) {
+        setCustomThemeName(fields.name)
+        setCustomStory(fields.story)
+        setCustomPrompt(fields.prompt || buildStructuredPrompt(fields.levelCount))
+        setLevelCount(fields.levelCount || levelCount)
+        setCreationLanguage(normalizeCreationLanguage(fields.creationLanguage))
+        templateSourcesRef.current=readTemplateAttributions(fields.templateSources) || []
       }
     } catch {
       // Ignore malformed drafts.
-    }
+    } finally { setBriefLoaded(true) }
   }, [])
+
+  useEffect(() => {
+    if (briefLoaded) sessionStorage.setItem(DRAFT_FIELDS_KEY, JSON.stringify({ name: customThemeName, story: customStory, prompt: customPrompt, levelCount, creationLanguage,templateSources:templateSourcesRef.current }))
+  }, [briefLoaded, customThemeName, customStory, customPrompt, levelCount, creationLanguage,inputRevision])
 
   const restoreSavedDraft = () => {
     if (!savedDraft) return
+    sessionStorage.setItem(DRAFT_ACTIVE_KEY, 'true')
     invalidateBrief()
     briefRevisionRef.current += 1
     setInputRevision((revision) => revision + 1)
@@ -253,6 +297,8 @@ const SideMenu: React.FC<SideMenuProps> = ({
     setCustomPrompt(restoredPrompt)
     setLevelCount(savedDraft.spec.levels.length)
     setOptimizedSpec(savedDraft.spec)
+    templateSourcesRef.current=readTemplateAttributions(savedDraft.spec.templateSources) || []
+    setCreationLanguage(normalizeCreationLanguage(savedDraft.spec.creationLanguage))
     setAgentApproved(false)
     const restoredRevision = briefRevisionRef.current
     void hydrateSpecAssets(DRAFT_PROJECT_ID, savedDraft.spec).then((hydrated) => {
@@ -267,15 +313,36 @@ const SideMenu: React.FC<SideMenuProps> = ({
   const persistDraft = (spec: GameSpec, prompt = customPrompt) => {
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({ name: customThemeName, story: customStory, prompt, sourcePrompt: optimizedInputRef.current?.source, spec: stripLargeAssetUrls(spec) }))
+      sessionStorage.setItem(DRAFT_ACTIVE_KEY, 'true')
     } catch {
       // Large image URLs are also cached by IndexedDB; draft failure must not interrupt generation.
     }
   }
 
   const updateSpec = (spec: GameSpec, prompt?: string) => {
+    spec={...spec,templateSources:templateSourcesRef.current.length?templateSourcesRef.current:spec.templateSources}
     setOptimizedSpec(spec)
     setPreviewStale(true)
     persistDraft(spec, prompt)
+  }
+
+  const applyTemplateSelection=(selection:TemplateReuseSelection)=>{
+    if(isAgentBusy || isOptimizing || isLoading || optimizationInFlight.current)return false
+    const sources=readTemplateAttributions(selection.templateSources)
+    if(!sources || !['zh-CN','en'].includes(selection.language) || !Number.isInteger(selection.levelCount) || selection.levelCount<1 || selection.levelCount>10)return false
+    sessionStorage.setItem(DRAFT_ACTIVE_KEY,'false')
+    invalidateBrief();briefRevisionRef.current+=1;setInputRevision(value=>value+1)
+    templateSourcesRef.current=sources;optimizedInputRef.current=null
+    setCreationLanguage(selection.language);setCustomThemeName(selection.title);setCustomStory(selection.story)
+    setLevelCount(selection.levelCount);setCustomPrompt(selection.prompt);setOptimizedSpec(selection.spec)
+    setAgentApproved(false);setPlanningLabel(selection.spec?'草案待检查':'尚未补全')
+    if(selection.spec){
+      try{
+        localStorage.setItem(DRAFT_KEY,JSON.stringify({name:selection.title,story:selection.story,prompt:selection.prompt,spec:stripLargeAssetUrls(selection.spec)}))
+        sessionStorage.setItem(DRAFT_ACTIVE_KEY,'true')
+      }catch{/* Keep the visible input even if local storage is full. */}
+    }
+    return true
   }
 
   const resetGeneratedPromptOnBriefEdit = () => {
@@ -285,7 +352,9 @@ const SideMenu: React.FC<SideMenuProps> = ({
   }
 
   const applyInspiration = (target: InspirationTarget, text: string) => {
+    if (creationLanguage === 'en') text = translateUiText(text) || text
     if (target === 'story' && customStory.includes(text)) return void message.info('这条灵感已在故事中。')
+    sessionStorage.setItem(DRAFT_ACTIVE_KEY, 'false')
     invalidateBrief()
     briefRevisionRef.current += 1
     setInputRevision((revision) => revision + 1)
@@ -384,7 +453,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
     try {
       const response = await fetch('/api/optimize-prompt', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(70_000),
-        body: JSON.stringify({ prompt, story, theme: projectName, levelCount,
+        body: JSON.stringify({ prompt, story, theme: projectName, levelCount, creationLanguage,
           ...(cloudOptimizer ? { provider: connection.provider, model: connection.model, apiKey: connection.apiKey.trim() } : {}),
         }),
       })
@@ -407,7 +476,8 @@ const SideMenu: React.FC<SideMenuProps> = ({
             modelWarning = 'WebLLM 尚未准备完成，已使用稳定的本地草案。先在文字策划中准备浏览器模型，再进行轻量灵感补全。'
           } else {
             try {
-              const patch = await createWebLlmCreativePatch(connection.model, projectName, story, selectedInspirationTexts(sourceBrief))
+              const inspirations = [...new Set([...selectedInspirationTexts(sourceBrief), ...[...sourceBrief.matchAll(/【已选灵感】([^\n]+)/g)].map(match => match[1].replace(/[。]+$/, '').trim())])]
+              const patch = await createWebLlmCreativePatch(connection.model, projectName, story, inspirations, creationLanguage)
               spec = preserveExplicitPromptFields(applyWebLlmCreativePatch(spec, patch), spec, sourceBrief)
               usedModel = true
               modelWarning = 'WebLLM 已补充世界、主角与画风方向；关卡和素材规格由本地规则稳定生成。'
@@ -431,6 +501,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
               sourcePrompt: sourceBrief,
               projectName,
               levelCount,
+              creationLanguage,
               baseSpec: stripLargeAssetUrls(spec),
               artifacts: {},
             }
@@ -472,7 +543,9 @@ const SideMenu: React.FC<SideMenuProps> = ({
           : /尚未填写 API Key/.test(modelWarning) ? '已用内置规则生成草案；所选服务缺少 Key'
             : modelWarning ? '文字模型未完成补全，已保留当前草案'
               : '已用内置规则生成本地草案',
-        description: '你的名称、故事和手填要求已保留。检查草案后仍需你批准；本次没有生成图片。',
+        description: creationLanguage === 'en' && !usedModel && (story.match(/[\u3400-\u9fff]/g)?.length || 0) >= 8
+          ? '英文规则草案已生成。原始中文要求已保留，但复杂剧情和结局仍需文字模型翻译，请在批准前核对。'
+          : '你的名称、故事和手填要求已保留。检查草案后仍需你批准；本次没有生成图片。',
         detail: modelWarning || undefined,
       })
       if (!quiet) {
@@ -530,7 +603,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
     const generatedAsset = result?.data?.asset as AssetDefinition | undefined
     const generatedClip = animationPose ? normalizeAnimationSpec(generatedAsset?.animation).clips?.[animationPose] : undefined
     if (!response.ok || !result?.success || (!animationPose && !generatedAsset?.url) || (animationPose && !generatedClip?.url)) {
-      throw new Error(formatGenerationError(result?.error || `HTTP ${response.status}`))
+      throw Object.assign(new Error(formatGenerationError(result?.error || `HTTP ${response.status}`)), { status: response.status })
     }
     if (!generatedAsset) throw new Error('The image API returned no asset data.')
     if (!animationPose) return generatedAsset
@@ -577,7 +650,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
     }
   }
 
-  const generateSelectedAssets = async () => {
+  const generateSelectedAssets = async (regenerateAll = false) => {
     setImageFeedback(null)
     if (abortRef.current) return void message.info('素材正在生成，请等待完成或先取消。')
     if (!agentApproved) return void reportImageError('请先检查草案，并点击“批准规格并开放生图”。')
@@ -588,6 +661,10 @@ const SideMenu: React.FC<SideMenuProps> = ({
     let baseSpec = optimizedSpec
     if (!baseSpec || baseSpec.levels.length !== levelCount) baseSpec = await optimizePrompt(true)
     if (!baseSpec) return void reportImageError('请先点击“一键优化提示词”建立 V3 素材规划。')
+    if (regenerateAll) {
+      baseSpec = resetVisualAssetsForGeneration(baseSpec)
+      updateSpec(baseSpec)
+    }
     if (imageSource === 'comfy') {
       if (!comfyCheckpoint) return void reportImageError('请先检测并选择 ComfyUI 检查点。')
       const builtIn = buildBuiltinGameSpec(baseSpec)
@@ -628,6 +705,8 @@ const SideMenu: React.FC<SideMenuProps> = ({
     abortRef.current = controller
     const workingAssets = new Map(baseSpec.assets.map((asset) => [asset.id, asset]))
     let finished = 0
+    const builtinFallbacks = new Set<string>()
+    let providerUnavailable = false
 
     const updateAsset = (id: string, patch: Partial<AssetDefinition>) => {
       const working = workingAssets.get(id)
@@ -663,14 +742,36 @@ const SideMenu: React.FC<SideMenuProps> = ({
           ? replaceAnimationClip(current, job.pose, updatedClip).animation!.clips!
           : { ...animation.clips, [job.pose]: updatedClip }
         const statuses = Object.values(clips).filter(clip => clip?.enabled !== false).map(clip => clip?.status)
+        const failedClip = Object.values(clips).find(clip => clip?.status === 'failed')
         const next = { ...current, ...patch, animation: { ...animation, clips }, url: clips.idle?.url }
         next.status = statuses.includes('generating') ? 'generating' : statuses.includes('failed') ? 'failed' : statuses.includes('cancelled') ? 'cancelled' : animationIsComplete(next) ? 'success' : 'pending'
+        if (failedClip) next.error = failedClip.error
         updateAsset(job.assetId, next)
+      }
+      const useBuiltinFallback = async (job: AssetGenerationJob) => {
+        const current = workingAssets.get(job.assetId)!
+        if (!job.pose) {
+          const liveSpec = { ...baseSpec!, assets: baseSpec!.assets.map(asset => workingAssets.get(asset.id) || asset) }
+          const builtIn = buildBuiltinGameSpec(liveSpec).assets.find(asset => asset.id === job.assetId)
+          if (!builtIn?.url) throw new Error(`缺少 ${current.title} 的内置素材。`)
+          await cacheAssetUrl(DRAFT_PROJECT_ID, job.assetId, builtIn.url)
+          patchJob(job, { url: builtIn.url, source: 'builtin-fallback', status: 'success', error: undefined })
+        } else {
+          const animation = normalizeAnimationSpec(current.animation)
+          const source = animation.clips?.idle?.url || BUILTIN_ART[current.category]
+          if (!source) throw new Error(`缺少 ${current.title} 的内置动作素材。`)
+          const strip = await repeatImageAsStrip(source, animation.clips?.[job.pose]?.frameCount || 1)
+          await cacheAssetUrl(DRAFT_PROJECT_ID, `${job.assetId}:clip:${job.pose}`, strip)
+          if (job.pose === 'idle') await cacheAssetUrl(DRAFT_PROJECT_ID, job.assetId, strip)
+          patchJob(job, { source: 'builtin-fallback', error: undefined }, { url: strip, status: 'success', error: undefined, source: 'builtin-fallback' })
+        }
+        builtinFallbacks.add(job.id)
       }
       await runGenerationJobs(jobs, concurrency, async (job) => {
         const current = workingAssets.get(job.assetId)!
         patchJob(job, { status: 'generating', error: undefined }, { status: 'generating', error: undefined })
         try {
+          if (providerUnavailable) { await useBuiltinFallback(job); return }
           const liveSpec = { ...baseSpec!, assets: baseSpec!.assets.map(asset => workingAssets.get(asset.id) || asset) }
           const generated = await requestAsset(liveSpec, current, controller.signal, job.pose, generationTarget)
           if (job.pose) {
@@ -678,13 +779,17 @@ const SideMenu: React.FC<SideMenuProps> = ({
             if (job.pose === 'idle' && current.animation?.clips?.idle?.url && current.animation.clips.idle.url !== clip.url) await removeCachedAssetClips(DRAFT_PROJECT_ID, job.assetId)
             if (clip.url) await cacheAssetUrl(DRAFT_PROJECT_ID, `${job.assetId}:clip:${job.pose}`, clip.url)
             if (job.pose === 'idle' && clip.url) await cacheAssetUrl(DRAFT_PROJECT_ID, job.assetId, clip.url)
-            patchJob(job, { error: undefined }, clip)
+            patchJob(job, { error: undefined, source: undefined }, { ...clip, source: undefined })
           } else {
             if (generated.url) await cacheAssetUrl(DRAFT_PROJECT_ID, job.assetId, generated.url)
-            patchJob(job, { ...generated, status: 'success', error: undefined })
+            patchJob(job, { ...generated, source: undefined, status: 'success', error: undefined })
           }
         } catch (error) {
           const cancelled = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
+          if (!cancelled) {
+            if ((error as { status?: number }).status !== 422) providerUnavailable = true
+            try { await useBuiltinFallback(job); return } catch { /* Surface a genuine fallback failure. */ }
+          }
           const detail = cancelled ? '生成已取消。' : error instanceof Error ? error.message : '生成失败。'
           patchJob(job, { error: detail, status: cancelled ? 'cancelled' : 'failed' }, { status: cancelled ? 'cancelled' : 'failed', error: detail })
           throw error
@@ -720,7 +825,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
       updateSpec(finalSpec)
       setPreviewStale(false)
       const failures = finalAssets.filter((asset) => asset.status === 'failed').length
-      setImageFeedback({ tone: failures || controller.signal.aborted ? 'warning' : 'success', title: failures ? `${failures} 个素材需要处理` : controller.signal.aborted ? '生成已停止' : '素材制作完成', description: failures ? '成功素材已保留；在右栏查看失败的素材或动作并单独重试。' : '已有结果保留在右栏，可以检查、试玩和导出。' })
+      setImageFeedback({ tone: failures || controller.signal.aborted || builtinFallbacks.size ? 'warning' : 'success', title: failures ? `${failures} 个素材需要处理` : controller.signal.aborted ? '生成已停止' : builtinFallbacks.size ? '游戏已完成，部分画面自动补齐' : '素材制作完成', description: failures ? '成功素材已保留；在右栏查看失败的素材或动作并单独重试。' : builtinFallbacks.size ? `${builtinFallbacks.size}/${totalJobs} 个图片任务使用内置素材或已有角色姿势补齐；模型生成的图片已保留，可继续试玩和导出。` : '已有结果保留在右栏，可以检查、试玩和导出。' })
       if (failures) message.warning(`已保留成功素材；${failures} 个任务失败，可在素材卡片中重试。`)
       else if (controller.signal.aborted) message.info('生成已停止，已完成素材全部保留。')
       else message.success('已选择素材全部生成完成，可以开始游戏或导出。')
@@ -806,7 +911,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
           <button className={`studio-step-assets${activeStage === 'assets' ? ' is-active' : ''}${currentGameCreated ? ' is-complete' : ''}`} aria-current={activeStage === 'assets' ? 'step' : undefined} onClick={() => onStageChange('assets')}><b>03</b><span>做素材<small>{currentGameCreated ? '游戏已创建' : !planningReady ? '先完成策划' : '选择来源并制作'}</small></span></button>
         </nav>
         <div className={`studio-control-stage-intro studio-control-stage-${activeStage}`}>
-          <span>第 {activeStage === 'idea' ? '1' : activeStage === 'agents' ? '2' : '3'} 步 · 当前操作</span>
+          <span>{`第 ${activeStage === 'idea' ? '1' : activeStage === 'agents' ? '2' : '3'} 步 · 当前操作`}</span>
         <h2>{activeStage === 'idea' ? '写故事' : activeStage === 'agents' ? 'AI 策划' : '做素材'}</h2>
           <p>{activeStage === 'idea' ? '先在中栏写下游戏名称与故事；完成后会进入策划。' : activeStage === 'agents' ? '补全草案，再到中栏确认；文字模型可选。' : '在这里选择图片来源，再到中栏制作素材。'}</p>
         </div>
@@ -817,6 +922,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
         </div>}
         <section id="agent-studio" className="studio-control-content section-anchor" hidden={activeStage !== 'agents'}>
           <div className="agent-studio-shell"><AgentStudio
+            creationLanguage={creationLanguage}
             embedded
             projectId={DRAFT_PROJECT_ID}
             sourcePrompt={composeProjectPrompt(customThemeName, customStory, customPrompt === optimizedInputRef.current?.generated ? optimizedInputRef.current.source : customPrompt, levelCount)}
@@ -874,7 +980,8 @@ const SideMenu: React.FC<SideMenuProps> = ({
           {planningReady && <div className="studio-rail-actions">
             {imageSource === 'builtin' && <Button type={currentGameCreated ? 'default' : 'primary'} block size="large" disabled={!agentApproved} onClick={() => { void createBuiltinGame().catch((error: unknown) => reportImageError(error instanceof Error ? error.message : '创建游戏失败。')) }}>用内置素材创建游戏</Button>}
             {imageSource === 'upload' && <Button block size="large" type="primary" disabled={!agentApproved} onClick={() => { void createUploadedGame().catch((error: unknown) => reportImageError(error instanceof Error ? error.message : '创建游戏失败。')) }}>用已上传素材创建游戏</Button>}
-            <ActionButtons isThemeCreated={currentGameCreated} isLoading={isLoading} selectedTheme={isPresetTheme(selectedTheme) ? '' : selectedTheme} customPrompt={customPrompt || (optimizedSpec ? serializeGameSpec(optimizedSpec) : '')} customThemeName={customThemeName || optimizedSpec?.title || ''} apiKey={imageSource === 'custom' ? customImage.apiKey : apiKey} allowWithoutApiKey={imageSource !== 'byok' && imageSource !== 'custom'} showCreateButton={imageSource !== 'builtin' && imageSource !== 'upload'} onCreateTheme={() => { void generateSelectedAssets() }} onStartGame={handleStartGame} />
+          <ActionButtons isThemeCreated={currentGameCreated} isLoading={isLoading} selectedTheme={isPresetTheme(selectedTheme) ? '' : selectedTheme} customPrompt={customPrompt || (optimizedSpec ? serializeGameSpec(optimizedSpec) : '')} customThemeName={customThemeName || optimizedSpec?.title || ''} apiKey={imageSource === 'custom' ? customImage.apiKey : apiKey} allowWithoutApiKey={imageSource !== 'byok' && imageSource !== 'custom'} showCreateButton={imageSource !== 'builtin' && imageSource !== 'upload'} onCreateTheme={() => { void generateSelectedAssets() }} onStartGame={handleStartGame} />
+          {agentApproved && optimizedSpec && (imageSource === 'byok' || imageSource === 'custom') && <Popconfirm title="全部用当前图片模型重新生成？" description={`将重新请求 ${createGenerationJobs(resetVisualAssetsForGeneration(optimizedSpec).assets).length} 张图片；已有上传和生成图会被替换，并可能产生费用。`} okText="确认重新生成" cancelText="取消" onConfirm={() => { void generateSelectedAssets(true) }}><Button disabled={isLoading}>全部用当前模型重生成</Button></Popconfirm>}
           </div>}
         </section>
       </div>
@@ -890,11 +997,25 @@ const SideMenu: React.FC<SideMenuProps> = ({
       {activeStage === 'idea' && <section id="game-idea" className="studio-section prompt-section section-anchor studio-workspace-editor">
         <StageHeading title="名称与故事" />
         <ThemeCustomizer
-          inspiration={<InspirationLibrary story={customStory} prompt={customPrompt} onApply={applyInspiration} />}
-          customThemeName={customThemeName} onThemeNameChange={(value) => { invalidateBrief(); briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); resetGeneratedPromptOnBriefEdit(); setCustomThemeName(value); setOptimizedSpec(null); setAgentApproved(false) }}
-          customStory={customStory} onStoryChange={(value) => { invalidateBrief(); briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); resetGeneratedPromptOnBriefEdit(); setCustomStory(value); setOptimizedSpec(null); setAgentApproved(false) }}
-          customPrompt={customPrompt} onPromptChange={(value) => { invalidateBrief(); briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); optimizedInputRef.current = null; setCustomPrompt(value); setOptimizedSpec(null); setAgentApproved(false) }}
-          levelCount={levelCount} onLevelCountChange={(count) => { invalidateBrief(); briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); setLevelCount(count); setOptimizedSpec(null); setAgentApproved(false); if (isStructuredPromptBlank(customPrompt)) setCustomPrompt(buildStructuredPrompt(count)) }}
+          onTemplateApply={applyTemplateSelection}
+          templateSources={templateSourcesRef.current}
+          creationLanguage={creationLanguage}
+          onCreationLanguageChange={(language) => {
+            if (language === creationLanguage || isAgentBusy || isOptimizing || isLoading) return
+            sessionStorage.setItem(DRAFT_ACTIVE_KEY, 'false')
+            invalidateBrief()
+            briefRevisionRef.current += 1
+            setInputRevision((revision) => revision + 1)
+            resetGeneratedPromptOnBriefEdit()
+            setCreationLanguage(language)
+            setOptimizedSpec(null)
+            setAgentApproved(false)
+          }}
+          inspiration={<InspirationLibrary creationLanguage={creationLanguage} story={customStory} prompt={customPrompt} onApply={applyInspiration} />}
+          customThemeName={customThemeName} onThemeNameChange={(value) => { sessionStorage.setItem(DRAFT_ACTIVE_KEY, 'false'); invalidateBrief(); briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); resetGeneratedPromptOnBriefEdit(); setCustomThemeName(value); setOptimizedSpec(null); setAgentApproved(false) }}
+          customStory={customStory} onStoryChange={(value) => { sessionStorage.setItem(DRAFT_ACTIVE_KEY, 'false'); invalidateBrief(); briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); resetGeneratedPromptOnBriefEdit(); setCustomStory(value); setOptimizedSpec(null); setAgentApproved(false) }}
+          customPrompt={customPrompt} onPromptChange={(value) => { sessionStorage.setItem(DRAFT_ACTIVE_KEY, 'false'); invalidateBrief(); briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); optimizedInputRef.current = null; setCustomPrompt(value); setOptimizedSpec(null); setAgentApproved(false) }}
+          levelCount={levelCount} onLevelCountChange={(count) => { sessionStorage.setItem(DRAFT_ACTIVE_KEY, 'false'); invalidateBrief(); briefRevisionRef.current += 1; setInputRevision((revision) => revision + 1); setLevelCount(count); setOptimizedSpec(null); setAgentApproved(false); if (isStructuredPromptBlank(customPrompt)) setCustomPrompt(buildStructuredPrompt(count)) }}
           completionNotice={completionFeedback && <WorkflowNotice feedback={completionFeedback} />}
           onOptimizePrompt={() => { void optimizePrompt(false) }} isOptimizing={isOptimizing} isAgentBusy={isAgentBusy} optimizedSpec={optimizedSpec}
           onCompleteIdea={() => onStageChange('agents')}

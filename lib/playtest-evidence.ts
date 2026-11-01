@@ -53,6 +53,10 @@ export function playtestCoverage(spec: GameSpec, value: unknown) {
   const missingObjectives = expected.filter(id => !evidence?.completedObjectives.includes(id))
   const complete = Boolean(evidence && spec.narrative && !missingLevels.length && !missingObjectives.length && evidence.openingTriggered && evidence.endingTriggered)
   return { status: complete ? 'observed-complete' : evidence ? 'observed-partial' : 'not-tested', evidence, missingLevels, missingObjectives,
-    summary: complete ? `本浏览器已记录 ${spec.levels.length} 关的任务、出口及结局触发。默认难度、操作手感、存档恢复和离线导出仍需另行确认。` : evidence ? `已试玩 ${evidence.enteredLevels.length} 关，完成 ${evidence.completedLevels.length}/${spec.levels.length} 关；尚未记录全部任务和结局。` : '尚无此版本的真实试玩记录；这里只能检查规格，不能确认实际通关。',
+    summary: spec.creationLanguage === 'en'
+      ? complete ? `This browser recorded the objectives, exits and ending across ${spec.levels.length} levels. Default difficulty, controls, save restoration and the offline export still require separate verification.`
+        : evidence ? `${evidence.enteredLevels.length} levels entered; ${evidence.completedLevels.length}/${spec.levels.length} levels completed. Not all objectives and the ending have been recorded.`
+          : 'No actual playtest record is available for this version. These checks assess the specification and do not confirm that the game can be completed.'
+      : complete ? `本浏览器已记录 ${spec.levels.length} 关的任务、出口及结局触发。默认难度、操作手感、存档恢复和离线导出仍需另行确认。` : evidence ? `已试玩 ${evidence.enteredLevels.length} 关，完成 ${evidence.completedLevels.length}/${spec.levels.length} 关；尚未记录全部任务和结局。` : '尚无此版本的真实试玩记录；这里只能检查规格，不能确认实际通关。',
   }
 }

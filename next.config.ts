@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  ...(process.env.PIXEL_WORLD_PREVIEW_DIST ? { distDir: process.env.PIXEL_WORLD_PREVIEW_DIST } : {}),
   /* config options here */
   async rewrites() {
     return [

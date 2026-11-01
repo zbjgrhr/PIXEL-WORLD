@@ -3,8 +3,9 @@ import {
   createFallbackGameSpec,
   serializeGameSpec,
 } from '@/lib/game-spec'
-import type { GameSpec, ProviderId } from '@/types'
-import { PROMPT_TEMPLATES } from '@/configs/prompt-templates'
+import type { GameSpec, ProviderId, CreationLanguage } from '@/types'
+import { normalizeCreationLanguage, creationLanguageInstruction, assertEnglishProse } from '@/lib/creation-language'
+import { getPromptTemplates } from '@/configs/prompt-templates'
 import { apiKeyHasUnsupportedCharacters, normalizeApiKey } from '@/lib/api-key'
 import { isStructuredPromptBlank } from '@/lib/asset-catalog'
 import { mergeProjectBrief } from '@/lib/project-brief'
@@ -13,6 +14,7 @@ import { responseText, type ChatPayload } from '@/lib/agents/execution'
 import { separateStoryIntroduction } from '@/lib/story-introduction'
 
 interface OptimizeRequest {
+  creationLanguage?: CreationLanguage
   prompt?: string
   theme?: string
   story?: string
@@ -46,8 +48,13 @@ export function optimizerMessages(prompt: string, fallback: GameSpec): Array<{ r
   const story = fallback.narrative?.source.originalStory.split('【已选灵感】')[0].trim() || ''
   const inspirations = [...prompt.matchAll(/【已选灵感】([^\n]+)/g)].map(match => match[1].trim()).slice(0, 5)
   const fields = compactPlayerFields(prompt)
+  const system = SYSTEM_PROMPT.replace('Write player-facing story in natural Chinese.', creationLanguageInstruction(fallback.creationLanguage))
+    .replace('If the story already has a completed ending, do not rewrite its opening or ending; propose at most two genuinely useful narrative improvements, preferably a missing cause or boss relationship.',
+      fallback.creationLanguage === 'en' && /[\u3400-\u9fff]/.test(story)
+        ? 'Translate the source brief into English narration, retaining its stated characters, events, relationships and ending. Preserve meaning rather than copying source-language wording. Do not invent a different outcome.'
+        : 'If the story already has a completed ending, do not rewrite its opening or ending; propose at most two genuinely useful narrative improvements, preferably a missing cause or boss relationship.')
   return [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: system },
     { role: 'user', content: [
       `游戏名称：${fallback.title.slice(0, 160)}`,
       `玩家故事：${compactStory(story)}`,
@@ -85,14 +92,15 @@ export function curateOptimizerCandidate(value: unknown, fallback: GameSpec): un
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value
   const candidate = { ...(value as Record<string, unknown>) }
   const story = fallback.narrative?.source.originalStory.split('【已选灵感】')[0] || ''
-  const hasPlayerEnding = Boolean(separateStoryIntroduction(story).ending)
+  const translatingBrief = fallback.creationLanguage === 'en' && /[\u3400-\u9fff]/.test(story)
+  const hasPlayerEnding = !translatingBrief && Boolean(separateStoryIntroduction(story).ending)
   if (hasPlayerEnding) delete candidate.backgroundStory
   if (candidate.narrative && typeof candidate.narrative === 'object' && !Array.isArray(candidate.narrative)) {
     const proposed = candidate.narrative as Record<string, unknown>
     const allowed = hasPlayerEnding
       ? ['incitingIncident', 'bossRelation', 'conflict', 'motivation']
       : ['incitingIncident', 'motivation', 'bossRelation', 'conflict', 'opening', 'ending']
-    candidate.narrative = Object.fromEntries(allowed.filter(key => typeof proposed[key] === 'string' && String(proposed[key]).trim()).slice(0, hasPlayerEnding ? 2 : 4).map(key => [key, proposed[key]]))
+    candidate.narrative = Object.fromEntries(allowed.filter(key => typeof proposed[key] === 'string' && String(proposed[key]).trim()).slice(0, hasPlayerEnding ? 2 : translatingBrief ? 6 : 4).map(key => [key, proposed[key]]))
   }
   return candidate
 }
@@ -137,7 +145,9 @@ async function optimizeWithAi(
   const payload = await response.json() as ChatPayload
   const content = responseText(payload)
   if (!content) throw new Error('Prompt optimizer returned an empty response')
-  return curateOptimizerCandidate(extractJson(content), fallback)
+  const candidate = extractJson(content)
+  assertEnglishProse(candidate, fallback.creationLanguage)
+  return curateOptimizerCandidate(candidate, fallback)
 }
 
 export async function POST(request: NextRequest) {
@@ -152,7 +162,8 @@ export async function POST(request: NextRequest) {
       : submittedPrompt
     const prompt = mergeProjectBrief(basePrompt, body.theme?.trim() || '', story)
 
-    const fallback = createFallbackGameSpec(prompt, theme, levelCount)
+    const fallback = createFallbackGameSpec(prompt, theme, levelCount, normalizeCreationLanguage(body.creationLanguage))
+    const english = fallback.creationLanguage === 'en'
     const provider = body.provider || 'dashscope'
     const config = optimizerEndpoint(provider)
     const apiKey = config
@@ -168,7 +179,7 @@ export async function POST(request: NextRequest) {
     let spec = fallback
     let source: 'ai' | 'local' | 'template' = 'local'
     let warning: string | undefined
-    const knownTemplate = PROMPT_TEMPLATES.find((template) => template.prompt.trim() === submittedPrompt)
+    const knownTemplate = getPromptTemplates(normalizeCreationLanguage(body.creationLanguage)).find((template) => template.prompt.trim() === submittedPrompt)
 
     if (knownTemplate) {
       // The bundled template is already exhaustive and category-safe. Keeping it
@@ -182,17 +193,20 @@ export async function POST(request: NextRequest) {
         source = 'ai'
       } catch (error) {
         warning = error instanceof Error && /TimeoutError|AbortError/.test(error.name)
-          ? '文字模型在 60 秒内未完成补全，已保留可审核的本地草案。你可以继续制作，或换模型后重试。'
+          ? english ? 'The text model did not finish within 60 seconds. The reviewable English rule-based draft has been retained. Continue with it or try another model.' : '文字模型在 60 秒内未完成补全，已保留可审核的本地草案。你可以继续制作，或换模型后重试。'
           : error instanceof Error
-            ? `文字模型补全未完成，已保留可审核的本地草案：${error.message.slice(0, 180)}`
-            : '文字模型补全未完成，已保留可审核的本地草案。'
+            ? english ? `Text completion failed. The reviewable English rule-based draft has been retained: ${error.message.slice(0, 180)}` : `文字模型补全未完成，已保留可审核的本地草案：${error.message.slice(0, 180)}`
+            : english ? 'Text completion failed. The reviewable English rule-based draft has been retained.' : '文字模型补全未完成，已保留可审核的本地草案。'
       }
     } else {
       warning = config && !apiKey
-        ? '所选文字服务尚未填写 API Key，已生成可审核的本地草案。填写 Key 后可重新补全。'
-        : '已在本地整理游戏构想；选择文字 Agent 并运行后，会继续策划和评审。'
+        ? english ? 'No API key was supplied for the selected text service. An English rule-based draft is ready for review. Add a key to request AI completion.' : '所选文字服务尚未填写 API Key，已生成可审核的本地草案。填写 Key 后可重新补全。'
+        : english ? 'The idea has been organized with built-in rules. Select and run a text Agent to continue planning and review.' : '已在本地整理游戏构想；选择文字 Agent 并运行后，会继续策划和评审。'
     }
 
+    if (source !== 'ai' && fallback.creationLanguage === 'en' && (story.match(/[\u3400-\u9fff]/g)?.length || 0) >= 8) {
+      warning = `${warning || ''} Your original Chinese brief has been retained. Complex plot details and the ending still require a text model for translation; review them before approving.`.trim()
+    }
     return NextResponse.json({
       success: true,
       data: {

@@ -121,6 +121,8 @@ export function migrateGameData(input: unknown, themeId = 'Pixel World'): GameDa
     enemySpawns: Array.isArray(level.enemySpawns) ? level.enemySpawns : [],
     collectibleSpawns: Array.isArray(level.collectibleSpawns) ? level.collectibleSpawns : [],
     bossSpawn: level.bossSpawn,
+    ...(level.layoutVersion === 2 && Number.isFinite(level.worldWidth) && level.worldWidth! >= 1120 && level.worldWidth! <= 10000
+      ? { layoutVersion: 2, worldWidth: level.worldWidth, combatStartX: level.combatStartX } : {}),
   }))
   return {
     ...data,

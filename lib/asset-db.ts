@@ -30,7 +30,7 @@ function openDatabase(): Promise<IDBDatabase | null> {
 }
 
 export async function cacheAssetUrl(projectId: string, assetId: string, url: string): Promise<void> {
-  if (!url) return
+  if (!url || url.startsWith('cached-image:')) return
   const database = await openDatabase()
   if (!database) return
   await new Promise<void>((resolve, reject) => {
@@ -91,6 +91,11 @@ export async function loadProjectAssets(projectId: string): Promise<Record<strin
 
 export async function hydrateSpecAssets(projectId: string, spec: GameSpec): Promise<GameSpec> {
   const urls = await loadProjectAssets(projectId)
+  return hydrateSpecAssetsWithUrls(spec, urls)
+}
+
+export function hydrateSpecAssetsWithUrls(spec: GameSpec, urls: Record<string, string>): GameSpec {
+  const resolve = (url: string | undefined, key: string) => url === `cached-image:${key}` ? urls[key] : url
   return {
     ...spec,
     assets: spec.assets.map((asset) => {
@@ -98,16 +103,16 @@ export async function hydrateSpecAssets(projectId: string, spec: GameSpec): Prom
       if (animation?.layoutVersion === 3 && animation.clips) {
         const clips = { ...animation.clips }
         for (const pose of animationClipPoses(asset)) {
-          const cachedUrl = urls[`${asset.id}:clip:${pose}`]
           const previous = clips[pose]!
-          const url = previous.url || cachedUrl
+          const url = resolve(previous.url, `${asset.id}:clip:${pose}`)
           const invalid = ['failed', 'cancelled', 'generating'].includes(previous.status)
           clips[pose] = { ...previous, url, status: invalid ? previous.status : url ? 'success' : 'pending' }
         }
         const complete = animationClipPoses(asset).every((pose) => Boolean(clips[pose]?.url) && clips[pose]?.status === 'success')
-        return { ...asset, animation: { ...animation, clips }, url: clips.idle?.url || asset.url || urls[asset.id], status: complete ? 'success' : asset.status, error: complete ? undefined : asset.error }
+        return { ...asset, animation: { ...animation, clips }, url: clips.idle?.url || resolve(asset.url, asset.id), status: complete ? 'success' : 'pending', error: complete ? undefined : asset.error }
       }
-      return asset.url || !urls[asset.id] ? asset : { ...asset, url: urls[asset.id], status: 'success', error: undefined }
+      const url = resolve(asset.url, asset.id)
+      return url ? { ...asset, url, status: 'success', error: undefined } : { ...asset, url: undefined, status: asset.kind === 'image' ? 'pending' : asset.status }
     }),
   }
 }
@@ -116,12 +121,12 @@ export function stripLargeAssetUrls(spec: GameSpec): GameSpec {
   return {
     ...spec,
     assets: spec.assets.map((asset) => {
-      const strip = (url?: string) => url?.startsWith('data:') || url?.startsWith('blob:') ? undefined : url
+      const strip = (url: string | undefined, key: string) => url?.startsWith('data:') || url?.startsWith('blob:') ? `cached-image:${key}` : url
       const animation = asset.animation?.clips ? {
         ...asset.animation,
-        clips: Object.fromEntries(Object.entries(asset.animation.clips).map(([pose, clip]) => [pose, clip ? { ...clip, url: strip(clip.url) } : clip])),
+        clips: Object.fromEntries(Object.entries(asset.animation.clips).map(([pose, clip]) => [pose, clip ? { ...clip, url: strip(clip.url, `${asset.id}:clip:${pose}`) } : clip])),
       } : asset.animation
-      return { ...asset, url: strip(asset.url), animation }
+      return { ...asset, url: strip(asset.url, asset.id), animation }
     }),
   }
 }

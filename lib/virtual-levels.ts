@@ -3,6 +3,7 @@ import { createFallbackGameSpec } from '@/lib/game-spec'
 import { getThemeId } from '@/lib/theme-utils'
 import type { GameData, Theme } from '@/types'
 import type { AssetCategory, AssetDefinition, GameSpec, ObstacleData } from '@/types'
+import { ensureEncounterClearance } from '@/lib/encounter-layout'
 
 const DEFAULT_VIRTUAL_LEVEL_COUNT = 3
 
@@ -31,7 +32,7 @@ export function buildGameDataFromSpec(spec: GameSpec): GameData {
       type: enabledObstacles[index % Math.max(1, enabledObstacles.length)] || 'normalObstacle',
     }))
     const enemyAssets = assets.filter((asset) => asset.enabled && ['groundEnemy', 'airEnemy', 'waterEnemy'].includes(asset.category) && asset.levelIds.includes(level.id))
-    return {
+    return ensureEncounterClearance({
       id: level.id,
       backgroundUrl: activeAsset(assets, 'levelBackground', level.id)?.url || '',
       groundUrl: activeAsset(assets, 'groundPlatform', level.id)?.url || '',
@@ -52,7 +53,7 @@ export function buildGameDataFromSpec(spec: GameSpec): GameData {
       bossSpawn: level.hasBoss
         ? { id: `${level.id}-boss`, x: 780, y: 310, kind: activeAsset(assets, 'boss', level.id)?.id || 'boss' }
         : undefined,
-    }
+    })
   })
   return {
     success: true,
