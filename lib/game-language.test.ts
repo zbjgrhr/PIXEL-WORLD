@@ -67,7 +67,7 @@ describe('per-work runtime language', () => {
     spec.creationLanguage = 'en'
     spec.assets = []
     spec.narrative!.opening = 'Pip sets out to find his mother.'
-    const created: Array<{ textContent: string; attrs: Record<string, string> }> = []
+    const created: Array<{ textContent: string; attrs: Record<string, string>; onclick?: () => void }> = []
     const node = () => {
       const element = { textContent: '', attrs: {} as Record<string, string>, style: {}, dataset: {}, classList: { add: vi.fn(), remove: vi.fn(), toggle: vi.fn() }, append: vi.fn(), replaceChildren: vi.fn(), setAttribute: (name: string, value: string) => { element.attrs[name] = value } }
       created.push(element)
@@ -89,8 +89,9 @@ describe('per-work runtime language', () => {
     new Function(offlineGameRuntimeSource())()
     await Promise.resolve()
     await Promise.resolve()
-    expect(created.some(element => element.textContent === 'Continue Adventure')).toBe(true)
+    expect(created.some(element => element.attrs['aria-label'] === 'Dismiss notice')).toBe(true)
     expect(created.some(element => element.textContent === 'Story Log')).toBe(true)
+    created.find(element => element.textContent === 'Story Log')!.onclick!()
     expect(created.some(element => element.textContent === spec.narrative!.opening)).toBe(true)
     expect(created.some(element => element.attrs['aria-label'] === 'Current Objectives')).toBe(true)
     expect(fetch).not.toHaveBeenCalled()

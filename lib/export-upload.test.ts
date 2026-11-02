@@ -109,10 +109,23 @@ describe('offline export with uploaded art', () => {
     expect(painted).toContain('#5ba5df')
     expect(painted).toContain('#ffd84d')
     const read = () => (globalThis as typeof globalThis & { __pixelWorldReadOnlySnapshot: () => { level: number; player: { x: number }; story: { endingSeen: boolean; completedLevels: string[]; counts: Record<string, number> }; won: boolean } }).__pixelWorldReadOnlySnapshot()
-    const nextStory = () => buttons.filter(button => button.textContent === t('继续冒险')).at(-1)!.onclick?.()
+    const nextStory = () => buttons.filter(button => button.textContent === '×').at(-1)?.onclick?.()
     const interact = () => buttons.filter(button => button.textContent === t('交互 E')).at(-1)!.onclick?.()
     let now = performance.now()
-    for (let overlay = 0; sections.at(-2)?.style.display === 'flex' && overlay < 20; overlay++) nextStory()
+    // Arrival text and opening/closing the journal must not release held input.
+    const arrivalX = read().player.x
+    listeners.get('keydown')!({ key: 'd', preventDefault: () => undefined })
+    now += 16.67; frame!(now)
+    expect(read().player.x).toBeGreaterThan(arrivalX)
+    buttons.find(button => button.textContent === t('剧情记录'))!.onclick?.()
+    const journalX = read().player.x
+    now += 16.67; frame!(now)
+    expect(read().player.x).toBeGreaterThan(journalX)
+    buttons.find(button => button.textContent === t('关闭记录'))!.onclick?.()
+    const closedX = read().player.x
+    now += 16.67; frame!(now)
+    expect(read().player.x).toBeGreaterThan(closedX)
+    listeners.get('keyup')!({ key: 'd', preventDefault: () => undefined })
     const initialX = read().player.x
     hidden = true
     visibilityChanged!()
@@ -139,7 +152,6 @@ describe('offline export with uploaded art', () => {
     let recognitionCompletedAfterBoss = false
     for (let tick = 0; tick < 3500 && !read().won; tick++) {
       if (read().level === 2 && (globalThis as typeof globalThis & { __pixelWorldReadOnlySnapshot: () => { enemies: Array<{ mobility: string }> } }).__pixelWorldReadOnlySnapshot().enemies.some(enemy => enemy.mobility === 'boss')) finalBossSpawned = true
-      for (let overlay = 0; sections.at(-2)?.style.display === 'flex' && overlay < 20; overlay++) nextStory()
       if (!midLevelRestored && read().level === 1 && read().player.x > 180) {
         const before = read()
         persist!()

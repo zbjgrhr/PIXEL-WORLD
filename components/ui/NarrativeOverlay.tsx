@@ -1,35 +1,22 @@
 'use client'
 
-import { Button } from 'antd'
-import { createGameTranslator } from '@/lib/game-language'
 import { useEffect, useMemo, useRef } from 'react'
+import { createGameTranslator } from '@/lib/game-language'
 import type { StoryEntry } from '@/lib/narrative-runtime'
 
-export default function NarrativeOverlay({ creationLanguage, queue, history, logOpen, onNext, onSkip, onClose }: { creationLanguage?: 'zh-CN' | 'en'; queue: StoryEntry[]; history: StoryEntry[]; logOpen: boolean; onNext: () => void; onSkip: () => void; onClose: () => void }) {
+export default function NarrativeOverlay({ creationLanguage, queue, history, logOpen, onSkip, onClose, onOpen }: { creationLanguage?: 'zh-CN' | 'en'; queue: StoryEntry[]; history: StoryEntry[]; logOpen: boolean; onSkip: () => void; onClose: () => void; onOpen: () => void }) {
   const t = useMemo(() => createGameTranslator(creationLanguage), [creationLanguage])
-  const current = queue[0]
-  const dialogRef = useRef<HTMLElement>(null)
-  const visible = Boolean(current || logOpen)
+  const current = queue[queue.length - 1]
+  const dismiss = useRef(onSkip)
+  useEffect(() => { dismiss.current = onSkip }, [onSkip])
   useEffect(() => {
-    if (!visible) return
-    const previous = document.activeElement as HTMLElement | null
-    dialogRef.current?.focus()
-    return () => { if (previous?.isConnected) previous.focus() }
-  }, [visible])
-  if (!current && !logOpen) return null
-  return <div data-no-ui-translation lang={creationLanguage || 'zh-CN'} className="narrative-shade" role="dialog" aria-modal="true" aria-label={logOpen ? t('剧情记录') : t('当前剧情')} onKeyDown={event => {
-    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (logOpen) onClose(); else onSkip() }
-    if (event.key === 'Tab') {
-      const controls = Array.from(dialogRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') || [])
-      const next = controls[0], last = controls.at(-1)
-      if (event.shiftKey && (document.activeElement === next || document.activeElement === dialogRef.current)) { event.preventDefault(); last?.focus() }
-      else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialogRef.current)) { event.preventDefault(); next?.focus() }
-    }
-  }}>
-    <section ref={dialogRef} className="narrative-dialog" tabIndex={-1}>
-      <header><small>{t("PIXEL WORLD · 冒险故事")}</small><h2>{logOpen ? t('剧情记录') : current.title}</h2></header>
-      <div className="narrative-dialog-body">{logOpen ? history.length ? history.map(entry => <article key={entry.id}><h3>{entry.title}</h3><p>{entry.text}</p></article>) : <p>{t("还没有新的剧情记录。")}</p> : <p>{current.text}</p>}</div>
-      <footer>{logOpen ? <Button type="primary" onClick={onClose}>{t("关闭记录，返回游戏")}</Button> : <><Button onClick={onSkip}>{t("跳过本段剧情")}</Button><Button type="primary" onClick={onNext}>{queue.length > 1 ? t('继续阅读') : t('继续冒险')}</Button></>}</footer>
-    </section>
-  </div>
+    if (!current || logOpen) return
+    const timer = window.setTimeout(() => dismiss.current(), 12_000)
+    return () => window.clearTimeout(timer)
+  }, [current?.id, logOpen])
+  const en = creationLanguage === 'en'
+  return <section data-no-ui-translation lang={creationLanguage || 'zh-CN'} className={'narrative-panel' + (logOpen ? ' is-reading' : current ? ' has-notice' : ' is-quiet')} aria-label={logOpen ? t('剧情记录') : t('当前剧情')}>
+    <header className="narrative-heading"><span className="narrative-sigil" aria-hidden="true">◇</span><span className="narrative-eyebrow">{logOpen ? en ? 'STORY ARCHIVE' : '旅途手记' : current ? en ? 'ON THE JOURNEY' : '旅途旁白' : en ? 'YOUR JOURNEY' : '故事仍在继续'}</span><span className="narrative-chapter">{current?.title}</span><button className="narrative-link" onPointerDown={event => event.preventDefault()} onClick={logOpen ? onClose : onOpen}>{logOpen ? t('关闭记录') : en ? 'Read story' : '回看故事'}<span aria-hidden="true">{logOpen ? ' −' : ' ↗'}</span></button></header>
+    {logOpen ? <div className="narrative-panel-body narrative-archive">{history.length ? history.map((entry,index) => <article key={entry.id}><span className="narrative-entry-number">{String(index+1).padStart(2,'0')}</span><div><h3>{entry.title}</h3><p>{entry.text}</p></div></article>) : <p>{t('还没有新的剧情记录。')}</p>}</div> : current && <div key={current.id} className="narrative-notice"><p>{current.text}</p><button className="narrative-dismiss" aria-label={en ? 'Dismiss notice' : '收起提示'} onPointerDown={event => event.preventDefault()} onClick={onSkip}>×</button><span className="narrative-reading-line" aria-hidden="true"/></div>}
+  </section>
 }

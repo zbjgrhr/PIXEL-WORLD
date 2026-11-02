@@ -333,7 +333,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
   const [settings, setSettings] = useState<GameSettings>(DEFAULT_GAME_SETTINGS)
   const storyRef = useRef<StoryProgress | null>(null)
   const storyQueueRef = useRef<StoryEntry[]>([])
-  const storyBlockedRef = useRef(false)
   const restoredCampaignRef = useRef<CampaignSave | null | undefined>(undefined)
   const initializedWorldRef = useRef<{ storyKey: string; levelId: string; groundTop: number; layoutVersion?: number } | null>(null)
   const levelScoreRef = useRef(0)
@@ -342,8 +341,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
   const [storyProgress, setStoryProgress] = useState<StoryProgress | null>(null)
   const setQueue = useCallback((queue: StoryEntry[]) => {
     storyQueueRef.current = queue
-    storyBlockedRef.current = queue.length > 0
-    keysRef.current.clear()
     setStoryQueue(queue)
   }, [])
   const commitStory = useCallback((next: StoryProgress) => {
@@ -352,7 +349,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     const added = next.history.filter(entry => !previous?.history.some(old => old.id === entry.id))
     storyRef.current = next
     setStoryProgress(next)
-    if (added.length) setQueue([...storyQueueRef.current, ...added])
+    if (added.length) setQueue(added.slice(-1))
   }, [setQueue])
   const emitStory = useCallback((kind: 'collect' | 'defeat' | 'boss' | 'reach' | 'interact' | 'boss-approach', target: string, id: string) => {
     if (!spec || !storyRef.current) return
@@ -786,7 +783,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     void startMusic()
     const player = playerRef.current
     const currentSpec = gameData.data?.spec
-    if (!player || !currentSpec || modeRef.current !== 'playing' || storyBlockedRef.current) return
+    if (!player || !currentSpec || modeRef.current !== 'playing') return
     const now = simulationTimeRef.current
     if (player.frozen || player.health <= 0 || (player.action === 'hit' && now < player.actionUntil)) return
     if (!characterRosterRules.effective(currentSpec.hero,rosterStateRef.current).meleeMultiplier || now < player.meleeReadyAt) return
@@ -811,7 +808,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     void startMusic()
     const player = playerRef.current
     const currentSpec = gameData.data?.spec
-    if (!player || !currentSpec || modeRef.current !== 'playing' || storyBlockedRef.current) return
+    if (!player || !currentSpec || modeRef.current !== 'playing') return
     const now = simulationTimeRef.current
     if (player.frozen || player.health <= 0 || (player.action === 'hit' && now < player.actionUntil)) return
     if (!characterRosterRules.effective(currentSpec.hero,rosterStateRef.current).rangedMultiplier || now < player.rangedReadyAt) return
@@ -841,7 +838,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
   const switchCharacter = useCallback(() => {
     const player = playerRef.current, roster = spec?.hero.roster
-    if (!player || !roster || !spec || !roster.allowSwitch || player.health <= 0 || player.frozen || modeRef.current !== 'playing' || storyBlockedRef.current || simulationTimeRef.current < player.actionUntil) return
+    if (!player || !roster || !spec || !roster.allowSwitch || player.health <= 0 || player.frozen || modeRef.current !== 'playing' || simulationTimeRef.current < player.actionUntil) return
     const next = characterRosterRules.choose(roster,rosterStateRef.current || characterRosterRules.fresh(roster),'switch'), profile = roster.characters.find(c=>c.id===next.characterId)!, box = characterRosterRules.resized(player,profile)
     if(box.x<0 || box.y<0 || box.x+box.width>worldWidth || box.y+box.height>worldHeight || authoredMap?.groundY!==undefined && authoredMap.groundY!==null && box.y+box.height>authoredMap.groundY || obstaclesRef.current.some(o=>authoredMapRules.overlaps(box,o))) { setBanner(t('空间不足，无法切换角色')); return }
     rosterStateRef.current = next
@@ -880,13 +877,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
   }, [currentLevelIndex, setMode, totalLevels, spec, emitStory, commitStory, t])
 
   useEffect(() => {
-    if (mode !== 'transition' || storyQueue.length || storyLogOpen) return
+    if (mode !== 'transition') return
     transitionTimerRef.current = window.setTimeout(() => { setCurrentLevelIndex(currentLevelIndex + 1); setMode('playing') }, 600)
     return () => { if (transitionTimerRef.current) window.clearTimeout(transitionTimerRef.current) }
-  }, [mode, storyQueue.length, storyLogOpen, currentLevelIndex, setCurrentLevelIndex, setMode])
+  }, [mode, currentLevelIndex, setCurrentLevelIndex, setMode])
 
   const interactStory = useCallback(() => {
-    if (!spec || !levelSpec || !playerRef.current || storyBlockedRef.current || modeRef.current !== 'playing') return
+    if (!spec || !levelSpec || !playerRef.current || modeRef.current !== 'playing') return
     const plan = spec.narrative?.chapters.find(c => c.levelId === levelSpec.id)
     if (!plan || !storyRef.current) return
     const available = narrativeEngine.objectives(spec, storyRef.current)
@@ -903,13 +900,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     const keyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase()
       if (['arrowleft', 'arrowright', 'arrowup', ' ', 'j', 'k', 'escape'].includes(key)) event.preventDefault()
-      if (storyBlockedRef.current) return
       if (key === 'escape') {
         if (modeRef.current === 'playing') setMode('paused', 'escape')
         else if (modeRef.current === 'paused') setMode('playing')
         return
       }
-      if (modeRef.current !== 'playing' || storyBlockedRef.current) return
+      if (modeRef.current !== 'playing') return
       void startMusic()
       if (event.repeat) return
       keysRef.current.add(key)
@@ -941,7 +937,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         stageRef.current.dataset.elapsedMs = String(elapsedRealMs)
         stageRef.current.dataset.loopTime = String(Math.round(realNow))
         stageRef.current.dataset.gameMode = modeRef.current
-        stageRef.current.dataset.storyBlocked = String(storyBlockedRef.current)
+        stageRef.current.dataset.storyBlocked = 'false'
         stageRef.current.dataset.lastPauseReason = lastPauseReasonRef.current
         stageRef.current.dataset.documentHidden = String(document.hidden)
         stageRef.current.dataset.documentFocused = String(document.hasFocus())
@@ -967,7 +963,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         stageRef.current.dataset.layoutVersion = String(initializedWorldRef.current?.layoutVersion || 0)
         stageRef.current.dataset.obstacleLayout = obstaclesRef.current.map(obstacle => `${obstacle.type}:${obstacle.x},${obstacle.width},${obstacle.height}`).join(';')
       }
-      if (modeRef.current === 'playing' && player && !storyBlockedRef.current) {
+      if (modeRef.current === 'playing' && player) {
         simulationTimeRef.current += elapsedRealMs
         const now = simulationTimeRef.current
         const delta = Math.min(2, elapsedRealMs / 16.67)
@@ -1219,7 +1215,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           width: authoredMap ? exitWidth : EXIT_WIDTH + 32,
           height: exitHeight,
         }
-        if (player.health > 0 && narrativeEngine.exitReady(spec, storyRef.current, enemiesRef.current.filter(e=>!e.programState?.resolved).length) && !storyBlockedRef.current && intersects(player, exitTrigger)) {
+        if (player.health > 0 && narrativeEngine.exitReady(spec, storyRef.current, enemiesRef.current.filter(e=>!e.programState?.resolved).length) && intersects(player, exitTrigger)) {
           enterExit()
         }
         if(traceRef.current)playtestTraceRules.sample(traceRef.current,{levelId:level.id,sim:now,x:player.x,y:player.y,vx:player.vx,vy:player.vy,onGround:player.onGround,health:player.health,characterId:rosterStateRef.current?.characterId})
@@ -1265,7 +1261,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
   const pressMovement = (key: string, pressed: boolean) => {
     if (pressed) {
-      if (modeRef.current !== 'playing' || storyBlockedRef.current) return
+      if (modeRef.current !== 'playing') return
       keysRef.current.add(key)
       void startMusic()
     }
@@ -1513,12 +1509,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           const x = (authoredMap ? authoredMapRules.storyPoint(authoredMap, point.position).x : 120 + (exitX - 220) * point.position) - cameraX
           return <button key={point.id} className="narrative-world-point" style={{ left: x, top: (authoredMap ? authoredMapRules.storyPoint(authoredMap, point.position).y : groundTop - 85) - cameraY }} aria-label={point.name} onClick={interactStory}>✦<small>{point.name} · E</small></button>
         })}
-        {spec?.narrative && <div className="narrative-objectives" aria-label={t("当前关卡任务")}><strong>{storyChapter?.title}</strong>{storyTasks.map(task => <div key={task.id} data-objective={task.id} data-complete={task.complete}>{task.complete ? '✓' : task.available ? '○' : '·'} {task.description} {task.count > 1 ? `${task.current}/${task.count}` : ''}</div>)}<Button size="small" onClick={() => { keysRef.current.clear(); storyBlockedRef.current = true; setStoryLogOpen(true) }}>{t("剧情记录")}</Button><Button size="small" onClick={interactStory}>{t("交互 E")}</Button></div>}
-        <NarrativeOverlay creationLanguage={spec.creationLanguage} queue={storyQueue} history={storyProgress?.history || []} logOpen={storyLogOpen} onNext={() => setQueue(storyQueueRef.current.slice(1))} onSkip={() => setQueue([])} onClose={() => { setStoryLogOpen(false); storyBlockedRef.current = storyQueueRef.current.length > 0; keysRef.current.clear() }} />
-        {mode === 'playing' && !storyBlockedRef.current && (player?.health || 0) > 0 && traversalHintsRef.current.message(simulationTimeRef.current) && <div role="status" data-testid="traversal-hint" style={{ position: 'absolute', left: '50%', bottom: 72, transform: 'translateX(-50%)', zIndex: 14, width: 'max-content', maxWidth: 'calc(100% - 32px)', padding: '10px 16px', borderRadius: 8, color: '#fff4ba', background: 'rgba(28,34,46,.95)', border: '1px solid #e5c46b', pointerEvents: 'none', textAlign: 'center', fontWeight: 700 }}>
+        {mode === 'playing' && (player?.health || 0) > 0 && traversalHintsRef.current.message(simulationTimeRef.current) && <div role="status" data-testid="traversal-hint" style={{ position: 'absolute', left: '50%', bottom: 72, transform: 'translateX(-50%)', zIndex: 14, width: 'max-content', maxWidth: 'calc(100% - 32px)', padding: '10px 16px', borderRadius: 8, color: '#fff4ba', background: 'rgba(28,34,46,.95)', border: '1px solid #e5c46b', pointerEvents: 'none', textAlign: 'center', fontWeight: 700 }}>
           {t(traversalHintsRef.current.message(simulationTimeRef.current)!)}
         </div>}
-        {banner && <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}><div style={{ padding: '14px 28px', color: '#fff', background: 'rgba(5,10,25,.82)', border: '2px solid #61dafb', fontSize: 24, fontWeight: 900, letterSpacing: 2 }}>{banner}</div></div>}
 
         {playerNearExit && (
           <div style={{ position: 'absolute', left: '50%', bottom: 92, transform: 'translateX(-50%)', zIndex: 14, padding: '8px 14px', borderRadius: 8, color: '#fff', background: levelCleared ? 'rgba(5,112,92,.92)' : 'rgba(120,35,45,.9)', border: `1px solid ${levelCleared ? '#66ffd0' : '#ff8792'}`, fontWeight: 700 }}>
@@ -1534,7 +1527,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
               {mode === 'dead' && <Button onClick={() => { if (spec && storyRef.current && level) { storyRef.current = narrativeEngine.begin(spec, storyRef.current, level.id, true); setStoryProgress(storyRef.current); setQueue(storyRef.current.history.filter(entry => entry.id === `${level.id}:arrival`)); } scoreRef.current = levelScoreRef.current; traceRetryRef.current=true; retryCheckpointRef.current = mechanismStateRef.current.checkpointId; if(spec?.hero.roster)rosterStateRef.current=characterRosterRules.choose(spec.hero.roster,rosterStateRef.current||characterRosterRules.fresh(spec.hero.roster),'respawn'); powerRef.current = 1; playerRef.current = null; restoredCampaignRef.current = null; initializeLevel() }}>{t("重试本关")}</Button>}
               {mode === 'paused' && <Button type="primary" icon={<Play size={15} />} onClick={() => setMode('playing')}>{t("Resume")}</Button>}
               {(mode === 'dead' || mode === 'victory') && <Button type="primary" icon={<RotateCcw size={15} />} onClick={restartCampaign}>{t("重新开始冒险")}</Button>}
-              {mode === 'victory' && spec.narrative && <Button style={{ marginLeft: 10 }} onClick={() => { keysRef.current.clear(); storyBlockedRef.current = true; setStoryLogOpen(true) }}>{t("回看故事")}</Button>}
+              {mode === 'victory' && spec.narrative && <Button style={{ marginLeft: 10 }} onClick={() => { setStoryLogOpen(true) }}>{t("回看故事")}</Button>}
             </div>
           </div>
         )}
@@ -1569,6 +1562,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           <Button danger size="large" icon={<Swords size={17} />} onClick={meleeAttack}>{t("Slash")}</Button>
           <Button type="primary" size="large" icon={<Crosshair size={17} />} onClick={rangedAttack}>{t("Shoot")}</Button>
         </div>
+      </div>
+
+      <div className="narrative-rail">
+        {banner && !spec.narrative && <div style={{ padding: '6px 20px', color: '#cfb67e', fontSize: 11 }}>{banner}</div>}
+        {spec?.narrative && <details className="narrative-objectives" aria-label={t('当前关卡任务')}><summary><span>{spec.creationLanguage === 'en' ? 'OBJECTIVE' : '当前目标'}</span><strong>{storyTasks.find(task => task.available && !task.complete)?.description || (spec.creationLanguage === 'en' ? 'Head for the exit' : '前往出口')}</strong><small>{storyTasks.filter(task => task.complete).length}/{storyTasks.length} ▾</small></summary><div className="narrative-task-list">{storyTasks.map(task => <div key={task.id} data-objective={task.id} data-complete={task.complete}>{task.complete ? '✓' : task.available ? '○' : '·'} {task.description} {task.count > 1 ? task.current + '/' + task.count : ''}</div>)}<Button size="small" onPointerDown={event => event.preventDefault()} onClick={interactStory}>{t('交互 E')}</Button></div></details>}
+        {spec.narrative && <NarrativeOverlay creationLanguage={spec.creationLanguage} queue={storyQueue} history={storyProgress?.history || []} logOpen={storyLogOpen} onOpen={() => setStoryLogOpen(true)} onSkip={() => setQueue([])} onClose={() => { setStoryLogOpen(false) }} />}
       </div>
 
       <div style={{ padding: '10px 16px', background: '#0b1122', color: '#aeb8d0', fontSize: 12 }}>
@@ -1649,7 +1648,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           <Card size="small" style={{ background: '#121c33', borderColor: '#2b3b61' }}>
             <Text style={{ color: '#dce5f8', whiteSpace: 'pre-wrap', lineHeight: 1.75 }}>{spec.narrative?.opening || spec.backgroundStory}</Text>
           </Card>
-          <Button onClick={() => { setSettingsOpen(false); storyBlockedRef.current = true; setStoryLogOpen(true) }} style={{ marginTop: 12 }}>{t("查看已发生的剧情")}</Button>
+          <Button onClick={() => { setSettingsOpen(false); setStoryLogOpen(true) }} style={{ marginTop: 12 }}>{t("查看已发生的剧情")}</Button>
         </section>
       </Space>
     </Drawer>
