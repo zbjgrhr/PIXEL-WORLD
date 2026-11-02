@@ -11,7 +11,12 @@ export interface SpatialProject {
   goalCount: number
   decorationCount: number
   playerSpeed: number
-  rhythm: { bpm: number; bars: number; offsetMs: number }
+  rhythm: {
+    bpm: number; bars: number; offsetMs: number
+    chartVersion?: 1 | 2
+    difficulty?: 'relaxed' | 'normal' | 'hard'
+    feedback?: { effects: number; hitVolume: number; musicVolume: number; shake: boolean }
+  }
 }
 
 export const SPATIAL_ENVIRONMENTS = {
@@ -44,6 +49,14 @@ export function parseSpatialProject(value: unknown): SpatialProject {
   if (p.genre !== 'exploration' && p.genre !== 'rhythm') throw new SpatialSpecError('当前支持收集探索与节奏击打两种模板。')
   if (!Object.hasOwn(SPATIAL_ENVIRONMENTS, String(p.environment))) throw new SpatialSpecError('请选择有效的场景环境。')
   const rhythm = record(p.rhythm)
+  if (rhythm.chartVersion !== undefined && rhythm.chartVersion !== 1 && rhythm.chartVersion !== 2) throw new SpatialSpecError('不支持的音符编排版本。')
+  if (rhythm.difficulty !== undefined && !['relaxed', 'normal', 'hard'].includes(String(rhythm.difficulty))) throw new SpatialSpecError('不支持的演奏难度。')
+  let feedback: SpatialProject['rhythm']['feedback']
+  if (rhythm.feedback !== undefined) {
+    const f = record(rhythm.feedback)
+    if (typeof f.shake !== 'boolean') throw new SpatialSpecError('镜头震动开关无效。')
+    feedback = { effects: number(f.effects, '视觉反馈', 0, 1, false), hitVolume: number(f.hitVolume, '打击音量', 0, 1, false), musicVolume: number(f.musicVolume, '音乐音量', 0, 1, false), shake: f.shake }
+  }
   return {
     schema: 'pixel-world/spatial', version: 1,
     title: text(p.title, '标题', 80), brief: text(p.brief, '构想', 4000),
@@ -56,6 +69,9 @@ export function parseSpatialProject(value: unknown): SpatialProject {
     rhythm: {
       bpm: number(rhythm.bpm, 'BPM', 60, 160), bars: number(rhythm.bars, '小节数', 4, 16),
       offsetMs: number(rhythm.offsetMs, '判定偏移', -250, 250),
+      ...(rhythm.chartVersion !== undefined ? { chartVersion: rhythm.chartVersion as 1 | 2 } : {}),
+      ...(rhythm.difficulty !== undefined ? { difficulty: rhythm.difficulty as 'relaxed' | 'normal' | 'hard' } : {}),
+      ...(feedback ? { feedback } : {}),
     },
   }
 }
@@ -77,7 +93,7 @@ export function createSpatialProject(brief: string, genre: SpatialProject['genre
     title: `${SPATIAL_ENVIRONMENTS[environment]} · ${genre === 'rhythm' ? '节奏回响' : '水晶之旅'}`,
     brief: idea, genre, environment, seed: spatialSeed(idea), arenaSize: 32,
     goalCount: 6, decorationCount: 30, playerSpeed: 2,
-    rhythm: { bpm: 100, bars: 8, offsetMs: 0 },
+    rhythm: { bpm: 100, bars: 8, offsetMs: 0, chartVersion: 2, difficulty: 'normal', feedback: { effects: .7, hitVolume: .8, musicVolume: .55, shake: false } },
   })
 }
 

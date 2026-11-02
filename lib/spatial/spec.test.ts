@@ -29,4 +29,19 @@ describe('Spatial V1 projects', () => {
     expect(() => parseSpatialProject({ ...p, rhythm: null })).toThrow()
     expect(parseSpatialProject({ ...p, script: 'fetch(secret)', apiKey: 'SECRET', modelUrl: 'https://example.com/a.glb' })).toEqual(p)
   })
+  it('keeps older three-field rhythm settings unchanged and defaults new works to mixed notes', () => {
+    const p = createSpatialProject('星夜', 'rhythm')
+    expect(p.rhythm.chartVersion).toBe(2); expect(p.rhythm.feedback?.shake).toBe(false)
+    const legacy = { bpm: 100, bars: 4, offsetMs: 0 }
+    expect(parseSpatialProject({ ...p, rhythm: legacy }).rhythm).toEqual(legacy)
+  })
+  it.each(['effects', 'hitVolume', 'musicVolume'])('rejects invalid %s rather than exporting unsafe intensity', key => {
+    const p = createSpatialProject('星夜', 'rhythm')
+    expect(() => parseSpatialProject({ ...p, rhythm: { ...p.rhythm, feedback: { ...p.rhythm.feedback, [key]: 2 } } })).toThrow()
+  })
+  it('rejects unsupported chart and difficulty values', () => {
+    const p = createSpatialProject('星夜', 'rhythm')
+    expect(() => parseSpatialProject({ ...p, rhythm: { ...p.rhythm, chartVersion: 9 } })).toThrow()
+    expect(() => parseSpatialProject({ ...p, rhythm: { ...p.rhythm, difficulty: 'anything' } })).toThrow()
+  })
 })

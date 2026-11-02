@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Card, Collapse, Input, InputNumber, Select, Space, Tag, Typography } from 'antd'
+import { Button, Card, Collapse, Input, InputNumber, Select, Slider, Space, Switch, Tag, Typography } from 'antd'
 import { Compass, Download, Music2, RotateCcw, Save, Sparkles } from 'lucide-react'
 import StageHeading from './ui/StageHeading'
 import WorkflowNotice from './ui/WorkflowNotice'
@@ -92,6 +92,8 @@ export default function HomeSpatialStudio({ mode, initialProject, onSave }: Prop
     finally { if (request.current === run) setBusy(false) }
   }
   const name = mode === 'rhythm' ? '节奏音游' : '自由探索'
+  const feedback = { effects: .7, hitVolume: .8, musicVolume: .55, shake: false, ...config.rhythm.feedback }
+  const changeFeedback = (patch: Partial<typeof feedback>) => edit({ rhythm: { ...config.rhythm, feedback: { ...feedback, ...patch } } })
   const Icon = mode === 'rhythm' ? Music2 : Compass
   const storyReady = Boolean(config.title.trim() && config.brief.trim())
   const previewStale = hasPreview && JSON.stringify(config) !== JSON.stringify(applied)
@@ -138,7 +140,11 @@ export default function HomeSpatialStudio({ mode, initialProject, onSave }: Prop
         {stage === 'rules' && <section className="studio-section studio-workspace-editor">
           <StageHeading title={mode === 'rhythm' ? '节奏与演奏规则' : '场景与探索规则'} />
           <div className="story-template-picker"><Typography.Text strong>场景环境</Typography.Text><Select aria-label="场景环境" value={config.environment} disabled={busy} onChange={v => edit({ environment: v })} options={Object.entries(SPATIAL_ENVIRONMENTS).map(([value, label]) => ({ value, label }))} style={{ width: '100%' }} /><Typography.Text type="secondary">选择森林、沙丘、星夜或雪原，让同一种玩法拥有不同氛围。</Typography.Text></div>
-          {mode === 'rhythm' ? <><div className="spatial-fields">{([['bpm', 'BPM', 60, 160], ['bars', '小节数', 4, 16], ['offsetMs', '判定偏移 ms', -250, 250]] as const).map(([key, label, min, max]) => <label key={key} className="spatial-field" htmlFor={`${mode}-${key}`}><Typography.Text strong>{label}</Typography.Text><InputNumber id={`${mode}-${key}`} aria-label={label} min={min} max={max} value={config.rhythm[key]} disabled={busy} onChange={v => { if (typeof v === 'number') edit({ rhythm: { ...config.rhythm, [key]: Math.max(min, Math.min(max, v)) } }) }} style={{ width: '100%' }} /></label>)}</div><div className="story-template-picker"><Typography.Text strong>四轨演奏</Typography.Text><div className="spatial-keycaps" aria-label="击打按键"><kbd>D</kbd><kbd>F</kbd><kbd>J</kbd><kbd>K</kbd></div><Typography.Text type="secondary">四个按键对应四条轨道，也可点击游戏内按钮。判定窗口±180ms；偏移用于对齐节奏。</Typography.Text></div></> : <div className="spatial-fields">{numeric('场景尺寸', 'arenaSize', 20, 48)}{numeric('水晶目标', 'goalCount', 3, 12)}{numeric('景物数量', 'decorationCount', 8, 48)}{numeric('移动速度', 'playerSpeed', 1, 3, .1)}</div>}
+          {mode === 'rhythm' ? <><div className="spatial-fields">{([['bpm', 'BPM', 60, 160], ['bars', '小节数', 4, 16], ['offsetMs', '判定偏移 ms', -250, 250]] as const).map(([key, label, min, max]) => <label key={key} className="spatial-field" htmlFor={`${mode}-${key}`}><Typography.Text strong>{label}</Typography.Text><InputNumber id={`${mode}-${key}`} aria-label={label} min={min} max={max} value={config.rhythm[key]} disabled={busy} onChange={v => { if (typeof v === 'number') edit({ rhythm: { ...config.rhythm, [key]: Math.max(min, Math.min(max, v)) } }) }} style={{ width: '100%' }} /></label>)}</div><div className="story-template-picker"><Typography.Text strong>四轨演奏</Typography.Text><div className="spatial-keycaps" aria-label="击打按键"><kbd>D</kbd><kbd>F</kbd><kbd>J</kbd><kbd>K</kbd></div><Typography.Text type="secondary">四个按键对应四条轨道，也可点击游戏内按钮。Perfect ±45ms，Good ±160ms；偏移用于对齐节奏，空击会断连击。</Typography.Text></div></> : <div className="spatial-fields">{numeric('场景尺寸', 'arenaSize', 20, 48)}{numeric('水晶目标', 'goalCount', 3, 12)}{numeric('景物数量', 'decorationCount', 8, 48)}{numeric('移动速度', 'playerSpeed', 1, 3, .1)}</div>}
+          {mode === 'rhythm' && <>
+            <div className="story-template-picker"><Typography.Text strong>音符编排</Typography.Text><Select aria-label="音符编排" value={config.rhythm.chartVersion || 1} disabled={busy} options={[{ value: 1, label: '经典单键 · 保留旧作品谱面' }, { value: 2, label: '新版乐句 · 单击 / 长按 / 双押' }]} onChange={v => edit({ rhythm: { ...config.rhythm, chartVersion: v } })} style={{ width: '100%' }} /><Select aria-label="演奏难度" value={config.rhythm.difficulty || 'normal'} disabled={busy || config.rhythm.chartVersion !== 2} options={[{ value: 'relaxed', label: '舒缓 · 留出反应空间' }, { value: 'normal', label: '标准 · 长按、双押与交替' }, { value: 'hard', label: '进阶 · 更密集的切分节奏' }]} onChange={v => edit({ rhythm: { ...config.rhythm, difficulty: v } })} style={{ width: '100%' }} /><Typography.Text type="secondary">长条需要持续按住，双押需要两轨分别命中。新作品默认新版编排；旧作品可在这里主动升级。</Typography.Text></div>
+            <Collapse size="small" items={[{ key: 'feedback', label: '打击反馈与音量', children: <div className="spatial-feedback-settings">{([['effects', '视觉反馈强度'], ['hitVolume', '打击音量'], ['musicVolume', '音乐音量']] as const).map(([key, label]) => <div key={key}><Typography.Text strong>{label}</Typography.Text><Slider aria-label={label} min={0} max={100} value={Math.round(feedback[key] * 100)} disabled={busy} onChange={v => changeFeedback({ [key]: v / 100 })} /></div>)}<div className="spatial-feedback-toggle"><Typography.Text>轻微镜头震动</Typography.Text><Switch aria-label="轻微镜头震动" checked={feedback.shake} disabled={busy} onChange={v => changeFeedback({ shake: v })} /></div><Typography.Text type="secondary">震动默认关闭；系统偏好减少动态效果时，关闭粒子和震动。反馈不会改变判定或暂停游戏。修改后应用到试玩。</Typography.Text></div> }]} />
+          </>}
           <Collapse size="small" items={[{ key: 'seed', label: '高级规则 · 布局种子', children: <>{numeric('布局种子', 'seed', 1, 2147483647)}<Typography.Text type="secondary">相同种子与规则可复现同一布局。</Typography.Text></> }]} />
           <Button disabled={busy || !storyReady} icon={<Sparkles size={15} />} onClick={() => { const p = { ...createSpatialProject(config.brief, mode), title: config.title }; edit(p); setNotice('已按创意整理本地模板，请检查规则后创建试玩。') }}>按创意整理本地模板</Button>
           <Space wrap><Button disabled={busy} onClick={() => setStage('idea')}>返回修改创意</Button><Button type="primary" disabled={busy || !ready || !storyReady} onClick={createPreview}>{hasPreview ? '应用并更新试玩 →' : '确认规则，创建试玩 →'}</Button></Space>
@@ -153,7 +159,7 @@ export default function HomeSpatialStudio({ mode, initialProject, onSave }: Prop
         <Card size="small" className="spatial-preview-summary"><Space wrap><Tag color="green">{name}</Tag><Tag color="blue">3D · {SPATIAL_ENVIRONMENTS[applied.environment]}</Tag><Tag color="purple">{mode === 'rhythm' ? `四轨 · ${applied.rhythm.bpm} BPM` : `${applied.goalCount}颗水晶`}</Tag></Space><Typography.Title level={4}>{applied.title}</Typography.Title><Typography.Paragraph ellipsis={{ rows: 2, expandable: true }}>{applied.brief}</Typography.Paragraph></Card>
         {previewStale && <div className="workflow-preview-note" role="status"><strong>这里显示已创建的试玩</strong><span>中栏草稿有修改，应用后才会更新。导出的是当前试玩版本。</span></div>}
         <div className="spatial-viewport">{html ? <iframe key={revision} srcDoc={html} title={`${applied.title} · 3D试玩`} sandbox="allow-scripts allow-pointer-lock allow-downloads" allow="autoplay; fullscreen" allowFullScreen /> : <p role="status">正在准备试玩资源…</p>}</div>
-        <div className="spatial-preview-footnote"><Icon size={16} aria-hidden="true" /><span>{mode === 'rhythm' ? 'D / F / J / K 击打 · 跟随节奏完成演奏' : 'WASD 移动 · 收集水晶 · 开启出口'}</span></div>
+        <div className="spatial-preview-footnote"><Icon size={16} aria-hidden="true" /><span>{mode === 'rhythm' ? 'D / F / J / K 击打 · 长条按住 · 双押同时击打' : 'WASD 移动 · 收集水晶 · 开启出口'}</span></div>
       </Card>}
     </section>
   </div>

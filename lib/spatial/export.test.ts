@@ -15,6 +15,9 @@ describe('standalone spatial export', () => {
     expect(html).not.toMatch(/<script[^>]+src=/)
     expect(html).not.toContain('apiKey')
     expect(() => new Script(runtime)).not.toThrow()
+    const source = html.match(/<script>([\s\S]*)<\/script>/)![1]
+    expect(() => new Script(source)).not.toThrow()
+    expect(source).toContain('createRhythmEngine')
     const data = html.match(/id="spatial-project" type="application\/json">([^<]+)<\/script>/)![1]
     expect(JSON.parse(data)).toEqual(p)
   })
