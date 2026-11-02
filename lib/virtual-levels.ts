@@ -4,6 +4,7 @@ import { getThemeId } from '@/lib/theme-utils'
 import type { GameData, Theme } from '@/types'
 import type { AssetCategory, AssetDefinition, GameSpec, ObstacleData } from '@/types'
 import { ensureEncounterClearance } from '@/lib/encounter-layout'
+import { authoredMapRules } from '@/lib/authored-map'
 
 const DEFAULT_VIRTUAL_LEVEL_COUNT = 3
 
@@ -15,6 +16,12 @@ export function buildGameDataFromSpec(spec: GameSpec): GameData {
   const assets = spec.assets || []
   const globalUrl = (category: AssetCategory) => activeAsset(assets, category)?.url || ''
   const levels = spec.levels.map((level, levelIndex) => {
+    if (level.map) {
+      const map = authoredMapRules.validate(level.map)
+      return { id: level.id, authoredMap: map, layoutVersion: 3, worldWidth: map.width,
+        backgroundUrl: activeAsset(assets, 'levelBackground', level.id)?.url || '', groundUrl: activeAsset(assets, 'groundPlatform', level.id)?.url || '',
+        obstacles: map.obstacles, enemySpawns: map.enemies, collectibleSpawns: map.collectibles, bossSpawn: map.boss }
+    }
     const obstacleCategories: AssetCategory[] = ['normalObstacle', 'bounceObstacle', 'deathObstacle']
     // The Boss encounter already combines regular enemies and a durable target.
     // Keep instant-death hazards out of that encounter; elsewhere place them

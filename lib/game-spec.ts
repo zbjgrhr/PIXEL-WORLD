@@ -3,6 +3,12 @@ import { stabilizeGameSpec } from '@/lib/game-spec-guardrails'
 import { extractStoryAnchors } from '@/lib/story-anchors'
 import { alignNarrativeCast, ensureNarrative, normalizeNarrative } from '@/lib/narrative'
 import { normalizeCreationLanguage } from '@/lib/creation-language'
+import { characterRosterRules } from '@/lib/character-roster'
+import { behaviorProgramRules } from '@/lib/behavior-program'
+import { originalArtRules } from '@/lib/original-art'
+import { heroPhysics } from '@/lib/hero-physics'
+import { authoredMapRules } from '@/lib/authored-map'
+import { validateReference } from '@/lib/reference-analysis'
 import {readTemplateAttributions} from '@/lib/template-attribution'
 import type {
   AssetCategory,
@@ -386,6 +392,12 @@ export function preserveExplicitPromptFields(spec: GameSpec, fallback: GameSpec,
   }
 }
 
+/** Preserve the same authored contract in storage migration and Agent review. */
+export function authoredGameSpecBaseline(value:GameSpec|undefined,fallback:GameSpec):GameSpec|undefined {
+  if(value?.version!==3||!(Array.isArray(value.levels)&&value.levels.some(l=>l.map)||value.hero?.physics||value.hero?.roster||value.boss?.program||Array.isArray(value.enemies)&&value.enemies.some(e=>e.program)))return undefined
+  return {...fallback,...value,hero:{...fallback.hero,...value.hero},weapon:{...fallback.weapon,...value.weapon},boss:{...fallback.boss,...value.boss},enemies:Array.isArray(value.enemies)?value.enemies:fallback.enemies,levels:Array.isArray(value.levels)?value.levels:fallback.levels,assets:Array.isArray(value.assets)?value.assets:fallback.assets}
+}
+
 export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, requestedLevelCount = fallback.levels.length): GameSpec {
   const input = candidate && typeof candidate === 'object' ? candidate as Partial<GameSpec> : {}
   const visual = input.visualStyle as Partial<VisualStyleSpec> | undefined
@@ -394,7 +406,8 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
   const boss = input.boss as Partial<BossSpec> | undefined
   const collectible = input.collectible as Partial<CollectibleSpec> | undefined
   const count = Math.min(10, Math.max(1, requestedLevelCount || fallback.levels.length))
-  const rawEnemies = Array.isArray(input.enemies) ? input.enemies : fallback.enemies
+  const proposedEnemies = Array.isArray(input.enemies) ? input.enemies : fallback.enemies
+  const rawEnemies = fallback.enemies.some(e => e.program) ? fallback.enemies.map((base,i) => ({...base,...proposedEnemies[i],program:base.program})) : proposedEnemies
   const rawLevels = Array.isArray(input.levels) ? input.levels : fallback.levels
 
   const enemies: EnemySpec[] = rawEnemies.slice(0, 8).map((raw, index) => {
@@ -403,6 +416,7 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
     return {
       name: text(enemy.name, base.name),
       appearance: text(enemy.appearance, base.appearance),
+      program: base.program || enemy.program ? behaviorProgramRules.validate(base.program || enemy.program) : undefined,
       health: bounded(enemy.health, base.health, 10, 300),
       damage: bounded(enemy.damage, base.damage, 1, 80),
       speed: bounded(enemy.speed, base.speed, 0.4, 5),
@@ -415,21 +429,23 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
   })
 
   const levels: LevelSpec[] = Array.from({ length: count }, (_, index) => {
-    const base = fallback.levels[index] || { ...fallback.levels[fallback.levels.length - 1], id: `level-${index + 1}`, name: `第 ${index + 1} 关` }
+    const base = fallback.levels[index] || { ...fallback.levels[fallback.levels.length - 1], map: undefined, id: `level-${index + 1}`, name: `第 ${index + 1} 关` }
     const byId = rawLevels.find(level => level?.id === base.id)
     const positional = !rawLevels.some(level => level?.id) || rawLevels.length === count
     const raw = (byId || (positional ? rawLevels[index] : undefined) || base) as Partial<LevelSpec>
     const environment = text(raw.environment, base.environment)
     const defaults = levelDefaults(index, count, environment)
+    const map = base.map || raw.map ? authoredMapRules.validate(base.map || raw.map) : undefined
     return {
       id: base.id,
+      map,
       name: text(raw.name, base.name),
       environment,
       ground: text(raw.ground, base.ground),
       obstacle: text(raw.obstacle, base.obstacle),
-      enemyCount: bounded(raw.enemyCount, base.enemyCount, 0, 12),
-      collectibleCount: bounded(raw.collectibleCount, base.collectibleCount, 0, 10),
-      hasBoss: index === count - 1 || Boolean(raw.hasBoss),
+      enemyCount: map ? map.enemies.length : bounded(raw.enemyCount, base.enemyCount, 0, 12),
+      collectibleCount: map ? map.collectibles.length : bounded(raw.collectibleCount, base.collectibleCount, 0, 10),
+      hasBoss: map ? !!map.boss : index === count - 1 || Boolean(raw.hasBoss),
       platformMode: ['ground', 'water', 'air'].includes(String(raw.platformMode)) ? raw.platformMode as LevelSpec['platformMode'] : defaults.platformMode,
       music: {
         tempo: bounded(raw.music?.tempo, defaults.music.tempo, 50, 220),
@@ -460,7 +476,11 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
     })
     if (matchIndex < 0) return required
     consumed.add(matchIndex)
-    return { ...required, ...providedAssets[matchIndex] }
+    const proposed = { ...required, ...providedAssets[matchIndex] }
+    if(required.original){proposed.original=required.original;proposed.url=required.url;proposed.kind=required.kind;proposed.source=undefined}
+    const originals=Object.entries(required.animation?.clips||{}).filter(([,clip])=>clip?.original)
+    if(originals.length){proposed.kind='spriteSheet';proposed.animation={...(proposed.animation||required.animation!),clips:{...proposed.animation?.clips,...Object.fromEntries(originals)}}}
+    return proposed
   })
   providedAssets.forEach((asset, index) => {
     if (!consumed.has(index) && asset && ASSET_CATALOG.some((entry) => entry.category === asset.category)) rawAssets.push(asset)
@@ -511,6 +531,7 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
       enabled: typeof asset.enabled === 'boolean' ? asset.enabled : base.enabled,
       levelIds: validLevelIds,
       kind,
+      original:asset.original?originalArtRules.validate(asset.original):undefined,
       status,
       url: url || undefined,
       source: asset.source === 'builtin-fallback' ? 'builtin-fallback' : undefined,
@@ -521,8 +542,9 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
     }
   })
 
-  return alignNarrativeCast({
+  const normalized = alignNarrativeCast({
     version: 3,
+    reference: fallback.reference || input.reference ? validateReference(fallback.reference || input.reference) : undefined,
     templateSources:readTemplateAttributions(fallback.templateSources) || readTemplateAttributions(input.templateSources),
     creationLanguage: normalizeCreationLanguage(fallback.creationLanguage),
     narrative: normalizeNarrative({ ...input.narrative, opening: input.narrative?.opening || input.backgroundStory || fallback.narrative?.opening, source: fallback.narrative?.source || input.narrative?.source }, { ...fallback, levels }, fallback.narrative),
@@ -544,6 +566,8 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
     hero: {
       name: text(hero?.name, fallback.hero.name), appearance: text(hero?.appearance, fallback.hero.appearance),
       maxHealth: bounded(hero?.maxHealth, fallback.hero.maxHealth, 40, 300), moveSpeed: bounded(hero?.moveSpeed, fallback.hero.moveSpeed, 2, 9), jumpPower: bounded(hero?.jumpPower, fallback.hero.jumpPower, 8, 24),
+      roster: fallback.hero.roster || hero?.roster ? characterRosterRules.validate(fallback.hero.roster || hero?.roster) : undefined,
+      physics: fallback.hero.physics || hero?.physics ? heroPhysics.validate(fallback.hero.physics || hero!.physics!) : undefined,
     },
     weapon: {
       name: text(weapon?.name, fallback.weapon.name), appearance: text(weapon?.appearance, fallback.weapon.appearance),
@@ -556,6 +580,7 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
       name: text(boss?.name, fallback.boss.name), appearance: text(boss?.appearance, fallback.boss.appearance),
       health: bounded(boss?.health, fallback.boss.health, 100, 1200), damage: bounded(boss?.damage, fallback.boss.damage, 5, 120), speed: bounded(boss?.speed, fallback.boss.speed, 0.3, 5),
       attackPattern: text(boss?.attackPattern, fallback.boss.attackPattern),
+      program: fallback.boss.program || boss?.program ? behaviorProgramRules.validate(fallback.boss.program || boss?.program) : undefined,
     },
     collectible: {
       name: text(collectible?.name, fallback.collectible.name), appearance: text(collectible?.appearance, fallback.collectible.appearance),
@@ -567,6 +592,16 @@ export function normalizeGameSpec(candidate: unknown, fallback: GameSpec, reques
     levels,
     assets,
   }, fallback)
+  // Explicit geometry and actor rules are a player-owned contract. Generated
+  // template balance ranges must not silently rewrite an imported project.
+  if(fallback.levels.some(level=>level.map)||fallback.hero.physics||fallback.hero.roster||fallback.boss.program||fallback.enemies.some(e=>e.program)){
+    const keep=(value:number,min:number,max:number)=>{if(!Number.isFinite(value)||value<min||value>max)throw Error('Authored actor value exceeds runtime limits');return value}
+    normalized.hero={...normalized.hero,maxHealth:keep(fallback.hero.maxHealth,1,1000),moveSpeed:keep(fallback.hero.moveSpeed,0.1,20),jumpPower:keep(fallback.hero.jumpPower,1,60)}
+    normalized.weapon={...normalized.weapon,meleeDamage:keep(fallback.weapon.meleeDamage,1,1000),rangedDamage:keep(fallback.weapon.rangedDamage,1,1000),projectileSpeed:keep(fallback.weapon.projectileSpeed,1,60)}
+    normalized.boss={...normalized.boss,health:keep(fallback.boss.health,1,1_000_000),damage:keep(fallback.boss.damage,0,1000),speed:keep(fallback.boss.speed,0,30)}
+    normalized.enemies=normalized.enemies.map((enemy,i)=>fallback.enemies[i]?{...enemy,health:keep(fallback.enemies[i].health,1,1_000_000),damage:keep(fallback.enemies[i].damage,0,1000),speed:keep(fallback.enemies[i].speed,0,30)}:enemy)
+  }
+  return normalized
 }
 
 export function serializeGameSpec(spec: GameSpec): string {

@@ -12,6 +12,7 @@ import {
   normalizeAnimationSpec,
 } from '@/lib/asset-catalog'
 import type { AnimationClipPose, AssetCategory, AssetDefinition, GameSpec } from '@/types'
+import BatchOriginalImport from '@/components/ui/BatchOriginalImport'
 import AssetUpload from '@/components/ui/AssetUpload'
 import StageHeading from '@/components/ui/StageHeading'
 
@@ -25,6 +26,7 @@ interface AssetPlannerProps {
   onCancel: () => void
   onTestApi: () => void
   onUpload: (assetId: string, file: File, pose?: AnimationClipPose) => Promise<void>
+  onImportOriginals?: (base:GameSpec,next:GameSpec)=>Promise<void>
   onFillMissing: () => void
   imageSource: 'builtin' | 'upload' | 'comfy' | 'byok' | 'custom'
   isGenerating: boolean
@@ -49,7 +51,7 @@ function visibleAssetError(asset: AssetDefinition): string | undefined {
   return asset.error
 }
 
-export default function AssetPlanner({ spec, onChange, onGenerate, onCancel, onTestApi, onUpload, onFillMissing, imageSource, isGenerating, isTesting, progress, showBatchAction = true }: AssetPlannerProps) {
+export default function AssetPlanner({ spec, onChange, onGenerate, onCancel, onTestApi, onUpload, onImportOriginals, onFillMissing, imageSource, isGenerating, isTesting, progress, showBatchAction = true }: AssetPlannerProps) {
   const [newCategory, setNewCategory] = useState<AssetCategory>('groundEnemy')
   const levels = spec.levels.map((level, index) => ({ label: `L${index + 1} ${level.name}`, value: level.id }))
   const imageAssets = spec.assets.filter((asset) => asset.enabled && (asset.kind === 'image' || asset.kind === 'spriteSheet'))
@@ -80,20 +82,21 @@ export default function AssetPlanner({ spec, onChange, onGenerate, onCancel, onT
 
   const duplicate = (asset: AssetDefinition) => onChange({
     ...spec,
-    assets: [...spec.assets, { ...asset, id: `${asset.category}-${Date.now()}`, title: `${asset.title} Copy`, status: asset.kind === 'audio' || asset.kind === 'runtime' ? 'success' : 'pending', url: undefined, error: undefined, animation: asset.kind === 'spriteSheet' ? createActionStripAnimation() : asset.animation }],
+    assets: [...spec.assets, { ...asset, id: `${asset.category}-${Date.now()}`, title: `${asset.title} Copy`, status: asset.kind === 'audio' || asset.kind === 'runtime' ? 'success' : 'pending', url: undefined, original:undefined, error: undefined, animation: asset.kind === 'spriteSheet' ? createActionStripAnimation() : asset.animation }],
   })
 
   const addAsset = () => {
     const catalog = ASSET_CATALOG_BY_CATEGORY[newCategory]
     const base = spec.assets.find((asset) => asset.category === newCategory)
     const asset: AssetDefinition = base
-      ? { ...base, id: `${newCategory}-${Date.now()}`, title: `${catalog.label} ${spec.assets.filter((item) => item.category === newCategory).length + 1}`, status: base.kind === 'audio' || base.kind === 'runtime' ? 'success' : 'pending', url: undefined, error: undefined, animation: base.kind === 'spriteSheet' ? createActionStripAnimation() : base.animation }
+      ? { ...base, id: `${newCategory}-${Date.now()}`, title: `${catalog.label} ${spec.assets.filter((item) => item.category === newCategory).length + 1}`, status: base.kind === 'audio' || base.kind === 'runtime' ? 'success' : 'pending', url: undefined, original:undefined, error: undefined, animation: base.kind === 'spriteSheet' ? createActionStripAnimation() : base.animation }
       : { id: `${newCategory}-${Date.now()}`, category: newCategory, title: catalog.label, prompt: catalog.defaultPrompt, enabled: true, levelIds: spec.levels.map((level) => level.id), kind: catalog.kind, status: catalog.kind === 'audio' || catalog.kind === 'runtime' ? 'success' : 'pending', animation: catalog.kind === 'spriteSheet' ? createActionStripAnimation() : undefined }
     onChange({ ...spec, assets: [...spec.assets, asset] })
   }
 
   return (
     <Card className="asset-planner-card" size="small" title={<StageHeading number="04" title="素材工坊" english="ASSET WORKSHOP" />}>
+      {onImportOriginals && <BatchOriginalImport spec={spec} onApply={onImportOriginals} disabled={isGenerating} />}
       <Alert type={builtinCount ? 'warning' : 'info'} showIcon message={`已启用 ${imageJobs.length} 个独立图片任务（角色按动作分别计算）；完成 ${completed} 个；待生成 ${pendingCount} 个。${builtinCount ? `其中 ${builtinCount} 个由内置素材补齐。` : ''}程序音效和行为不调用图片 API。`} style={{ marginBottom: 12 }} />
       <Space wrap style={{ marginBottom: 12 }}>
         <Select value={newCategory} onChange={setNewCategory} style={{ minWidth: 220 }} options={ASSET_CATALOG.filter((entry) => entry.repeatable !== false).map((entry) => ({ value: entry.category, label: entry.label }))} />

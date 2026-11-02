@@ -1,6 +1,6 @@
 import { sanitizeAgentArtifact, sanitizeSharedArtifacts } from '@/lib/agents/sanitize'
 import { countBlockingIssues, dedupeIssues, inspectGameSpec, inspectPlayability, inspectVisualAssets, sanitizeIssues } from '@/lib/agents/validation'
-import { createFallbackGameSpec, normalizeGameSpec } from '@/lib/game-spec'
+import { authoredGameSpecBaseline, createFallbackGameSpec, normalizeGameSpec } from '@/lib/game-spec'
 import { stabilizeGameSpec } from '@/lib/game-spec-guardrails'
 import { isStructuredPromptBlank } from '@/lib/asset-catalog'
 import { inspectSelectedInspirations } from '@/lib/agents/inspiration-review'
@@ -79,7 +79,7 @@ function currentSpec(request: AgentExecuteRequest): GameSpec {
     || request.baseSpec
   if (!candidate) return deterministicFallback
   const source = request.baseSpec?.narrative?.source || candidate.narrative?.source
-  const baseline = source && deterministicFallback.narrative ? { ...deterministicFallback, narrative: { ...deterministicFallback.narrative, source } } : deterministicFallback
+  const baseline = authoredGameSpecBaseline(request.baseSpec,deterministicFallback) || (source && deterministicFallback.narrative ? { ...deterministicFallback, narrative: { ...deterministicFallback.narrative, source } } : deterministicFallback)
   return { ...stabilizeGameSpec(normalizeGameSpec(candidate, baseline, request.levelCount)), creationLanguage: agentCreationLanguage(request) }
 }
 

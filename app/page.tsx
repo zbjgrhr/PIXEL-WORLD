@@ -1,5 +1,6 @@
 'use client'
 
+import type { GameSpec } from '@/types'
 import { readCampaign, clearCampaign } from '@/lib/campaign-save'
 
 import React, { useEffect, useRef, useState, type CSSProperties } from 'react'
@@ -15,7 +16,7 @@ import { PRESET_THEMES } from '@/configs'
 import { getDefaultModel, getDefaultProvider } from '@/configs/image-providers'
 import { formatGenerationError } from '@/lib/format-generation-error'
 import { loadImageApiPrefs, loadProviderApiKey, saveImageApiPrefs } from '@/lib/image-api-prefs'
-import { cacheAssetUrl, removeCachedAssetClips, stripLargeAssetUrls } from '@/lib/asset-db'
+import { cacheSpecAssets, cacheAssetUrl, removeCachedAssetClips, stripLargeAssetUrls } from '@/lib/asset-db'
 import { prepareAnimationReferenceImages } from '@/lib/animation-references'
 import { animationClipDefaults, animationIsComplete, createActionStripAnimation, normalizeAnimationSpec, replaceAnimationClip } from '@/lib/asset-catalog'
 import { ASSET_TYPES } from '@/types'
@@ -351,10 +352,17 @@ export default function Home() {
     const theme = themes.find((item) => item.id === themeId)
     const spec = current.data?.spec || theme?.spec
     if (!spec) return
-    const nextSpec = { ...spec, assets: spec.assets.map((asset) => asset.id === assetId ? { ...asset, ...patch } : asset) }
+    const nextSpec = { ...spec, assets: spec.assets.map((asset) => asset.id === assetId ? { ...asset, ...patch, ...(patch.url!==undefined&&patch.url!==asset.url&&!Object.prototype.hasOwnProperty.call(patch,'original')?{original:undefined}:{}) } : asset) }
     updateTheme(themeId, (item) => ({ ...item, spec: nextSpec }))
     const nextData = buildGameDataFromSpec(nextSpec)
     setGameData(nextData, themeId)
+  }
+
+  const handleImportOriginals=async(themeId:string,base:GameSpec,next:GameSpec)=>{
+    if(getGameDataForTheme(themeId).data?.spec!==base)throw Error('作品已变化，请重新选择原图。')
+    await cacheSpecAssets(themeId,next,true)
+    if(getGameDataForTheme(themeId).data?.spec!==base)throw Error('缓存期间作品变化，本次未应用。')
+    updateTheme(themeId,item=>({...item,spec:next}));setGameData(buildGameDataFromSpec(next),themeId)
   }
 
   const handleUploadAsset = async (themeId: string, assetId: string, file: File, pose?: AnimationClipPose) => {
@@ -586,6 +594,7 @@ export default function Home() {
                     onRegenerateAsset={activeImageSource === 'upload' ? undefined : handleRegenerateAsset}
                     onUpdateAsset={handleUpdateAsset}
                     onUploadAsset={handleUploadAsset}
+                    onImportOriginals={handleImportOriginals}
                     onDeleteTheme={handleDeleteTheme}
                     onStartGame={openGameCover}
                   />

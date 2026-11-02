@@ -214,7 +214,11 @@ export type AnimationPose = 'idle' | 'walk' | 'jump' | 'attack' | 'meleeAttack' 
 export type AnimationClipPose = Exclude<AnimationPose, 'attack'>
 
 export interface AnimationClipSpec {
-  frameCount: 1 | 2 | 3
+  frameCount: number
+  frameOrder?: number[]
+  original?: OriginalImageSpec
+  originalPages?: Array<{ original: OriginalImageSpec; url?: string }>
+  frameRects?: Array<MapRect & { page: number }>
   fps: number
   loop: boolean
   enabled: boolean
@@ -251,6 +255,7 @@ export interface MotionSpec {
 }
 
 export interface AssetDefinition {
+  original?: OriginalImageSpec
   id: string
   category: AssetCategory
   title: string
@@ -266,6 +271,8 @@ export interface AssetDefinition {
   sound?: SoundSpec
   motion?: MotionSpec
 }
+
+export interface OriginalImageSpec { version: 1; fileName: string; sha256: string; width: number; height: number; bytes: number }
 
 export interface MusicSpec {
   tempo: number
@@ -295,6 +302,58 @@ export interface HeroSpec {
   maxHealth: number
   moveSpeed: number
   jumpPower: number
+  /** Optional advanced movement; legacy games retain their original controls. */
+  physics?: HeroPhysicsSpec
+  roster?: CharacterRosterSpec
+}
+
+export interface CharacterProfile {
+  id: string
+  name: string
+  assetId?: string
+  maxHealth: number
+  moveSpeed: number
+  jumpPower: number
+  physics?: HeroPhysicsSpec
+  width: number
+  height: number
+  meleeMultiplier: number
+  rangedMultiplier: number
+  weight: number
+}
+export interface CharacterRosterSpec { version: 1; initialId: string; allowSwitch: boolean; respawn: 'keep' | 'cycle' | 'weighted'; seed: number; characters: CharacterProfile[] }
+export interface CharacterRosterState { characterId: string; seed: number; draws: number }
+export interface BehaviorStage {
+  id: string
+  label: string
+  triggerDistance: number
+  triggerAbove: boolean
+  warningMs: number
+  activeMs: number
+  cooldownMs: number
+  repeats: number
+  motion: 'still' | 'offset' | 'chase' | 'stretch'
+  dx: number
+  dy: number
+  speed: number
+  leash: number
+  attack: 'none' | 'contact' | 'melee' | 'ranged'
+  attackEveryMs: number
+  vulnerable: boolean
+  transition: 'time' | 'health'
+  healthBelow: number
+}
+export interface BehaviorProgram { version: 1; loop: boolean; onDefeat: 'remove' | 'hazard'; stages: BehaviorStage[] }
+export interface BehaviorRuntime { index: number; enteredAt: number; lastAttackAt: number; repeat: number; baseX: number; baseY: number; width: number; height: number; resolved?: boolean; finished?: boolean }
+
+export interface HeroPhysicsSpec {
+  acceleration: number
+  gravity: number
+  airControl: number
+  jumpCount: number
+  releaseJumpSpeed: number
+  runUpBoost: number
+  runUpLimit: number
 }
 
 export interface WeaponSpec {
@@ -308,6 +367,7 @@ export interface WeaponSpec {
 }
 
 export interface EnemySpec {
+  program?: BehaviorProgram
   name: string
   appearance: string
   health: number
@@ -319,6 +379,7 @@ export interface EnemySpec {
 }
 
 export interface BossSpec {
+  program?: BehaviorProgram
   name: string
   appearance: string
   health: number
@@ -335,6 +396,7 @@ export interface CollectibleSpec {
 }
 
 export interface LevelSpec {
+  map?: AuthoredLevelMap
   id: string
   name: string
   environment: string
@@ -430,6 +492,7 @@ export interface TemplateReuseSelection {
 }
 
 export interface GameSpec {
+  reference?: ReferenceAnalysis
   /** Attribution retained when adapting a reviewed community template. */
   templateSources?:TemplateAttribution[]
   /** Work language; independent of the current interface language. Legacy works default to Chinese. */
@@ -480,6 +543,8 @@ export interface ObstacleData {
 }
 
 export interface SpawnPoint {
+  width?: number
+  height?: number
   id: string
   x: number
   y: number
@@ -489,6 +554,7 @@ export interface SpawnPoint {
 }
 
 export interface LevelData {
+  authoredMap?: AuthoredLevelMap
   id: string
   backgroundUrl: string
   groundUrl?: string
@@ -501,6 +567,44 @@ export interface LevelData {
   combatStartX?: number
   layoutVersion?: number
 }
+
+export interface MapRect { x: number; y: number; width: number; height: number }
+export interface AuthoredMapSpawn extends SpawnPoint { width: number; height: number }
+export type MapMechanism = MapRect & { id: string } & (
+  { kind: 'movingPlatform'; axis: 'x' | 'y'; distance: number; speed: number }
+  | { kind: 'trap'; delayMs: number; durationMs: number; cooldownMs: number }
+  | { kind: 'freeze' | 'reverse'; durationMs: number; cooldownMs: number }
+)
+export interface MapMechanismState {
+  entries: Record<string, { inside: boolean; activatedAt: number; nextAt: number }>
+  checkpointId?: string
+}
+export interface MapCheckpoint extends MapRect { id: string; respawn: { x: number; y: number } }
+export interface AuthoredLevelMap {
+  version: 1 | 2
+  width: number
+  height: number
+  groundY: number | null
+  player: MapRect
+  exit: MapRect
+  obstacles: ObstacleData[]
+  enemies: AuthoredMapSpawn[]
+  collectibles: AuthoredMapSpawn[]
+  boss?: AuthoredMapSpawn
+  mechanisms?: MapMechanism[]
+  checkpoints?: MapCheckpoint[]
+}
+export type ReferenceCategory = 'characters' | 'map' | 'controls' | 'enemies' | 'mechanisms' | 'completion'
+export interface ReferenceRequirement {
+  confirmationKey?: string
+  confirmed?: boolean
+  id: string
+  category: ReferenceCategory
+  policy: 'required' | 'creative' | 'unsupported'
+  description: string
+  evidence: string
+}
+export interface ReferenceAnalysis { version: 1; title: string; source: string; requirements: ReferenceRequirement[] }
 
 export interface GameAssets {
   characterUrl: string
@@ -599,6 +703,7 @@ export interface ThemesListProps {
 export type RegeneratingImages = Record<AssetType, boolean>
 
 export interface ThemePreviewProps {
+  onImportOriginals?: (themeId:string,base:GameSpec,next:GameSpec)=>Promise<void>
   isLoading: boolean
   loadingMessage?: string
   gameData?: GameData

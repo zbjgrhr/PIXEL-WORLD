@@ -21,6 +21,10 @@ import AiProviderChoice from './ui/AiProviderChoice'
 import ReadyAgentGuide, { READY_AGENT_VISUALS } from './ui/ReadyAgentGuide'
 import StageHeading from './ui/StageHeading'
 import GameSpecSummary from './ui/GameSpecSummary'
+import ActorRulesEditor from './ui/ActorRulesEditor'
+import HeroPhysicsEditor from './ui/HeroPhysicsEditor'
+import ReferenceAnalysisEditor from './ui/ReferenceAnalysisEditor'
+import ExactMapEditor from './ui/ExactMapEditor'
 import NarrativeEditor, { type RefinementScope } from './ui/NarrativeEditor'
 import WorkflowNotice, { type WorkflowFeedback } from './ui/WorkflowNotice'
 import { pendingNarrativeSuggestions, sameSpecExceptSuggestions } from '@/lib/narrative-suggestions'
@@ -46,6 +50,7 @@ interface AgentStudioProps {
   onTextConnectionChange?: (connection: { provider?: AgentProviderId; model?: string; apiKey: string; baseUrl?: string }) => void
   reviewTarget?: HTMLDivElement | null
   inputRevision?: number
+  reviewRevision?: number
   onDraftChange?: (spec: GameSpec, suggestionsOnly?: boolean) => void
   onRefine?: (scope: RefinementScope) => void
   completionNotice?: React.ReactNode
@@ -83,7 +88,7 @@ function artifactPreview(output?: Record<string, unknown>): string {
   return json.length > 20000 ? `${json.slice(0, 20000)}\n…（内容过长，已在界面截断）` : json
 }
 
-export default function AgentStudio({ embedded = false, projectId, sourcePrompt, projectName, briefReady, levelCount, baseSpec, creationLanguage, onOptimizePrompt, isOptimizing = false, onSpecReady, onApproved, onApprovedRestored, onBusyChange, onTextConnectionChange, reviewTarget, inputRevision = 0, onDraftChange, onRefine, completionNotice, onEditStory, onContinueAssets, onPlanningStateChange }: AgentStudioProps) {
+export default function AgentStudio({ embedded = false, projectId, sourcePrompt, projectName, briefReady, levelCount, baseSpec, creationLanguage, onOptimizePrompt, isOptimizing = false, onSpecReady, onApproved, onApprovedRestored, onBusyChange, onTextConnectionChange, reviewTarget, inputRevision = 0, reviewRevision = 0, onDraftChange, onRefine, completionNotice, onEditStory, onContinueAssets, onPlanningStateChange }: AgentStudioProps) {
   const [provider, setProvider] = useState<AgentProviderId>('openrouter')
   const [accessMode, setAccessMode] = useState<AiAccessMode>('ready')
   const [readyProvider, setReadyProvider] = useState<AgentProviderId | null>(null)
@@ -104,6 +109,15 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
   const webLlmAttempt = useRef(0)
   const cluster = useAgentCluster({ projectId, sourcePrompt, projectName, levelCount, baseSpec, creationLanguage, onSpecReady, onApproved, onApprovedRestored })
   const seenInputRevision = useRef(inputRevision)
+  const seenReviewRevision=useRef(reviewRevision)
+  useEffect(()=>{
+    if(cluster.restoring||seenReviewRevision.current===reviewRevision)return
+    seenReviewRevision.current=reviewRevision
+    // Reopening even the same package requires a fresh local check; a saved
+    // identical run must not restore its old approval over the import action.
+    const check=baseSpec?cluster.reviewLocalDraft(baseSpec,cluster.run?.modelLock||{provider:'openrouter',model:'google/gemini-2.5-flash'}):cluster.reset()
+    void check.catch(error=>setActionFeedback({tone:'error',title:'导入项目检查未完成',description:String(error)}))
+  },[reviewRevision,cluster.restoring,baseSpec,cluster.reviewLocalDraft,cluster.reset,cluster.run?.modelLock])
 
   useEffect(() => {
     if (seenInputRevision.current === inputRevision) return
@@ -501,6 +515,10 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
       {Boolean(cluster.run?.archivedTasks?.length) && <Collapse size="small" items={[{ key: 'revisions', label: '查看修改前的任务记录与用量', children: <Collapse size="small" items={cluster.run!.archivedTasks!.map((task, index) => ({ key: `${task.id}-${index}`, label: `${AGENT_ROLE_LABELS[task.role].zh} · ${task.usage?.totalTokens || 0} Token`, children: <><Paragraph>{task.summary || task.status}</Paragraph>{task.output && <pre className="workflow-history-output">{artifactPreview(task.output)}</pre>}</> }))} /> }]} />}
 
       {reviewTarget && createPortal(<div className="agent-review-content">
+        {(plannedSpec || baseSpec) && onDraftChange && <ReferenceAnalysisEditor spec={(plannedSpec || baseSpec)!} onChange={next => onDraftChange(next)} disabled={locked || isOptimizing} />}
+        {(plannedSpec || baseSpec) && onDraftChange && <ExactMapEditor spec={(plannedSpec || baseSpec)!} onChange={next => onDraftChange(next)} disabled={locked || isOptimizing} />}
+        {(plannedSpec || baseSpec) && onDraftChange && <HeroPhysicsEditor spec={(plannedSpec || baseSpec)!} onChange={next => onDraftChange(next)} disabled={locked || isOptimizing} />}
+        {(plannedSpec || baseSpec) && onDraftChange && <ActorRulesEditor spec={(plannedSpec || baseSpec)!} onChange={next => onDraftChange(next)} disabled={locked || isOptimizing} />}
         {(plannedSpec || baseSpec) && <GameSpecSummary spec={(plannedSpec || baseSpec)!} imageJobs={estimatedImageJobs(plannedSpec || baseSpec)} onEdit={onEditStory} />}
         {(plannedSpec || baseSpec) && onDraftChange && <NarrativeEditor spec={(plannedSpec || baseSpec)!} onChange={next => {
           const suggestionsOnly = sameSpecExceptSuggestions((plannedSpec || baseSpec)!, next)

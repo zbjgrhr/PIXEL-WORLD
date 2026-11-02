@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { createFallbackGameSpec, normalizeGameSpec } from '@/lib/game-spec'
+import { authoredGameSpecBaseline, createFallbackGameSpec, normalizeGameSpec } from '@/lib/game-spec'
 import { GameTheme, getThemeId, isCustomTheme, resolveValidTheme } from '@/lib/theme-utils'
 import { ASSET_TYPES } from '@/types'
 import { hydrateSpecAssets, stripLargeAssetUrls } from '@/lib/asset-db'
@@ -107,12 +107,17 @@ export function migrateGameData(input: unknown, themeId = 'Pixel World'): GameDa
   if (!data.data) return {}
   const levels = Array.isArray(data.data.levels) ? data.data.levels : []
   const fallback = createFallbackGameSpec(themeId, themeId, Math.max(1, levels.length))
-  const baseline = data.data.spec?.narrative && fallback.narrative ? { ...fallback, narrative: { ...fallback.narrative, source: data.data.spec.narrative.source } } : fallback
+  const savedSpec=data.data.spec
+  const baseline = authoredGameSpecBaseline(savedSpec,fallback) || (savedSpec?.narrative && fallback.narrative ? { ...fallback, narrative: { ...fallback.narrative, source: savedSpec.narrative.source } } : fallback)
   const normalized = normalizeGameSpec(data.data.spec || fallback, baseline, Math.max(1, levels.length))
   // Do not silently add new task gates to old saved games whose real actor
   // layouts were created before narrative tasks existed.
   const spec = data.data.spec?.narrative ? normalized : { ...normalized, narrative: undefined }
-  const migratedLevels: LevelData[] = levels.map((level, index) => ({
+  const authoredLevels = spec.levels.some(level => level.map) ? buildGameDataFromSpec(spec).data!.levels : undefined
+  const migratedLevels: LevelData[] = levels.map((level, index) => spec.levels[index]?.map && authoredLevels?.[index] ? {
+    ...authoredLevels[index], backgroundUrl: level.backgroundUrl || authoredLevels[index].backgroundUrl,
+    groundUrl: level.groundUrl || authoredLevels[index].groundUrl, obstacleUrl: level.obstacleUrl || authoredLevels[index].obstacleUrl,
+  } : ({
     id: level.id || `level-${index + 1}`,
     backgroundUrl: level.backgroundUrl || '',
     groundUrl: level.groundUrl || '',

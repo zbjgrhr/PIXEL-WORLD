@@ -77,9 +77,9 @@ export function stabilizeGameSpec(spec: GameSpec): GameSpec {
   const levels = spec.levels.map((level, index) => ({
     ...level,
     platformMode: inferredPlatformMode(level),
-    enemyCount: Math.min(index === spec.levels.length - 1 ? 5 : 6, Math.max(0, Math.round(level.enemyCount))),
-    collectibleCount: Math.min(8, Math.max(0, Math.round(level.collectibleCount))),
-    hasBoss: index === spec.levels.length - 1,
+    enemyCount: level.map ? level.map.enemies.length : Math.min(index === spec.levels.length - 1 ? 5 : 6, Math.max(0, Math.round(level.enemyCount))),
+    collectibleCount: level.map ? level.map.collectibles.length : Math.min(8, Math.max(0, Math.round(level.collectibleCount))),
+    hasBoss: level.map ? !!level.map.boss : index === spec.levels.length - 1,
   }))
 
   let assets = spec.assets

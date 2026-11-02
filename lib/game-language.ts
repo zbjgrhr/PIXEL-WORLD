@@ -5,6 +5,7 @@ export function createGameTranslator(language: string | undefined) {
     '尚无可试玩的游戏数据': 'No playable game is available yet', '返回制作台': 'Back to Studio',
     '出口已开放': 'Exit unlocked', '完成任务后开放出口': 'Complete the objectives to unlock the exit',
     '继续游戏': 'Resume', '暂停游戏': 'Pause', '打开游戏设置': 'Open Game Settings',
+    '导出试玩轨迹':'Export Playtest Trace',
     '当前关卡任务': 'Current Objectives', '剧情记录': 'Story Log', '交互 E': 'Interact · E',
     '出口已开启：走入传送门继续冒险': 'Exit unlocked: enter the portal to continue',
     '游戏已暂停': 'Paused', '主角倒下了': 'You Have Fallen', '冒险完成': 'Adventure Complete',

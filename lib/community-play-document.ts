@@ -1,4 +1,9 @@
 import {templateAttributionHtml} from './template-attribution'
+import {authoredMapRules} from './authored-map'
+import {characterRosterRules} from './character-roster'
+import {behaviorProgramRules} from './behavior-program'
+import {originalArtRules} from './original-art'
+import {heroPhysics} from './hero-physics'
 
 export const GAME_PREVIEW_SANDBOX='allow-scripts'
 export const GAME_PREVIEW_CSP="default-src 'none'; script-src 'nonce-__PREVIEW_NONCE__'; style-src 'unsafe-inline'; img-src blob:; media-src blob:; connect-src 'none'; font-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
@@ -21,6 +26,9 @@ export function buildGamePreviewDocument(files:Array<{name:string;bytes:Uint8Arr
     || !Array.isArray(project.levels) || !project.levels.length || project.levels.length>10 || !Array.isArray(runtime.levels) || runtime.levels.length!==project.levels.length
     || !project.hero || !project.weapon || !project.boss || !project.collectible || !Array.isArray(project.enemies) || project.enemies.length>8)throw new Error('Unsupported game specification')
   for(const [key,max] of [['maxHealth',1_000_000],['moveSpeed',50],['jumpPower',100]] as const)if(!number(project.hero[key],0,max))throw new Error('Invalid player parameters')
+  if(project.hero.roster){project.hero.roster=characterRosterRules.validate(project.hero.roster);for(const character of project.hero.roster.characters)if(character.assetId&&!project.assets.some((a:{id:string;enabled:boolean;kind:string})=>a.id===character.assetId&&a.enabled&&['image','spriteSheet'].includes(a.kind)))throw new Error('Invalid character sprite reference')}
+  for(const actor of [...project.enemies,project.boss])if(actor.program)actor.program=behaviorProgramRules.validate(actor.program)
+  if(project.hero.physics)project.hero.physics=heroPhysics.validate(project.hero.physics)
   for(const key of ['meleeDamage','rangedDamage','cooldownMs','projectileSpeed'])if(!number(project.weapon[key],0,1_000_000))throw new Error('Invalid weapon parameters')
   for(const enemy of [...project.enemies,project.boss])if(!number(enemy.health,0,1_000_000) || !number(enemy.damage,0,1_000_000))throw new Error('Invalid actor parameters')
   if(!number(project.collectible.value,0,1_000_000))throw new Error('Invalid collectible')
@@ -39,21 +47,29 @@ export function buildGamePreviewDocument(files:Array<{name:string;bytes:Uint8Arr
     if(!asset || typeof asset.id!=='string' || !Array.isArray(asset.levelIds) || asset.levelIds.length>10)throw new Error('Invalid asset plan')
     asset.url=assetUrl(asset.url,asset.enabled!==false)
     if(asset.animation?.clips && (Object.keys(asset.animation.clips).length>7 || Object.keys(asset.animation.clips).some(pose=>!['idle','walk','jump','meleeAttack','rangedAttack','hit','death'].includes(pose))))throw new Error('Unsupported animation states')
+    if(asset.original)asset.original=originalArtRules.validate(asset.original)
     if(asset.animation?.clips)for(const clip of Object.values(asset.animation.clips) as Array<Record<string,unknown>|null>){
       if(!clip)continue
       if(!count(clip.frameCount,64) || !number(clip.frameCount,1,64) || !number(clip.fps,0,60))throw new Error('Invalid animation parameters')
+      if(clip.original){const meta=originalArtRules.validate(clip.original);const layout=originalArtRules.layout(clip);if(layout){Object.assign(clip,layout);for(const [i,p] of layout.originalPages.entries())if(i)p.url=assetUrl(p.url,asset.enabled!==false&&clip.enabled!==false)}if(!layout&&!originalArtRules.geometry(meta.width,meta.height,Number(clip.frameCount)))throw new Error('Invalid original strip geometry');originalArtRules.order(clip.frameOrder,Number(clip.frameCount));clip.original=meta}
       clip.url=assetUrl(clip.url,asset.enabled!==false && clip.enabled!==false)
     }
   }
   for(let i=0;i<runtime.levels.length;i++){
     const level=runtime.levels[i],setting=project.levels[i]
-    if(!level || level.id!==setting.id || !count(setting.enemyCount,12) || !count(setting.collectibleCount,10) || !setting.music || !Array.isArray(setting.music.scale) || setting.music.scale.length>16 || setting.music.scale.some((note:unknown)=>!number(note,-24,24)) || !number(setting.music.tempo,50,220) || !number(setting.music.rootFrequency,55,880) || !number(setting.music.intensity,0,1) || !setting.effects
-      || level.worldWidth!==undefined && !number(level.worldWidth,1120,10000))throw new Error('Unsupported level layout')
+    const authored=setting?.map?authoredMapRules.validate(setting.map):undefined
+    if(!level || level.id!==setting.id || !count(setting.enemyCount,authored?512:12) || !count(setting.collectibleCount,authored?512:10) || !setting.music || !Array.isArray(setting.music.scale) || setting.music.scale.length>16 || setting.music.scale.some((note:unknown)=>!number(note,-24,24)) || !number(setting.music.tempo,50,220) || !number(setting.music.rootFrequency,55,880) || !number(setting.music.intensity,0,1) || !setting.effects
+      || level.worldWidth!==undefined && !number(level.worldWidth,authored?320:1120,authored?32768:10000))throw new Error('Unsupported level layout')
+    if(authored){
+      if(!level.authoredMap || level.layoutVersion!==3 || level.worldWidth!==authored.width)throw new Error('Authored layout missing or inconsistent')
+      const original=authoredMapRules.validate(level.authoredMap),geometry=authoredMapRules.validate({...original,obstacles:level.obstacles,enemies:level.enemySpawns,collectibles:level.collectibleSpawns,boss:level.bossSpawn})
+      if(JSON.stringify(original)!==JSON.stringify(authored) || JSON.stringify(geometry)!==JSON.stringify(authored))throw new Error('Authored layout differs from the game specification')
+    }else if(level.authoredMap)throw new Error('Unexpected authored layout')
     for(const [key,max] of [['obstacles',1000],['enemySpawns',40],['collectibleSpawns',40]] as const){
-      if(!Array.isArray(level[key]) || level[key].length>max)throw new Error('Invalid entity count')
+      if(!Array.isArray(level[key]) || level[key].length>(authored?512:max))throw new Error('Invalid entity count')
       for(const entity of level[key])if(!entity || !number(entity.x,-10000,100000) || !number(entity.y,-10000,100000))throw new Error('Invalid entity position')
     }
-    if(level.obstacles.some((entity:{width:unknown;height:unknown})=>!number(entity.width,1,2048) || !number(entity.height,1,2048)))throw new Error('Invalid obstacle size')
+    if(level.obstacles.some((entity:{width:unknown;height:unknown})=>!number(entity.width,1,authored?32768:2048) || !number(entity.height,1,authored?32768:2048)))throw new Error('Invalid obstacle size')
     if(level.bossSpawn && (!number(level.bossSpawn.x,-10000,100000) || !number(level.bossSpawn.y,-10000,100000)))throw new Error('Invalid Boss position')
     for(const key of ['backgroundUrl','groundUrl','obstacleUrl'])level[key]=assetUrl(level[key]) || ''
   }
@@ -77,7 +93,7 @@ export function buildGamePreviewDocument(files:Array<{name:string;bytes:Uint8Arr
         const resources=new Map();for(const file of event.data.resources){const url=URL.createObjectURL(new Blob([file.bytes],{type:file.mime}));urls.add(url);resources.set(file.name,url)}
         const projectNode=document.getElementById('project-data'),runtimeNode=document.getElementById('runtime-data'),project=JSON.parse(projectNode.textContent),runtime=JSON.parse(runtimeNode.textContent);
         const replace=value=>value?resources.get(value):undefined;
-        for(const asset of project.assets){asset.url=replace(asset.url);if(asset.animation?.clips)for(const clip of Object.values(asset.animation.clips))if(clip)clip.url=replace(clip.url)}
+        for(const asset of project.assets){asset.url=replace(asset.url);if(asset.animation?.clips)for(const clip of Object.values(asset.animation.clips))if(clip){clip.url=replace(clip.url);if(clip.originalPages)for(let i=1;i<clip.originalPages.length;i++)clip.originalPages[i].url=replace(clip.originalPages[i].url)}}
         for(const level of runtime.levels)for(const key of ['backgroundUrl','groundUrl','obstacleUrl'])level[key]=replace(level[key]) || '';
         projectNode.textContent=JSON.stringify(project);runtimeNode.textContent=JSON.stringify(runtime);
         const script=document.createElement('script');script.nonce=nonce;script.textContent=JSON.parse(document.getElementById('engine-source').textContent);document.body.append(script);

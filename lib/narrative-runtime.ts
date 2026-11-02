@@ -34,6 +34,10 @@ export function createNarrativeEngine() {
     const value = JSON.stringify(canonical([
       ...(spec.creationLanguage === 'en' ? ['language:en'] : []), spec.title, narrative,
       [spec.hero.maxHealth, spec.hero.moveSpeed, spec.hero.jumpPower],
+      ...(spec.hero.physics ? [spec.hero.physics] : []),
+      ...(spec.hero.roster ? [spec.hero.roster] : []),
+      ...(spec.boss.program || spec.enemies.some(e => e.program) ? [spec.boss.program,spec.enemies.map(e => e.program)] : []),
+      ...(spec.levels.some(level => level.map) ? [spec.levels.map(level => level.map)] : []),
       [spec.weapon.mode, spec.weapon.meleeDamage, spec.weapon.rangedDamage, spec.weapon.cooldownMs, spec.weapon.projectileSpeed],
       spec.enemies.map((enemy, index) => [enemy.health, enemy.damage, enemy.speed, enemy.behavior, enemy.category || ['groundEnemy', 'airEnemy', 'waterEnemy'][index], enemy.assetId]),
       [spec.boss.health, spec.boss.damage, spec.boss.speed],

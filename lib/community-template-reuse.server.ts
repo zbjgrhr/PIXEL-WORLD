@@ -16,9 +16,9 @@ export function prepareTemplateReuse(template:ReviewedTemplate,rawText:string,mo
   if(!templateSources)throw new Error('attribution-limit')
   if(mode==='story')return {title:template.title,story:template.story,language:template.language,levelCount:template.levelCount,prompt:buildStructuredPrompt(template.levelCount),spec:null,templateSources}
   const normalized=normalizeGameSpec(raw,raw,template.levelCount)
-  const spec:GameSpec={...normalized,templateSources,assets:normalized.assets.map(asset=>({...asset,url:undefined,source:undefined,error:undefined,
+  const spec:GameSpec={...normalized,templateSources,assets:normalized.assets.map(asset=>({...asset,original:undefined,url:undefined,source:undefined,error:undefined,
     status:asset.kind==='image' || asset.kind==='spriteSheet'?'pending':'success',
-    animation:asset.animation?{...asset.animation,clips:asset.animation.clips?Object.fromEntries(Object.entries(asset.animation.clips).map(([pose,clip])=>[pose,clip?{...clip,url:undefined,source:undefined,error:undefined,status:'pending'}:clip])):undefined}:undefined,
+    animation:asset.animation?{...asset.animation,clips:asset.animation.clips?Object.fromEntries(Object.entries(asset.animation.clips).map(([pose,clip])=>[pose,clip?{...clip,original:undefined,originalPages:undefined,frameRects:undefined,frameOrder:undefined,url:undefined,source:undefined,error:undefined,status:'pending'}:clip])):undefined}:undefined,
   }))}
   if(spec.narrative)spec.narrative={...spec.narrative,source:{...spec.narrative.source,originalTitle:template.title,originalStory:template.story,origin:'player'}}
   return {title:template.title,story:template.story,language:template.language,levelCount:template.levelCount,prompt:serializeGameSpec(spec),spec,templateSources}

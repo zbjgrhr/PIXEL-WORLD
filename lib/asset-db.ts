@@ -62,14 +62,17 @@ export async function removeCachedAssetClips(projectId: string, assetId: string)
   database.close()
 }
 
-export async function cacheSpecAssets(projectId: string, spec: GameSpec): Promise<void> {
+function originalCacheKey(asset: GameSpec['assets'][number], pose?: string) { const metadata = pose ? asset.animation?.clips?.[pose as keyof typeof asset.animation.clips]?.original : asset.original; return asset.id + (pose ? ':clip:' + pose : '') + (metadata ? ':original:' + metadata.sha256 : '') }
+
+export async function cacheSpecAssets(projectId: string, spec: GameSpec, originalsOnly=false): Promise<void> {
   await Promise.all(spec.assets.flatMap((asset) => {
     const jobs: Promise<void>[] = []
-    if (asset.url) jobs.push(cacheAssetUrl(projectId, asset.id, asset.url))
+    if (asset.url && (!originalsOnly||asset.original)) jobs.push(cacheAssetUrl(projectId, originalCacheKey(asset), asset.url))
     const animation = asset.kind === 'spriteSheet' ? normalizeAnimationSpec(asset.animation) : undefined
     for (const pose of animationClipPoses(asset)) {
       const url = animation?.clips?.[pose]?.url
-      if (url) jobs.push(cacheAssetUrl(projectId, `${asset.id}:clip:${pose}`, url))
+      for(const [pageIndex,page] of (animation?.clips?.[pose]?.originalPages||[]).entries())if(pageIndex&&page.url)jobs.push(cacheAssetUrl(projectId,`${asset.id}:clip:${pose}:page:${pageIndex}:original:${page.original.sha256}`,page.url))
+      if (url && (!originalsOnly||animation?.clips?.[pose]?.original)) jobs.push(cacheAssetUrl(projectId, originalCacheKey(asset,pose), url))
     }
     return jobs
   }))
@@ -104,14 +107,15 @@ export function hydrateSpecAssetsWithUrls(spec: GameSpec, urls: Record<string, s
         const clips = { ...animation.clips }
         for (const pose of animationClipPoses(asset)) {
           const previous = clips[pose]!
-          const url = resolve(previous.url, `${asset.id}:clip:${pose}`)
+          const url = resolve(previous.url, originalCacheKey(asset,pose))
           const invalid = ['failed', 'cancelled', 'generating'].includes(previous.status)
-          clips[pose] = { ...previous, url, status: invalid ? previous.status : url ? 'success' : 'pending' }
+          const originalPages=previous.originalPages?.map((p,i)=>({...p,url:i?resolve(p.url,`${asset.id}:clip:${pose}:page:${i}:original:${p.original.sha256}`):undefined}))
+          clips[pose] = { ...previous, originalPages, url, status: invalid ? previous.status : url&&(!originalPages||originalPages.every((p,i)=>!i||p.url)) ? 'success' : 'pending' }
         }
         const complete = animationClipPoses(asset).every((pose) => Boolean(clips[pose]?.url) && clips[pose]?.status === 'success')
-        return { ...asset, animation: { ...animation, clips }, url: clips.idle?.url || resolve(asset.url, asset.id), status: complete ? 'success' : 'pending', error: complete ? undefined : asset.error }
+        return { ...asset, animation: { ...animation, clips }, url: clips.idle?.url || resolve(asset.url, originalCacheKey(asset)), status: complete ? 'success' : 'pending', error: complete ? undefined : asset.error }
       }
-      const url = resolve(asset.url, asset.id)
+      const url = resolve(asset.url, originalCacheKey(asset))
       return url ? { ...asset, url, status: 'success', error: undefined } : { ...asset, url: undefined, status: asset.kind === 'image' ? 'pending' : asset.status }
     }),
   }
@@ -124,9 +128,9 @@ export function stripLargeAssetUrls(spec: GameSpec): GameSpec {
       const strip = (url: string | undefined, key: string) => url?.startsWith('data:') || url?.startsWith('blob:') ? `cached-image:${key}` : url
       const animation = asset.animation?.clips ? {
         ...asset.animation,
-        clips: Object.fromEntries(Object.entries(asset.animation.clips).map(([pose, clip]) => [pose, clip ? { ...clip, url: strip(clip.url, `${asset.id}:clip:${pose}`) } : clip])),
+        clips: Object.fromEntries(Object.entries(asset.animation.clips).map(([pose, clip]) => [pose, clip ? { ...clip, originalPages:clip.originalPages?.map((p,i)=>({...p,url:i?strip(p.url,`${asset.id}:clip:${pose}:page:${i}:original:${p.original.sha256}`):undefined})),url: strip(clip.url, originalCacheKey(asset,pose)) } : clip])),
       } : asset.animation
-      return { ...asset, url: strip(asset.url, asset.id), animation }
+      return { ...asset, url: strip(asset.url, originalCacheKey(asset)), animation }
     }),
   }
 }
@@ -140,7 +144,7 @@ export function assetMetadataForReview(spec: GameSpec): GameSpec {
       url: asset.url ? `cached-image:${asset.id}` : undefined,
       animation: asset.animation?.clips ? {
         ...asset.animation,
-        clips: Object.fromEntries(Object.entries(asset.animation.clips).map(([pose, clip]) => [pose, clip ? { ...clip, url: clip.url ? `cached-image:${asset.id}:${pose}` : undefined } : clip])),
+        clips: Object.fromEntries(Object.entries(asset.animation.clips).map(([pose, clip]) => [pose, clip ? { ...clip, originalPages:clip.originalPages?.map((p,i)=>({...p,url:i&&p.url?`cached-image:${asset.id}:${pose}:page:${i}`:undefined})),url: clip.url ? `cached-image:${asset.id}:${pose}` : undefined } : clip])),
       } : asset.animation,
     })),
   }

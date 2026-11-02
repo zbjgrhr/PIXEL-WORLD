@@ -12,8 +12,9 @@ import {readStoredGameArchive,gameArchiveWorkerSource} from './community-play-ar
 import {buildGamePreviewDocument,GAME_PREVIEW_CSP,GAME_PREVIEW_SANDBOX} from './community-play-document'
 
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks()})
-async function archive(language:'zh-CN'|'en'='en'){
+async function archive(language:'zh-CN'|'en'='en',authored=false){
   const spec=createFallbackGameSpec('A penguin finds its mother.','Preview fixture',3,language)
+  if(authored)spec.levels[0]={...spec.levels[0],enemyCount:0,collectibleCount:0,hasBoss:false,map:{version:1,width:960,height:1800,groundY:1600,player:{x:37,y:1536,width:32,height:64},exit:{x:800,y:1504,width:64,height:96},obstacles:[{id:'platform',type:'platform',x:300,y:1400,width:130,height:16}],enemies:[],collectibles:[]}}
   spec.assets=spec.assets.map(asset=>({...asset,enabled:false,url:undefined,animation:undefined}))
   const svg=await readFile(new URL('../public/builtin/hero.svg',import.meta.url))
   spec.assets[0]={...spec.assets[0],enabled:true,kind:'image',status:'success',url:`data:image/svg+xml;base64,${svg.toString('base64')}`}
@@ -33,6 +34,18 @@ async function workerCheck(bytes:Uint8Array,overrides:Record<string,unknown>={})
   return result[0]
 }
 describe('native exported ZIP playback without arbitrary uploaded code',()=>{
+  it('retains authored maps in preview and rejects altered geometry in duplicated runtime data',async()=>{
+    const files=readStoredGameArchive((await archive('en',true)).buffer),encoder=new TextEncoder(),decoder=new TextDecoder()
+    const preview=buildGamePreviewDocument(files,'12345678-1234-4234-8234-123456789abc')
+    const originalHtml=decoder.decode(files.find(f=>f.name==='index.html')!.bytes)
+    const matched=originalHtml.match(/id="runtime-data">([\s\S]*?)<\/script>/)!
+    const runtime=JSON.parse(matched[1])
+    expect(preview.html).toContain('"worldWidth":960')
+    expect(runtime.levels[0].authoredMap.player.x).toBe(37)
+    runtime.levels[0].authoredMap.player.x=99
+    const modified=files.map(f=>f.name==='index.html'?{...f,bytes:encoder.encode(originalHtml.replace(matched[1],JSON.stringify(runtime)))}:f)
+    expect(()=>buildGamePreviewDocument(modified,'12345678-1234-4234-8234-123456789abc')).toThrow(/differs/)
+  })
   it('keeps reproducible engine and style bytes across exporter/server builds',()=>{
     expect(offlineGameRuntimeSource()).toBe(engine.source)
     expect(createHash('sha256').update(engine.source).digest('hex')).toBe(engine.sha256)

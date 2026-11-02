@@ -45,6 +45,7 @@ import { mergeRefinement, type RefinementScope } from '@/lib/refine-game-spec'
 import { sameSpecExceptSuggestions } from '@/lib/narrative-suggestions'
 import { preservePlanningMedia } from '@/lib/agents/draft-revision'
 import { normalizeGameSpec } from '@/lib/game-spec'
+import ProjectImport from './ui/ProjectImport'
 import { mergeCompletedDraft } from '@/lib/completed-draft'
 import { normalizeCreationLanguage } from '@/lib/creation-language'
 import { translateUiText } from '@/lib/ui-locale'
@@ -122,7 +123,7 @@ function composeProjectPrompt(name: string, story: string, prompt: string, level
 }
 
 function patchSpecAsset(spec: GameSpec, id: string, patch: Partial<AssetDefinition>): GameSpec {
-  return { ...spec, assets: spec.assets.map((asset) => asset.id === id ? { ...asset, ...patch } : asset) }
+  return { ...spec, assets: spec.assets.map((asset) => asset.id === id ? { ...asset, ...patch, ...(patch.url!==undefined&&patch.url!==asset.url&&!Object.prototype.hasOwnProperty.call(patch,'original')?{original:undefined}:{}) } : asset) }
 }
 
 const SideMenu: React.FC<SideMenuProps> = ({
@@ -185,6 +186,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
   const briefRevisionRef = useRef(0)
   const templateSourcesRef=useRef<TemplateAttribution[]>([])
   const [inputRevision, setInputRevision] = useState(0)
+  const [reviewRevision,setReviewRevision]=useState(0)
   const [agentReviewTarget, setAgentReviewTarget] = useState<HTMLDivElement | null>(null)
 
   useEffect(() => { onPreviewStaleChange?.(previewStale) }, [previewStale, onPreviewStaleChange])
@@ -335,7 +337,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
     templateSourcesRef.current=sources;optimizedInputRef.current=null
     setCreationLanguage(selection.language);setCustomThemeName(selection.title);setCustomStory(selection.story)
     setLevelCount(selection.levelCount);setCustomPrompt(selection.prompt);setOptimizedSpec(selection.spec)
-    setAgentApproved(false);setPlanningLabel(selection.spec?'草案待检查':'尚未补全')
+    setAgentApproved(false);setPlanningLabel(selection.spec?'草案待检查':'尚未补全');setReviewRevision(value=>value+1)
     if(selection.spec){
       try{
         localStorage.setItem(DRAFT_KEY,JSON.stringify({name:selection.title,story:selection.story,prompt:selection.prompt,spec:stripLargeAssetUrls(selection.spec)}))
@@ -375,6 +377,15 @@ const SideMenu: React.FC<SideMenuProps> = ({
         : `整体像素风格：${nextStyle}\n${sourcePrompt}`)
     }
     message.success('已加入构想，你可以继续修改。')
+  }
+
+  const importSpecRef=useRef(optimizedSpec)
+  importSpecRef.current=optimizedSpec
+  const importOriginalAssets=async(base:GameSpec,next:GameSpec)=>{
+    if(importSpecRef.current!==base)throw Error('草稿已变化，请重新选择文件。')
+    await cacheSpecAssets(DRAFT_PROJECT_ID,next,true)
+    if(importSpecRef.current!==base)throw Error('缓存期间草稿变化，已取消应用；原图按内容指纹独立缓存。')
+    updateSpec(next)
   }
 
   const uploadDraftAsset = async (assetId: string, file: File, pose?: AnimationClipPose) => {
@@ -738,12 +749,13 @@ const SideMenu: React.FC<SideMenuProps> = ({
         if (!job.pose) return updateAsset(job.assetId, { ...current, ...patch })
         const animation = current.animation?.layoutVersion === 3 ? normalizeAnimationSpec(current.animation) : createActionStripAnimation()
         const updatedClip = { ...animation.clips?.[job.pose]!, ...clipPatch }
+        if(clipPatch?.url&&clipPatch.url!==animation.clips?.[job.pose]?.url){updatedClip.original=undefined;updatedClip.frameOrder=undefined}
         const clips = updatedClip.status === 'success'
           ? replaceAnimationClip(current, job.pose, updatedClip).animation!.clips!
           : { ...animation.clips, [job.pose]: updatedClip }
         const statuses = Object.values(clips).filter(clip => clip?.enabled !== false).map(clip => clip?.status)
         const failedClip = Object.values(clips).find(clip => clip?.status === 'failed')
-        const next = { ...current, ...patch, animation: { ...animation, clips }, url: clips.idle?.url }
+        const next = { ...current, ...patch, original:clips.idle?.original, animation: { ...animation, clips }, url: clips.idle?.url }
         next.status = statuses.includes('generating') ? 'generating' : statuses.includes('failed') ? 'failed' : statuses.includes('cancelled') ? 'cancelled' : animationIsComplete(next) ? 'success' : 'pending'
         if (failedClip) next.error = failedClip.error
         updateAsset(job.assetId, next)
@@ -959,6 +971,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
             onContinueAssets={() => onStageChange('assets')}
             onPlanningStateChange={handlePlanningStateChange}
             inputRevision={inputRevision}
+            reviewRevision={reviewRevision}
           /></div>
 
         </section>
@@ -994,6 +1007,14 @@ const SideMenu: React.FC<SideMenuProps> = ({
         <h2>{activeStage === 'idea' ? '先写游戏名称和故事' : activeStage === 'agents' ? '完善游戏设定' : '为游戏准备画面'}</h2>
         <p>{activeStage === 'idea' ? '写清主角是谁、想完成什么。后面的 AI 策划和画面会以此为依据。' : activeStage === 'agents' ? '先补全草案，再确认游戏内容。文字模型和完整 Agent 策划都可选。' : '在左栏选图片来源，在这里逐项生成或上传；右栏可以查看成品。'}</p>
       </header>
+      <ProjectImport disabled={isLoading||isOptimizing||isAgentBusy} revision={optimizedSpec} onLoad={async spec=>{
+        const expected=importSpecRef.current
+        await cacheSpecAssets(DRAFT_PROJECT_ID,spec)
+        if(importSpecRef.current!==expected)throw Error('缓存期间草稿变化，请重新导入。')
+        const story=spec.narrative?.source.originalStory||spec.backgroundStory||spec.title
+        if(!applyTemplateSelection({title:spec.title,story,language:normalizeCreationLanguage(spec.creationLanguage),levelCount:spec.levels.length,prompt:serializeGameSpec(spec),spec,templateSources:spec.templateSources||[]}))throw Error('当前无法载入项目。')
+        onStageChange?.('agents');message.success('项目已载入草稿，请重新检查和批准。')
+      }}/>
       {activeStage === 'idea' && <section id="game-idea" className="studio-section prompt-section section-anchor studio-workspace-editor">
         <StageHeading title="名称与故事" />
         <ThemeCustomizer
@@ -1029,7 +1050,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
       </section>}
       {activeStage === 'assets' && <section id="asset-workshop" className="section-anchor studio-workspace-assets">
         {optimizedSpec && agentApproved
-          ? <AssetPlanner showBatchAction={false} spec={optimizedSpec} onChange={updateSpec} onGenerate={() => { void generateSelectedAssets() }} onCancel={() => abortRef.current?.abort()} onTestApi={() => { void testApi() }} onUpload={uploadDraftAsset} onFillMissing={() => { void fillMissingWithBuiltin().catch((error: unknown) => reportImageError(error instanceof Error ? error.message : '内置素材补齐失败。')) }} imageSource={imageSource} isGenerating={isLoading} isTesting={isTesting} progress={generationProgress} />
+          ? <AssetPlanner showBatchAction={false} spec={optimizedSpec} onChange={updateSpec} onGenerate={() => { void generateSelectedAssets() }} onCancel={() => abortRef.current?.abort()} onTestApi={() => { void testApi() }} onUpload={uploadDraftAsset} onImportOriginals={importOriginalAssets} onFillMissing={() => { void fillMissingWithBuiltin().catch((error: unknown) => reportImageError(error instanceof Error ? error.message : '内置素材补齐失败。')) }} imageSource={imageSource} isGenerating={isLoading} isTesting={isTesting} progress={generationProgress} />
           : <div className="studio-section nav-section-placeholder"><StageHeading title="图片和声音素材" /><p>先在 AI 策划中检查并批准游戏内容，接着就能上传或生成素材。</p></div>}
       </section>}
     </div>, workspaceTarget)}

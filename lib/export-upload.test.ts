@@ -119,7 +119,8 @@ describe('offline export with uploaded art', () => {
     now += 1000
     frame!(now)
     expect(read().player.x).toBe(initialX)
-    expect(saved.size).toBe(1)
+    expect([...saved.keys()].filter(key => !key.endsWith(':trace'))).toHaveLength(1)
+    expect([...saved.keys()].filter(key => key.endsWith(':trace'))).toHaveLength(1)
     hidden = false
     listeners.get('keydown')!({ key: 'Escape', preventDefault: () => undefined })
     listeners.get('blur')!({ key: '', preventDefault: () => undefined })
@@ -186,7 +187,8 @@ describe('offline export with uploaded art', () => {
     expect(read().story.endingSeen).toBe(true)
     expect(read().won).toBe(true)
     persist!()
-    expect(saved.size).toBe(1)
+    expect([...saved.keys()].filter(key => !key.endsWith(':trace'))).toHaveLength(1)
+    expect([...saved.keys()].filter(key => key.endsWith(':trace'))).toHaveLength(1)
     new Function(exportedRuntime)()
     await Promise.resolve()
     await Promise.resolve()
@@ -198,7 +200,7 @@ describe('offline export with uploaded art', () => {
     expect(read().story.completedLevels).toEqual([])
     expect(read().story.endingSeen).toBe(false)
     expect(read().won).toBe(false)
-    expect(saved.size).toBe(0)
+    expect([...saved.keys()].filter(key => !key.endsWith(':trace'))).toHaveLength(0)
   })
   it('embeds the current story, chapter tasks and ending in the offline package', async () => {
     const story = '小企鹅在日本世界发现妈妈失踪了。他追踪熊猫Boss，最后救出了妈妈。'

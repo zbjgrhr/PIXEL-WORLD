@@ -13,6 +13,7 @@ export function currentRunSpec(run: AgentRun): GameSpec | undefined {
 
 export function changedDraftGroups(before: GameSpec, after: GameSpec): AgentDraftChangeGroup[] {
   const groups: AgentDraftChangeGroup[] = []
+  if (different(before.reference, after.reference)) groups.push('requirements')
   const a = before.narrative, b = after.narrative
   if ((before.creationLanguage || 'zh-CN') !== (after.creationLanguage || 'zh-CN') || before.title !== after.title || before.version !== after.version || before.levels.length !== after.levels.length || a?.source.originalStory !== b?.source.originalStory || a?.source.originalTitle !== b?.source.originalTitle) groups.push('requirements')
   const story = (spec: GameSpec) => [spec.world, spec.backgroundStory, spec.creativeBrief?.heroGoal, ...(['premise', 'incitingIncident', 'motivation', 'conflict', 'bossRelation', 'resolution', 'opening', 'ending'] as const).map(key => spec.narrative?.[key])]
@@ -20,7 +21,7 @@ export function changedDraftGroups(before: GameSpec, after: GameSpec): AgentDraf
   const cast = (spec: GameSpec) => [spec.narrative?.characters, ...[spec.hero, spec.boss, spec.weapon, spec.collectible, ...spec.enemies].map(item => [item.name, item.appearance])]
   if (different(cast(before), cast(after))) groups.push('characters')
   const gameplay = (spec: GameSpec) => [spec.hero.maxHealth, spec.hero.moveSpeed, spec.hero.jumpPower, spec.weapon, spec.boss, spec.collectible, spec.enemies].map(value => value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'name' && key !== 'appearance')) : value)
-  if (different([gameplay(before), before.creativeBrief?.difficulty], [gameplay(after), after.creativeBrief?.difficulty])) groups.push('gameplay')
+  if (different([gameplay(before), before.hero.physics, before.hero.roster, before.creativeBrief?.difficulty], [gameplay(after), after.hero.physics, after.hero.roster, after.creativeBrief?.difficulty])) groups.push('gameplay')
   if (different([before.levels, a?.chapters, a?.clues, before.creativeBrief?.pacing], [after.levels, b?.chapters, b?.clues, after.creativeBrief?.pacing])) groups.push('chapters')
   if (different([before.visualStyle, before.creativeBrief?.identityRules], [after.visualStyle, after.creativeBrief?.identityRules])) groups.push('art')
   // Cache hydration and successful image uploads do not invalidate text planning.

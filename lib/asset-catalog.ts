@@ -1,3 +1,4 @@
+import { originalArtRules } from './original-art'
 import type {
   AnimationClipPose,
   AnimationClipSpec,
@@ -144,16 +145,19 @@ export function normalizeAnimationSpec(value: unknown): AnimationSpec {
     const clips = Object.fromEntries(ANIMATION_CLIP_POSES.map((pose) => {
       const clip = raw.clips?.[pose] || {}
       const defaults = CLIP_DEFAULTS[pose]
+      const original=clip.original?originalArtRules.validate(clip.original):undefined
       const rawFrames = Number(clip.frameCount)
-      const frameCount = ([1, 2, 3].includes(rawFrames) ? rawFrames : defaults.frameCount) as 1 | 2 | 3
+      const frameCount = original ? rawFrames : [1, 2, 3].includes(rawFrames) ? rawFrames : defaults.frameCount
+      const originalLayout=original?originalArtRules.layout(clip):undefined
+      if(original&&!originalLayout&&!originalArtRules.geometry(original.width,original.height,frameCount))throw Error('Invalid original frame geometry')
       const rawFps = Number(clip.fps)
       return [pose, {
         ...defaults,
-        frameCount,
-        fps: Number.isFinite(rawFps) ? Math.max(1, Math.min(12, rawFps)) : defaults.fps,
-        loop: pose === 'walk',
+        ...originalLayout, frameCount, original, frameOrder:original?originalArtRules.order(clip.frameOrder,frameCount):undefined,
+        fps: Number.isFinite(rawFps) ? Math.max(1, Math.min(original?60:12, rawFps)) : defaults.fps,
+        loop: original && typeof clip.loop === 'boolean' ? clip.loop : pose === 'walk',
         enabled: typeof clip.enabled === 'boolean' ? clip.enabled : defaults.enabled,
-        status: ['generating', 'failed', 'cancelled'].includes(String(clip.status)) ? clip.status as AnimationClipSpec['status'] : clip.url ? 'success' : 'pending',
+        status: ['generating', 'failed', 'cancelled'].includes(String(clip.status)) ? clip.status as AnimationClipSpec['status'] : clip.url && (!originalLayout||originalLayout.originalPages.every((p,i)=>!i||p.url)) ? 'success' : 'pending',
         url: typeof clip.url === 'string' && clip.url ? clip.url : undefined,
         error: typeof clip.error === 'string' && clip.error ? clip.error : undefined,
         source: clip.source === 'builtin-fallback' ? 'builtin-fallback' as const : undefined,
@@ -222,7 +226,7 @@ export function replaceAnimationClip(asset: AssetDefinition, pose: AnimationClip
     }
   }
   clips[pose] = clip
-  const next = { ...asset, animation: { ...animation, clips }, url: clips.idle?.url, error: undefined }
+  const next = { ...asset, original:clips.idle?.original, animation: { ...animation, clips }, url: clips.idle?.url, error: undefined }
   return { ...next, status: animationIsComplete(next) ? 'success' : 'pending' }
 }
 

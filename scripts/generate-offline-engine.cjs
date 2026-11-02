@@ -10,6 +10,12 @@ const runtimeModules=new Map([
   ['./narrative-runtime','lib/narrative-runtime.ts'],
   ['./game-language','lib/game-language.ts'],
   ['./enemy-combat','lib/enemy-combat.ts'],
+  ['./hero-physics','lib/hero-physics.ts'],
+  ['./original-art','lib/original-art.ts'],
+  ['./playtest-trace','lib/playtest-trace.ts'],
+  ['./character-roster','lib/character-roster.ts'],
+  ['./behavior-program','lib/behavior-program.ts'],
+  ['./authored-map','lib/authored-map.ts'],
   ['./traversal-hints','lib/traversal-hints.ts'],
 ])
 const inertImports=new Set(['./virtual-levels','@/lib/asset-catalog','./template-attribution','@/configs/offline-engine-source.json'])

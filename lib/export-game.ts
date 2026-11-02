@@ -1,6 +1,12 @@
 import { offlineNarrativeRuntimeSource } from './narrative-runtime'
 import { createGameTranslator, offlineGameLanguageSource } from './game-language'
 import { offlineEnemyCombatSource } from './enemy-combat'
+import { offlineCharacterRosterSource } from './character-roster'
+import { offlineBehaviorProgramSource } from './behavior-program'
+import { offlinePlaytestTraceSource } from './playtest-trace'
+import { offlineOriginalArtSource } from './original-art'
+import { offlineHeroPhysicsSource } from './hero-physics'
+import { offlineAuthoredMapSource } from './authored-map'
 import { offlineTraversalHintSource } from './traversal-hints'
 import { buildGameDataFromSpec } from './virtual-levels'
 import { animationClipPoses, normalizeAnimationSpec } from '@/lib/asset-catalog'
@@ -116,9 +122,12 @@ const OFFLINE_GAME_V2 = String.raw`
   const runtimeLevels = JSON.parse(document.getElementById('runtime-data').textContent).levels
   const canvas = document.querySelector('canvas'), c = canvas.getContext('2d'), pauseButton = document.querySelector('[data-pause]')
   c.imageSmoothingEnabled = false
-  const VIEW_WIDTH = 1152, H = 648, G = 555, images = {}, keys = {}
-  let W = VIEW_WIDTH
+  const VIEW_WIDTH = 1152, H = 648, images = {}, keys = {}
+  let W = VIEW_WIDTH, WH = H, G = 555
   let level = 0, score = 0, sim = 0, lastReal = performance.now(), paused = false, won = false
+  let rosterState = spec.hero.roster ? characterRosterRules.fresh(spec.hero.roster) : undefined
+  const currentHero = () => characterRosterRules.effective(spec.hero,rosterState)
+  let mechanismState = authoredMapRules.freshMechanisms(), mechanismFrame = null
   let player, enemies = [], shots = [], items = [], effects = [], obstacles = []
   const traversalHints = createTraversalHints()
   const active = (category) => spec.assets.find((asset) => asset.enabled && asset.category === category && (!asset.levelIds.length || asset.levelIds.includes(spec.levels[level].id)))
@@ -148,11 +157,17 @@ const OFFLINE_GAME_V2 = String.raw`
     if (asset && asset.animation) {
       const animation = animationFor(asset), requestedState = actor.action || 'idle', state = requestedState === 'attack' ? 'meleeAttack' : requestedState
       if (animation.actionStrips) {
-        const clip = animation.clips[state] || animation.clips.idle || {}, image = images[id + ':clip:' + state] || images[id + ':clip:idle'] || images[id]
+        const requested = animation.clips[state], useRequested=requested?.url&&requested.enabled!==false, clip = (useRequested?requested:animation.clips.idle) || {}, image = images[id + ':clip:' + (useRequested?state:'idle')] || images[id]
         const count = Math.max(1, Number(clip.frameCount) || 1), elapsed = Math.max(0, sim - (actor.actionStart || 0)), duration = Math.max(1, (actor.actionUntil || 0) - (actor.actionStart || 0))
+        if(clip.original){
+          const index=originalArtRules.frame(clip,elapsed),source=originalArtRules.at(clip,index),originalImage=source.page?images[id+':clip:'+(useRequested?state:'idle')+':page:'+source.page]:image,r=source.rect
+          if(!originalImage||r.x+r.width>originalImage.width||r.y+r.height>originalImage.height){c.fillStyle='#5ba5df';c.fillRect(x,y,w,h);return}
+          c.save();if(face<0){c.translate(x+w,y);c.scale(-1,1);x=0;y=0}else{c.translate(x,y);x=0;y=0}
+          c.drawImage(originalImage,r.x,r.y,r.width,r.height,x,y,w,h);c.restore();return
+        }
         if (!usableClip(image, count)) { c.fillStyle = actor.mobility === 'boss' ? '#c94c8f' : actor.mobility ? '#df7154' : '#5ba5df'; c.fillRect(x, y, w, h); return }
         const oneShot = state === 'meleeAttack' || state === 'rangedAttack' || state === 'death'
-        const frame = state === 'idle' || state === 'hit' ? 0 : state === 'jump' ? Math.min(count - 1, actor.vy < 0 ? 0 : 1) : oneShot ? Math.min(count - 1, Math.floor(elapsed / duration * count)) : Math.floor(elapsed / (1000 / (clip.fps || 5))) % count
+        const frame = clip.original ? originalArtRules.frame(clip,elapsed) : state === 'idle' || state === 'hit' ? 0 : state === 'jump' ? Math.min(count - 1, actor.vy < 0 ? 0 : 1) : oneShot ? Math.min(count - 1, Math.floor(elapsed / duration * count)) : Math.floor(elapsed / (1000 / (clip.fps || 5))) % count
         const cellW = image.width / count
         c.save(); if (face < 0) { c.translate(x + w, y); c.scale(-1, 1); x = 0; y = 0 } else { c.translate(x, y); x = 0; y = 0 }
         c.drawImage(image, frame * cellW, 0, cellW, image.height, x, y, w, h); c.restore(); return
@@ -170,32 +185,41 @@ const OFFLINE_GAME_V2 = String.raw`
   }
   const load = () => Promise.all(spec.assets.flatMap((asset) => {
     const sources = asset.url ? [[asset.id, asset.url]] : []
-    if (asset.animation && asset.animation.clips) Object.entries(asset.animation.clips).forEach(([pose, clip]) => { if (clip && clip.url) sources.push([asset.id + ':clip:' + pose, clip.url]) })
+    if (asset.animation && asset.animation.clips) Object.entries(asset.animation.clips).forEach(([pose, clip]) => { if (clip && clip.url) sources.push([asset.id + ':clip:' + pose, clip.url]);if(clip?.originalPages)clip.originalPages.forEach((p,i)=>{if(i&&p.url)sources.push([asset.id+':clip:'+pose+':page:'+i,p.url])}) })
     return sources.map(([key, url]) => new Promise((resolve) => { const image = new Image(); image.onload = () => { images[key] = image; resolve() }; image.onerror = resolve; image.src = url }))
   }))
   const reset = (retry = false) => {
-    const current = spec.levels[level], layout = runtimeLevels[level]; sim = 0
-    W = Math.max(VIEW_WIDTH, layout.worldWidth || VIEW_WIDTH)
+    if(retry&&spec.hero.roster)rosterState=characterRosterRules.choose(spec.hero.roster,rosterState,'respawn')
+    const hero=currentHero()
+    const retryCheckpointId = retry ? mechanismState.checkpointId : undefined; const current = spec.levels[level], layout = runtimeLevels[level]; sim = 0; mechanismState = authoredMapRules.freshMechanisms(); mechanismFrame = null
+    const map = layout.authoredMap
+    W = map ? map.width : Math.max(VIEW_WIDTH, layout.worldWidth || VIEW_WIDTH); WH = map ? map.height : H; G = map ? map.groundY ?? WH + 1024 : 555
     if (retry) { score = levelScore; storyState = storyEngine.begin(spec, storyState, current.id, true) }
     else levelScore = score
-    player = { x: 55, y: G - 64, vx: 0, vy: 0, w: 54, h: 64, hp: spec.hero.maxHealth, face: 1, on: true, invulnerable: 0, meleeReady: 0, rangedReady: 0, action: 'idle', actionStart: 0, actionUntil: 0 }
-    obstacles = (layout.obstacles || []).map((source, index) => { const w = Math.max(42, Math.min(80, source.width || 48)), h = Math.max(42, Math.min(80, source.height || 48)); return { x: Math.max(150, Math.min(W - 230 - w, source.x || 220 + index * 100)), y: G - h, w, h, type: source.type, id: active(source.type)?.id } })
-    if (current.platformMode === 'air' && active('airPlatform')) obstacles.push(...Array.from({ length: 3 }, (_, index) => ({ x: 250 + index * 235, y: G - 115 - index % 2 * 65, w: 130, h: 32, type: 'airPlatform', id: active('airPlatform').id })))
+    player = { x: map?.player.x ?? 55, y: map?.player.y ?? G - 64, vx: 0, vy: 0, w: map?.player.width ?? 54, h: map?.player.height ?? 64, hp: hero.maxHealth, face: 1, on: !map || map.player.y + map.player.height === G || map.obstacles.some(o=>map.player.y+map.player.height===o.y&&map.player.x+map.player.width>o.x&&map.player.x<o.x+o.width), invulnerable: 0, meleeReady: 0, rangedReady: 0, action: 'idle', actionStart: 0, actionUntil: 0 }
+    const checkpoint = map?.checkpoints?.find(c=>c.id===retryCheckpointId);if(checkpoint){Object.assign(player,checkpoint.respawn,{on:false});mechanismState.checkpointId=checkpoint.id}
+    if(spec.hero.roster){const profile=spec.hero.roster.characters.find(c=>c.id===rosterState.characterId),box=characterRosterRules.resized({x:player.x,y:player.y,width:player.w,height:player.h},profile);Object.assign(player,{x:box.x,y:box.y,w:box.width,h:box.height})}
+    if(!bootSave||retry)playtestTraceRules.begin(traceState,{kind:retry?'retry':'level-start',levelId:current.id,sim,x:player.x,y:player.y,target:rosterState?.characterId})
+    obstacles = (layout.obstacles || []).map((source, index) => { if(map)return {x:source.x,y:source.y,w:source.width,h:source.height,type:source.type,id:active(source.type==='platform'?'groundPlatform':source.type)?.id}; const w = Math.max(42, Math.min(80, source.width || 48)), h = Math.max(42, Math.min(80, source.height || 48)); return { x: Math.max(150, Math.min(W - 230 - w, source.x || 220 + index * 100)), y: G - h, w, h, type: source.type, id: active(source.type)?.id } })
+    if (!map && current.platformMode === 'air' && active('airPlatform')) obstacles.push(...Array.from({ length: 3 }, (_, index) => ({ x: 250 + index * 235, y: G - 115 - index % 2 * 65, w: 130, h: 32, type: 'airPlatform', id: active('airPlatform').id })))
     const types = spec.assets.filter((asset) => asset.enabled && ['groundEnemy', 'airEnemy', 'waterEnemy'].includes(asset.category) && (!asset.levelIds.length || asset.levelIds.includes(current.id)))
     const spawns = layout.enemySpawns || []
     enemies = spawns.map((spawn, index) => {
-      const asset = spec.assets.find(candidate => candidate.id === spawn.kind) || types[index % Math.max(1, types.length)], mobility = asset && asset.motion && asset.motion.mobility || 'ground'
+      const asset = spec.assets.find(candidate => candidate.id === spawn.kind) || (map ? types.find(candidate=>candidate.category===spawn.kind) : types[index % Math.max(1, types.length)]), mobility = asset && asset.motion && asset.motion.mobility || (map && spawn.kind==='airEnemy'?'air':map && spawn.kind==='waterEnemy'?'water':'ground')
       const enemySpec = spec.enemies.find(enemy => asset && enemy.assetId === asset.id)
         || spec.enemies.find((enemy, enemyIndex) => asset && (enemy.category || ['groundEnemy', 'airEnemy', 'waterEnemy'][enemyIndex]) === asset.category)
         || spec.enemies[0]
-      const y = mobility === 'air' ? G - 190 - index % 2 * 42 : mobility === 'water' ? G - 58 : G - 54
-      return { uid: spawn.id, x: spawn.x, patrolMin: spawn.patrolMin ?? Math.max(170, spawn.x - 100), patrolMax: Math.min(W - 120, spawn.patrolMax ?? spawn.x + 100), y, baseY: y, w: 52, h: 54, hp: enemySpec.health + level * 8, damage: enemySpec.damage + level * 2, behavior: enemySpec.behavior, id: asset && asset.id, mobility, face: index % 2 ? -1 : 1, phase: index * 1.15, vy: 0, on: mobility === 'ground', lastAttack: 0, nextJump: 1500 + index * 350, removeAt: 0, action: 'idle', actionStart: 0, actionUntil: 0 }
+      const y = map ? spawn.y : mobility === 'air' ? G - 190 - index % 2 * 42 : mobility === 'water' ? G - 58 : G - 54
+      return { program:enemySpec.program, maxHp:enemySpec.health+level*8, uid: spawn.id, x: spawn.x, patrolMin: spawn.patrolMin ?? Math.max(map ? 0 : 170, spawn.x - 100), patrolMax: Math.min(W - (map ? spawn.width : 120), spawn.patrolMax ?? spawn.x + 100), y, baseY: y, w: map ? spawn.width : 52, h: map ? spawn.height : 54, hp: enemySpec.health + level * 8, damage: enemySpec.damage + level * 2, behavior: enemySpec.behavior, id: asset && asset.id, mobility, face: index % 2 ? -1 : 1, phase: index * 1.15, vy: 0, on: mobility === 'ground', lastAttack: 0, nextJump: 1500 + index * 350, removeAt: 0, action: 'idle', actionStart: 0, actionUntil: 0 }
     })
-    if (layout.bossSpawn) { const boss = spec.assets.find(asset => asset.id === layout.bossSpawn.kind); enemies.push({ uid: layout.bossSpawn.id, x: layout.bossSpawn.x, patrolMin: Math.max(600, layout.bossSpawn.x - 180), patrolMax: Math.min(W - 120, layout.bossSpawn.x + 180), y: G - 94, baseY: G - 94, w: 94, h: 94, hp: spec.boss.health, id: boss?.id || layout.bossSpawn.kind, mobility: 'boss', face: -1, phase: 0, vy: 0, on: true, lastAttack: 0, nextJump: 1800, removeAt: 0, action: 'idle', actionStart: 0, actionUntil: 0 }) }
-    items = (layout.collectibleSpawns || []).map(spawn => ({ uid: spawn.id, x: spawn.x, y: Math.min(G - 42, spawn.y + (G - 438)), w: 34, h: 34, taken: false })); shots = []; effects = []; traversalHints.clear()
+    if (layout.bossSpawn) { const spawn=layout.bossSpawn,boss = spec.assets.find(asset => asset.id === spawn.kind); enemies.push({ program:spec.boss.program, maxHp:spec.boss.health, damage:spec.boss.damage, uid: spawn.id, x: spawn.x, patrolMin: spawn.patrolMin ?? Math.max(map ? 0 : 600, spawn.x - 180), patrolMax: spawn.patrolMax ?? Math.min(W - (map ? spawn.width : 120), spawn.x + 180), y: map ? spawn.y : G - 94, baseY: map ? spawn.y : G - 94, w: map ? spawn.width : 94, h: map ? spawn.height : 94, hp: spec.boss.health, id: boss?.id || layout.bossSpawn.kind, mobility: 'boss', face: -1, phase: 0, vy: 0, on: true, lastAttack: 0, nextJump: 1800, removeAt: 0, action: 'idle', actionStart: 0, actionUntil: 0 }) }
+    items = (layout.collectibleSpawns || []).map(spawn => ({ uid: spawn.id, x: spawn.x, y: map ? spawn.y : Math.min(G - 42, spawn.y + (G - 438)), w: map ? spawn.width : 34, h: map ? spawn.height : 34, taken: false })); shots = []; effects = []; traversalHints.clear()
   }
   let storyState = storyEngine.fresh(spec), unread = [], levelScore = 0, storyLog = false, bootSave = null
   const saveKey = 'pixel-world-offline-campaign:' + storyEngine.key(spec)
+  let traceState=playtestTraceRules.fresh(storyEngine.key(spec),'offline')
+  try{const raw=localStorage.getItem(saveKey+':trace');if(raw&&raw.length<2000000)traceState=playtestTraceRules.restore(storyEngine.key(spec),'offline',JSON.parse(raw))}catch{}
+  const traceEvent=(kind,target,stage,phase,x=player?.x||0,y=player?.y||0)=>playtestTraceRules.event(traceState,{kind,levelId:spec.levels[level].id,sim,x,y,target,stage,phase})
   try { const raw = JSON.parse(localStorage.getItem(saveKey) || 'null'); if (raw && raw.key === storyEngine.key(spec) && spec.levels[raw.level] && raw.player && Array.isArray(raw.enemies) && Array.isArray(raw.items)) bootSave = raw } catch {}
   const storyBox = document.createElement('section'); storyBox.className = 'offline-story'; storyBox.setAttribute('role','dialog'); storyBox.setAttribute('aria-label',t('冒险剧情'))
   const storyTitle = document.createElement('h2'), storyText = document.createElement('div'), storyFooter = document.createElement('footer'), nextStory = document.createElement('button'), skipStory = document.createElement('button')
@@ -215,41 +239,57 @@ const OFFLINE_GAME_V2 = String.raw`
   const emitStory = (kind,target,id) => commitStory(storyEngine.emit(spec,storyState,{kind,target,id,levelId:spec.levels[level].id}))
   const beginStory = () => commitStory(storyEngine.begin(spec,storyState,spec.levels[level].id))
   const points = () => spec.narrative?.chapters.find(c=>c.levelId===spec.levels[level].id)?.points || []
-  const pointX = point => 120 + (W - 288) * point.position
-  const interactStory = () => { if(blocked()||paused||won)return;const available=storyEngine.objectives(spec,storyState);const point=points().filter(p=>p.kind==='interact'&&available.some(task=>task.target===p.id&&task.available&&!task.complete)&&Math.abs(player.x-pointX(p))<95).sort((a,b)=>Math.abs(player.x-pointX(a))-Math.abs(player.x-pointX(b)))[0];if(point)emitStory('interact',point.id,point.id) }
+  const pointX = point => runtimeLevels[level].authoredMap ? authoredMapRules.storyPoint(runtimeLevels[level].authoredMap,point.position).x : 120 + (W - 288) * point.position
+  const pointY = point => runtimeLevels[level].authoredMap ? authoredMapRules.storyPoint(runtimeLevels[level].authoredMap,point.position).y : G - 60
+  const interactStory = () => { if(blocked()||paused||won)return;const available=storyEngine.objectives(spec,storyState);const point=points().filter(p=>p.kind==='interact'&&available.some(task=>task.target===p.id&&task.available&&!task.complete)&&Math.abs(player.x-pointX(p))<95&&(!runtimeLevels[level].authoredMap||Math.abs(player.y-pointY(p))<100)).sort((a,b)=>Math.abs(player.x-pointX(a))-Math.abs(player.x-pointX(b)))[0];if(point)emitStory('interact',point.id,point.id) }
   nextStory.onclick=()=>{if(storyLog)storyLog=false;else unread.shift();clearKeys();renderStory()};skipStory.onclick=()=>{unread=[];clearKeys();renderStory()};logButton.onclick=()=>{storyLog=true;clearKeys();renderStory()};interactButton.onclick=interactStory
-  restartButton.onclick=()=>{localStorage.removeItem(saveKey);level=0;score=0;unread=[];storyLog=false;won=false;storyState=storyEngine.fresh(spec);document.querySelector('.overlay').classList.remove('show');reset();beginStory()}
+  restartButton.onclick=()=>{localStorage.removeItem(saveKey);level=0;score=0;rosterState=spec.hero.roster?characterRosterRules.fresh(spec.hero.roster):undefined;unread=[];storyLog=false;won=false;storyState=storyEngine.fresh(spec);document.querySelector('.overlay').classList.remove('show');reset();beginStory()}
   const completedRestart=document.createElement('button'),completedLog=document.createElement('button'),completedActions=document.createElement('div');completedRestart.textContent=t('重新开始冒险');completedLog.textContent=t('回看故事');completedRestart.onclick=()=>restartButton.onclick();completedLog.onclick=()=>logButton.onclick();completedActions.className='offline-completed-actions';completedActions.append(completedRestart,completedLog);document.querySelector('.overlay').append(completedActions)
-  const saveStory = () => { if(!player||player.hp<=0)return;try{localStorage.setItem(saveKey,JSON.stringify({key:storyEngine.key(spec),level,levelScore,score,sim,player,enemies,items,story:storyState,unread,won}))}catch{} }
+  const saveStory = () => { try{localStorage.setItem(saveKey+':trace',JSON.stringify(traceState))}catch{} if(!player||player.hp<=0)return;try{localStorage.setItem(saveKey,JSON.stringify({key:storyEngine.key(spec),level,levelScore,score,sim,rosterState,mechanismState,player,enemies,items,story:storyState,unread,won}))}catch{} }
   setInterval(saveStory,750);addEventListener('pagehide',saveStory)
   const bossReady = () => !storyEngine.objectives(spec,storyState).some(task=>task.kind==='boss'&&!task.available)
-  const hurtEnemy = (enemy, damage) => { if (enemy.hp <= 0 || enemy.mobility === 'boss' && !bossReady()) return; enemy.hp = Math.max(0, enemy.hp - damage); if (!enemy.hp) { setAction(enemy, 'death', 720); enemy.removeAt = sim + 720; score += enemy.mobility === 'boss' ? 1000 : 150; if(enemy.mobility==='boss')emitStory('boss-approach','boss','approach');emitStory(enemy.mobility==='boss'?'boss':'defeat',enemy.mobility==='boss'?'boss':'enemies',enemy.uid) } else setAction(enemy, 'hit', 260) }
-  const hurtPlayer = (damage) => { if (player.hp <= 0 || sim < player.invulnerable) return; player.hp = Math.max(0, player.hp - damage); player.invulnerable = sim + 850; setAction(player, player.hp ? 'hit' : 'death', player.hp ? 260 : 720) }
-  const shoot = () => { if (paused || won || blocked() || player.hp <= 0 || sim < player.rangedReady || player.action === 'hit') return; player.rangedReady = sim + Math.max(240, spec.weapon.cooldownMs * 1.2); setAction(player, 'rangedAttack', 320); shots.push({ x: player.face > 0 ? player.x + player.w : player.x - 24, y: player.y + 25, w: 24, h: 14, vx: spec.weapon.projectileSpeed * player.face, damage: spec.weapon.rangedDamage, hostile: false }) }
-  const slash = () => { if (paused || won || blocked() || player.hp <= 0 || sim < player.meleeReady || player.action === 'hit') return; player.meleeReady = sim + spec.weapon.cooldownMs; setAction(player, 'meleeAttack', 320); const box = enemyCombatRules.meleeHitbox(player.x,player.y,player.w,player.h,player.face), hitbox = { x:box.x,y:box.y,w:box.width,h:box.height }; enemies.forEach((enemy) => { if (enemy.hp > 0 && rect(hitbox, enemy)) hurtEnemy(enemy, spec.weapon.meleeDamage) }); effects.push({ x: hitbox.x, y: hitbox.y, expires: sim + 180 }) }
+  const hurtEnemy = (enemy, damage) => { if(enemy.program&&!enemy.programState)enemy.programState=behaviorProgramRules.fresh({x:enemy.x,y:enemy.y,width:enemy.w,height:enemy.h}); if (enemy.program && !behaviorProgramRules.canDamage(enemy.program,enemy.programState))return; if (enemy.hp <= 0 || enemy.mobility === 'boss' && !bossReady()) return; enemy.hp = Math.max(0, enemy.hp - damage); if (!enemy.hp) { if(enemy.program && enemy.programState && behaviorProgramRules.defeat(enemy.program,enemy.programState)){enemy.hp=1}else{setAction(enemy, 'death', 720);enemy.removeAt=sim+720;} score += enemy.mobility === 'boss' ? 1000 : 150; if(enemy.mobility==='boss')emitStory('boss-approach','boss','approach');emitStory(enemy.mobility==='boss'?'boss':'defeat',enemy.mobility==='boss'?'boss':'enemies',enemy.uid) } else setAction(enemy, 'hit', 260) }
+  const hurtPlayer = (damage) => { if (player.hp <= 0 || sim < player.invulnerable) return; player.hp = Math.max(0, player.hp - damage); player.invulnerable = sim + 850; setAction(player, player.hp ? 'hit' : 'death', player.hp ? 260 : 720);if(!player.hp)traceEvent('death') }
+  const shoot = () => { if (!currentHero().rangedMultiplier || player.frozen || paused || won || blocked() || player.hp <= 0 || sim < player.rangedReady || player.action === 'hit') return; player.rangedReady = sim + Math.max(240, spec.weapon.cooldownMs * 1.2); setAction(player, 'rangedAttack', 320); shots.push({ x: player.face > 0 ? player.x + player.w : player.x - 24, y: player.y + 25, w: 24, h: 14, vx: spec.weapon.projectileSpeed * player.face, damage: spec.weapon.rangedDamage*currentHero().rangedMultiplier, hostile: false }) }
+  const slash = () => { if (!currentHero().meleeMultiplier || player.frozen || paused || won || blocked() || player.hp <= 0 || sim < player.meleeReady || player.action === 'hit') return; player.meleeReady = sim + spec.weapon.cooldownMs; setAction(player, 'meleeAttack', 320); const box = enemyCombatRules.meleeHitbox(player.x,player.y,player.w,player.h,player.face), hitbox = { x:box.x,y:box.y,w:box.width,h:box.height }; enemies.forEach((enemy) => { if (enemy.hp > 0 && rect(hitbox, enemy)) hurtEnemy(enemy, spec.weapon.meleeDamage*currentHero().meleeMultiplier) }); effects.push({ x: hitbox.x, y: hitbox.y, expires: sim + 180 }) }
+  const switchCharacter=()=>{const roster=spec.hero.roster;if(!roster||!roster.allowSwitch||paused||won||blocked()||player.hp<=0||player.frozen||sim<player.actionUntil)return;const next=characterRosterRules.choose(roster,rosterState,'switch'),profile=roster.characters.find(c=>c.id===next.characterId),box=characterRosterRules.resized({x:player.x,y:player.y,width:player.w,height:player.h},profile),map=runtimeLevels[level].authoredMap;if(box.x<0||box.y<0||box.x+box.width>W||box.y+box.height>WH||map&&map.groundY!==null&&box.y+box.height>map.groundY||obstacles.some(o=>rect({x:box.x,y:box.y,w:box.width,h:box.height},o)))return;rosterState=next;traceEvent('character',next.characterId,undefined,undefined,box.x,box.y);Object.assign(player,{x:box.x,y:box.y,w:box.width,h:box.height,hp:Math.min(player.hp,profile.maxHealth),runUp:0})}
+  const traceButton=document.createElement('button');traceButton.textContent=t('导出试玩轨迹');traceButton.onclick=()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(traceState,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='pixel-world-offline-trace.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};document.querySelector('.bar').append(traceButton)
+  const switchButton=document.createElement('button');switchButton.textContent='C · '+currentHero().name;switchButton.style.display=spec.hero.roster?'':'none';switchButton.onclick=switchCharacter;document.querySelector('.bar').append(switchButton)
   const togglePause = () => { if (won) return; paused = !paused; Object.keys(keys).forEach((key) => { keys[key] = false }); pauseButton.textContent = paused ? t('Resume') : t('Pause'); pauseButton.classList.toggle('paused-label', paused) }
   const pauseWhenAway = () => { if (!paused && !won) { togglePause(); saveStory() } }
   document.addEventListener?.('visibilitychange', () => { if (document.hidden) pauseWhenAway() })
   addEventListener('blur', pauseWhenAway)
-  addEventListener('keydown', (event) => { const key = event.key.toLowerCase(); if (['arrowleft', 'arrowright', 'arrowup', ' ', 'escape'].includes(key)) event.preventDefault(); if(blocked()){if(key==='escape')skipStory.onclick();return} if (key === 'escape') { togglePause(); return } if (paused || won || blocked()) return; if(key==='e'){interactStory();return} keys[key] = true; if (key === 'j') slash(); if (key === 'k' || key === 'f') shoot() })
+  addEventListener('keydown', (event) => { const key = event.key.toLowerCase(); if (['arrowleft', 'arrowright', 'arrowup', ' ', 'escape'].includes(key)) event.preventDefault(); if(blocked()){if(key==='escape')skipStory.onclick();return} if (key === 'escape') { togglePause(); return } if (paused || won || blocked()) return; if(key==='c'){switchCharacter();return} if(key==='e'){interactStory();return} keys[key] = true; if (key === 'j') slash(); if (key === 'k' || key === 'f') shoot() })
   addEventListener('keyup', (event) => { keys[event.key.toLowerCase()] = false })
   document.querySelectorAll('[data-key]').forEach((button) => { const key = button.dataset.key; button.onpointerdown = (event) => { event.preventDefault(); if (paused || won || blocked()) return; if(key==='e'){interactStory();return} keys[key] = true; if (key === 'shoot') shoot(); if (key === 'slash') slash() }; button.onpointerup = button.onpointerleave = () => { keys[key] = false } })
   pauseButton.onclick = togglePause
   const update = (delta) => {
-    const current = spec.levels[level]
+    const map=runtimeLevels[level].authoredMap
+    const current = spec.levels[level], hero=currentHero()
+    if(map && player.hp > 0){
+      const previousCheckpoint=mechanismState.checkpointId
+      mechanismFrame=authoredMapRules.mechanismFrame(map,mechanismState,{x:player.x,y:player.y,width:player.w,height:player.h},sim,delta*16.67)
+      if(mechanismState.checkpointId!==previousCheckpoint&&mechanismState.checkpointId)traceEvent('checkpoint',mechanismState.checkpointId)
+      obstacles=mechanismFrame.solids.map(o=>({x:o.x,y:o.y,w:o.width,h:o.height,type:o.type,id:active(o.type==='platform'?'groundPlatform':o.type)?.id}))
+      const carried=authoredMapRules.transport({x:player.x,y:player.y,width:player.w,height:player.h,vx:player.vx,vy:player.vy,onGround:player.on},mechanismFrame,map)
+      Object.assign(player,{x:carried.x,y:carried.y,frozen:mechanismFrame.frozen,reversed:mechanismFrame.reversed})
+      if(carried.dead || mechanismFrame.solids.some(o=>o.type==='deathObstacle'&&authoredMapRules.overlaps({x:player.x,y:player.y,width:player.w,height:player.h},o))){player.invulnerable=0;hurtPlayer(player.hp)}
+    }
     if (player.hp <= 0) { player.vx = 0; if (sim >= player.actionUntil) { reset(true); unread=storyState.history.filter(e=>e.id===spec.levels[level].id+':arrival');renderStory() } }
     else {
       const locked = (player.action === 'meleeAttack' || player.action === 'rangedAttack' || player.action === 'hit') && sim < player.actionUntil
       const left = keys.a || keys.arrowleft, right = keys.d || keys.arrowright, jump = keys.w || keys[' '] || keys.arrowup
-      player.vx = locked ? 0 : ((right ? 1 : 0) - (left ? 1 : 0)) * spec.hero.moveSpeed; if (player.vx) player.face = player.vx > 0 ? 1 : -1
-      if (!locked && jump && player.on) { player.vy = -spec.hero.jumpPower; player.on = false; traversalHints.clear() }
+      const motion = heroPhysics.drive({ ...player, onGround: player.on }, { direction: (Number(Boolean(right)) - Number(Boolean(left))) * (player.reversed ? -1 : 1), jump: Boolean(jump), locked: locked || !!player.frozen }, hero.moveSpeed, hero.jumpPower, delta, hero.physics)
+      Object.assign(player, { vx: motion.vx, vy: motion.vy, on: motion.onGround, jumpsUsed: motion.jumpsUsed, jumpHeld: motion.jumpHeld, runUp: motion.runUp }); if (player.vx) player.face = player.vx > 0 ? 1 : -1
+      if (motion.jumped){traversalHints.clear();traceEvent('jump',rosterState?.characterId)}
+      if(map){const moved=player.frozen?{x:player.x,y:player.y,vx:0,vy:0,onGround:player.on,dead:false}:authoredMapRules.move({x:player.x,y:player.y,width:player.w,height:player.h,vx:player.vx,vy:player.vy},mechanismFrame.solids,delta,heroPhysics.gravity(hero.physics,current.platformMode,true),map,hero.jumpPower);Object.assign(player,{x:moved.x,y:moved.y,vx:moved.vx,vy:moved.vy,on:moved.onGround});if(moved.dead)hurtPlayer(player.hp)}else{
       let nextX = Math.max(0, Math.min(W - player.w, player.x + player.vx * delta))
       const horizontalHit = obstacles.find(obstacle => rect({ ...player, x: nextX }, obstacle))
       traversalHints.observe(sim, horizontalHit?.type, player.on && player.vx !== 0)
       if (horizontalHit?.type === 'deathObstacle') hurtPlayer(player.hp)
       else if (horizontalHit) nextX = player.x
       player.x = nextX
-      player.vy += (current.platformMode === 'water' ? .29 : current.platformMode === 'air' ? .56 : .82) * delta
+      player.vy += heroPhysics.gravity(hero.physics, current.platformMode, true) * delta
       let nextY = player.y + player.vy * delta
       player.on = false
       if (nextY + player.h >= G) { nextY = G - player.h; player.vy = 0; player.on = true }
@@ -258,16 +298,29 @@ const OFFLINE_GAME_V2 = String.raw`
         for (const obstacle of obstacles) {
           if (player.x + player.w <= obstacle.x || player.x >= obstacle.x + obstacle.w || previousBottom > obstacle.y + 7 || nextY + player.h < obstacle.y) continue
           if (obstacle.type === 'deathObstacle') hurtPlayer(player.hp)
-          else if (obstacle.type === 'bounceObstacle') { nextY = obstacle.y - player.h; player.vy = -spec.hero.jumpPower * 1.35 }
+          else if (obstacle.type === 'bounceObstacle') { nextY = obstacle.y - player.h; player.vy = -hero.jumpPower * 1.35 }
           else { nextY = obstacle.y - player.h; player.vy = 0; player.on = true }
           break
         }
       }
       player.y = nextY
+      }
       if (!locked || sim >= player.actionUntil) setAction(player, !player.on ? 'jump' : Math.abs(player.vx) > .1 ? 'walk' : 'idle')
     }
     enemies.forEach((enemy) => {
       if (enemy.hp <= 0) return
+      if(enemy.program){
+        if(enemy.mobility==='boss'&&!bossReady())return
+        const actor={x:enemy.x,y:enemy.y,width:enemy.w,height:enemy.h,health:enemy.hp,maxHealth:enemy.maxHp},target={x:player.x,y:player.y,width:player.w,height:player.h}
+        const state=enemy.programState||(enemy.programState=behaviorProgramRules.fresh(actor)),priorStage=state.index,priorPhase=enemy.programPhase,frame=behaviorProgramRules.step(enemy.program,state,actor,target,sim,delta)
+        if(state.index!==priorStage||frame.phase!==priorPhase)traceEvent('boss-stage',enemy.uid,state.index,frame.phase,frame.x,frame.y)
+        Object.assign(enemy,{x:Math.max(0,Math.min(W-frame.width,frame.x)),y:frame.y,w:frame.width,h:frame.height,programLabel:frame.label,programPhase:frame.phase});enemy.face=player.x>=enemy.x?1:-1
+        setAction(enemy,frame.phase==='warning'?'idle':frame.attack==='ranged'?'rangedAttack':frame.attack==='melee'?'meleeAttack':'walk')
+        if(frame.contact&&rect(player,enemy)){player.invulnerable=0;hurtPlayer(player.hp)}else if(frame.attack==='melee'){const b=enemyCombatRules.meleeHitbox(enemy.x,enemy.y,enemy.w,enemy.h,enemy.face);if(rect(player,{x:b.x,y:b.y,w:b.width,h:b.height}))hurtPlayer(enemy.damage)}else if(frame.attack==='ranged')shots.push({x:enemy.x+enemy.w/2,y:enemy.y+enemy.h*.4,w:20,h:16,vx:enemy.face*7,damage:enemy.damage,hostile:true})
+        return
+      }
+      if(map && mechanismFrame && (enemy.mobility==='ground'||enemy.mobility==='boss')){const carried=authoredMapRules.transport({x:enemy.x,y:enemy.y,width:enemy.w,height:enemy.h,vx:0,vy:enemy.vy,onGround:enemy.on},mechanismFrame,map);Object.assign(enemy,{x:carried.x,y:carried.y});if(carried.dead){hurtEnemy(enemy,enemy.hp);return}}
+      const previousX=enemy.x
       if (enemy.mobility === 'boss' && !bossReady()) return
       const distance = player.x - enemy.x; enemy.face = distance >= 0 ? 1 : -1
       const locked = (enemy.action === 'meleeAttack' || enemy.action === 'rangedAttack' || enemy.action === 'hit') && sim < enemy.actionUntil, resting = (sim + enemy.phase * 700) % (enemy.mobility === 'boss' ? 3200 : 2600) < 480
@@ -275,8 +328,9 @@ const OFFLINE_GAME_V2 = String.raw`
       if (!locked) {
         if (enemy.mobility === 'air') { const dive = (sim + enemy.phase * 900) % 3200 > 2380; enemy.y = enemy.baseY + Math.sin(sim / 520 + enemy.phase) * 34 + (dive ? 58 : 0); setAction(enemy, dive ? 'jump' : resting ? 'idle' : 'walk') }
         else if (enemy.mobility === 'water') { const rise = (sim + enemy.phase * 1000) % 3400 > 2550; enemy.y = enemy.baseY + Math.sin(sim / 630 + enemy.phase) * 20 + (rise ? -28 : 0); setAction(enemy, rise ? 'jump' : resting ? 'idle' : 'walk') }
-        else { if (enemy.on && sim >= enemy.nextJump && Math.abs(distance) < 340) { enemy.vy = enemy.mobility === 'boss' ? -10.5 : -7.5; enemy.on = false; enemy.nextJump = sim + (enemy.mobility === 'boss' ? 2200 : 3000) } if (!enemy.on) { enemy.vy += .72 * delta; enemy.y += enemy.vy * delta; if (enemy.y + enemy.h >= G) { enemy.y = G - enemy.h; enemy.vy = 0; enemy.on = true } } setAction(enemy, !enemy.on ? 'jump' : resting ? 'idle' : 'walk') }
+        else { if (enemy.on && sim >= enemy.nextJump && Math.abs(distance) < 340) { enemy.vy = enemy.mobility === 'boss' ? -10.5 : -7.5; enemy.on = false; enemy.nextJump = sim + (enemy.mobility === 'boss' ? 2200 : 3000) } if (!enemy.on && !map) { enemy.vy += .72 * delta; enemy.y += enemy.vy * delta; if (enemy.y + enemy.h >= G) { enemy.y = G - enemy.h; enemy.vy = 0; enemy.on = true } } setAction(enemy, !enemy.on ? 'jump' : resting ? 'idle' : 'walk') }
       }
+      if(map&&(enemy.mobility==='ground'||enemy.mobility==='boss')){const moved=authoredMapRules.move({x:previousX,y:enemy.y,width:enemy.w,height:enemy.h,vx:delta?(enemy.x-previousX)/delta:0,vy:enemy.vy},mechanismFrame.solids,delta,.72,map,7.5);Object.assign(enemy,{x:moved.x,y:moved.y,vy:moved.vy,on:moved.onGround});if(moved.dead){hurtEnemy(enemy,enemy.hp);return}}
       const boss = enemy.mobility === 'boss', ranged = enemyCombatRules.restoredRanged(enemy, enemy.behavior || spec.enemies[0].behavior)
       const verticalOverlap = player.y < enemy.y + enemy.h && player.y + player.h > enemy.y
       const attack = enemyCombatRules.attackKind(ranged, boss, distance, enemy.w, sim - enemy.lastAttack, locked, verticalOverlap)
@@ -287,9 +341,10 @@ const OFFLINE_GAME_V2 = String.raw`
     shots.forEach((shot) => { shot.x += shot.vx * delta; if (shot.hostile) { if (rect(shot, player)) { hurtPlayer(shot.damage); shot.x = -9999 } } else { const target = enemies.find((enemy) => enemy.hp > 0 && rect(shot, enemy)); if (target) { hurtEnemy(target, shot.damage); shot.x = -9999 } } if (obstacles.some(obstacle => rect(shot, obstacle))) shot.x = -9999 })
     shots = shots.filter((shot) => shot.x > -100 && shot.x < W + 100); enemies = enemies.filter((enemy) => enemy.hp > 0 || sim < enemy.removeAt); effects = effects.filter((effect) => effect.expires > sim)
     items.forEach((item) => { if (!item.taken && rect(player, item)) { item.taken = true; score += spec.collectible.value;emitStory('collect','collectible',item.uid) } })
-    points().filter(p=>p.kind==='reach'&&Math.abs(player.x-pointX(p))<70).forEach(p=>emitStory('reach',p.id,p.id))
-    const liveBoss=enemies.find(e=>e.mobility==='boss'&&e.hp>0);if(liveBoss&&Math.abs(player.x-liveBoss.x)<360)emitStory('boss-approach','boss','approach')
-    if (player.hp > 0 && !blocked() && storyEngine.exitReady(spec,storyState,enemies.length) && player.x > W - 95) {
+    points().filter(p=>p.kind==='reach'&&Math.abs(player.x-pointX(p))<70&&(!map||Math.abs(player.y-pointY(p))<100)).forEach(p=>emitStory('reach',p.id,p.id))
+    playtestTraceRules.sample(traceState,{levelId:current.id,sim,x:player.x,y:player.y,vx:player.vx,vy:player.vy,onGround:player.on,health:player.hp,characterId:rosterState?.characterId})
+    const liveBoss=enemies.find(e=>e.mobility==='boss'&&e.hp>0&&!e.programState?.resolved);if(liveBoss&&Math.abs(player.x-liveBoss.x)<360)emitStory('boss-approach','boss','approach')
+    if (player.hp > 0 && !blocked() && storyEngine.exitReady(spec,storyState,enemies.filter(e=>!e.programState?.resolved).length) && (map ? rect(player,{x:map.exit.x,y:map.exit.y,w:map.exit.width,h:map.exit.height}) : player.x > W - 95)) {
       emitStory('reach','exit','exit');commitStory(storyEngine.finish(spec,storyState));
       if(level===spec.levels.length-1 && (!spec.narrative || storyState.endingSeen)){won=true;document.querySelector('.overlay').classList.add('show')}
       else if(level < spec.levels.length-1 && (!spec.narrative||storyState.completedLevels.includes(spec.levels[level].id))){pendingLevel=true}
@@ -298,36 +353,40 @@ const OFFLINE_GAME_V2 = String.raw`
   const render = () => {
     const current = spec.levels[level], background = active('levelBackground'); c.clearRect(0, 0, VIEW_WIDTH, H)
     const camera = Math.max(0, Math.min(W - VIEW_WIDTH, player.x - VIEW_WIDTH * .32))
-    c.save(); c.translate(-camera, 0)
-    if (background && images[background.id]) c.drawImage(images[background.id], 0, 0, W, H); else { c.fillStyle = '#17304c'; c.fillRect(0, 0, W, H) }
-    c.fillStyle = current.platformMode === 'water' ? '#087f9a88' : '#36502e'; c.fillRect(0, G, W, H - G)
+    const map=runtimeLevels[level].authoredMap,cameraY=map?Math.max(0,Math.min(WH-H,player.y-H*.42)):0
+    c.save(); c.translate(-camera, -cameraY)
+    if (background && images[background.id]) c.drawImage(images[background.id], 0, 0, W, map ? WH : H); else { c.fillStyle = '#17304c'; c.fillRect(0, 0, W, map ? WH : H) }
+    c.fillStyle = current.platformMode === 'water' ? '#087f9a88' : '#36502e'; c.fillRect(0, G, W, Math.max(0, WH - G))
     obstacles.forEach(obstacle => { if (obstacle.id) sprite(obstacle.id, obstacle.x, obstacle.y, obstacle.w, obstacle.h, { action: 'idle', actionStart: 0, actionUntil: 0 }); else { c.fillStyle = obstacle.type === 'deathObstacle' ? '#cf5362' : obstacle.type === 'bounceObstacle' ? '#6bdcc5' : '#ad8157'; c.fillRect(obstacle.x, obstacle.y, obstacle.w, obstacle.h) } })
     const collectible = active('collectible'); items.filter((item) => !item.taken).forEach((item) => { if (collectible) sprite(collectible.id, item.x, item.y, item.w, item.h, { action: 'idle', actionStart: 0, actionUntil: 0 }); else { c.fillStyle = '#ffd84d'; c.fillRect(item.x, item.y, item.w, item.h) } })
-    enemies.forEach((enemy) => sprite(enemy.id, enemy.x, enemy.y, enemy.w, enemy.h, enemy, enemy.face))
+    enemies.forEach((enemy) => {sprite(enemy.id, enemy.x, enemy.y, enemy.w, enemy.h, enemy, enemy.face);if(enemy.programLabel){c.fillStyle='#fff';c.fillText(enemy.programLabel+' · '+enemy.programPhase,enemy.x,enemy.y-8)}})
     const projectile = active('rangedProjectile'); shots.forEach((shot) => { if (projectile) sprite(projectile.id, shot.x, shot.y, shot.w, shot.h, { action: 'idle', actionStart: 0, actionUntil: 0 }, shot.vx < 0 ? -1 : 1); else { c.fillStyle = shot.hostile ? '#ff4567' : '#75e9ff'; c.fillRect(shot.x, shot.y, shot.w, shot.h) } })
+    if(map)for(const checkpoint of map.checkpoints||[]){c.fillStyle=mechanismState.checkpointId===checkpoint.id?'#58d68d88':'#58d68d33';c.fillRect(checkpoint.x,checkpoint.y,checkpoint.width,checkpoint.height);c.fillStyle='#fff';c.fillText('⚑',checkpoint.x,checkpoint.y+18)}
+    if(mechanismFrame)mechanismFrame.visuals.filter(m=>m.kind!=='movingPlatform').forEach(m=>{c.fillStyle=m.kind==='freeze'?'#74d9ff55':m.kind==='reverse'?'#d49aff55':m.warning?'#ffcf5577':'#ff657333';c.fillRect(m.x,m.y,m.width,m.height);c.fillStyle='#fff';c.fillText(m.kind==='freeze'?'❄':m.kind==='reverse'?'⇄':m.warning?'!':'△',m.x,m.y+16)})
     effects.forEach((effect) => { c.strokeStyle = '#8ff'; c.lineWidth = 8; c.beginPath(); c.arc(effect.x + 35, effect.y + 30, 30, -1, 1); c.stroke() })
-    const hero = active('hero'); sprite(hero?.id || 'hero', player.x, player.y, player.w, player.h, player, player.face)
+    const hero = spec.assets.find(a=>a.id===currentHero().assetId) || active('hero'); sprite(hero?.id || 'hero', player.x, player.y, player.w, player.h, player, player.face)
     const heldWeapon = player.action === 'rangedAttack' ? active('rangedWeapon') : player.action === 'meleeAttack' ? active('meleeWeapon') : null
     if (heldWeapon && images[heldWeapon.id]) { c.save(); if (player.face < 0) { c.translate(player.x + player.w, player.y); c.scale(-1, 1); c.drawImage(images[heldWeapon.id], -16, 22, 52, 26) } else c.drawImage(images[heldWeapon.id], player.x + 34, player.y + 22, 52, 26); c.restore() }
-    const availablePoints = storyEngine.objectives(spec,storyState);points().filter(p=>availablePoints.some(task=>task.target===p.id&&(task.available||task.complete))).forEach(p=>{c.fillStyle='#ffe292';c.fillRect(pointX(p),G-60,26,55);c.fillStyle='#fff';c.font='14px sans-serif';c.fillText(p.name+' · E',pointX(p)-30,G-72)});
-    c.fillStyle = storyEngine.exitReady(spec,storyState,enemies.length) ? '#6fffc2' : '#677084'; c.fillRect(W - 68, G - 90, 48, 90)
+    const availablePoints = storyEngine.objectives(spec,storyState);points().filter(p=>availablePoints.some(task=>task.target===p.id&&(task.available||task.complete))).forEach(p=>{c.fillStyle='#ffe292';c.fillRect(pointX(p),pointY(p),26,55);c.fillStyle='#fff';c.font='14px sans-serif';c.fillText(p.name+' · E',pointX(p)-30,pointY(p)-12)});
+    c.fillStyle = storyEngine.exitReady(spec,storyState,enemies.filter(e=>!e.programState?.resolved).length) ? '#6fffc2' : '#677084'; if(map)c.fillRect(map.exit.x,map.exit.y,map.exit.width,map.exit.height);else c.fillRect(W - 68, G - 90, 48, 90)
     c.restore()
     const traversalMessage = !paused && !blocked() && player.hp > 0 && traversalHints.message(sim)
     if (traversalMessage) { c.save(); c.fillStyle = '#1c222ef2'; c.fillRect(36, H - 124, VIEW_WIDTH - 72, 46); c.fillStyle = '#fff4ba'; c.font = '700 18px system-ui'; c.textAlign = 'center'; c.fillText(t(traversalMessage), VIEW_WIDTH / 2, H - 94); c.restore() }
     if (paused) { c.fillStyle = '#030610aa'; c.fillRect(0, 0, VIEW_WIDTH, H); c.fillStyle = '#fff'; c.font = '700 54px system-ui'; c.textAlign = 'center'; c.fillText(t('游戏已暂停'), VIEW_WIDTH / 2, H / 2) }
-    document.querySelector('#level').textContent = t('关卡') + ' ' + (level + 1) + '/' + spec.levels.length; document.querySelector('#score').textContent = t('得分') + ' ' + score
+    document.querySelector('#level').textContent = t('关卡') + ' ' + (level + 1) + '/' + spec.levels.length; document.querySelector('#score').textContent = t('得分') + ' ' + score;switchButton.textContent='C · '+currentHero().name
   }
   let pendingLevel=false
   const loop = (realNow) => { const elapsed = Math.min(34, Math.max(0, realNow - lastReal)); lastReal = realNow; if(pendingLevel&&!blocked()){pendingLevel=false;level++;reset();beginStory()} if (!paused && !won && !blocked()) { sim += elapsed; update(Math.min(2, elapsed / 16.67)) } render(); requestAnimationFrame(loop) }
   // Canvas actors have no DOM nodes. Return copies for read-only playtest and
   // accessibility tooling; callers cannot mutate the running actors.
-  globalThis.__pixelWorldReadOnlySnapshot = () => player ? JSON.parse(JSON.stringify({ level, levelScore, score, sim, player, enemies, items, story: storyState, won, worldWidth: W, viewportWidth: VIEW_WIDTH, layoutVersion: runtimeLevels[level].layoutVersion, obstacles })) : null
-  load().then(() => { if(bootSave){level=bootSave.level;score=bootSave.score;reset();const patrols=new Map(enemies.map(enemy=>[enemy.uid,enemy]));player=bootSave.player;enemies=bootSave.enemies.map(enemy=>{const bounds=patrols.get(enemy.uid);return bounds?{...enemy,patrolMin:bounds.patrolMin,patrolMax:bounds.patrolMax,x:enemyCombatRules.moveWithinPatrol(enemy.x,0,0,bounds.patrolMin,bounds.patrolMax)}:enemy});items=bootSave.items;sim=bootSave.sim;levelScore=bootSave.levelScore;storyState=storyEngine.restore(spec,bootSave.story);unread=bootSave.unread||[];won=Boolean(bootSave.won);if(won)document.querySelector('.overlay').classList.add('show');renderStory()}else{reset();beginStory()} requestAnimationFrame(loop) })
+  globalThis.__pixelWorldReadOnlyTrace = () => JSON.parse(JSON.stringify(traceState))
+  globalThis.__pixelWorldReadOnlySnapshot = () => player ? JSON.parse(JSON.stringify({ level, levelScore, score, sim, player, enemies, items, story: storyState, won, traceSummary:{segment:traceState.segment,samples:traceState.samples.length,events:traceState.events.length,droppedSamples:traceState.droppedSamples,droppedEvents:traceState.droppedEvents}, worldWidth: W, worldHeight: WH, rosterState, mechanismState, mechanismFrame, authoredMap: runtimeLevels[level].authoredMap, viewportWidth: VIEW_WIDTH, layoutVersion: runtimeLevels[level].layoutVersion, obstacles })) : null
+  load().then(() => { if(bootSave){level=bootSave.level;score=bootSave.score;rosterState=spec.hero.roster?characterRosterRules.restore(spec.hero.roster,bootSave.rosterState):undefined;reset();const patrols=new Map(enemies.map(enemy=>[enemy.uid,enemy]));player=bootSave.player;enemies=bootSave.enemies.map(enemy=>{const bounds=patrols.get(enemy.uid);return bounds?{...enemy,program:bounds.program,maxHp:bounds.maxHp,programState:bounds.program?behaviorProgramRules.restore(bounds.program,{x:enemy.x,y:enemy.y,width:enemy.w,height:enemy.h},enemy.programState):undefined,patrolMin:bounds.patrolMin,patrolMax:bounds.patrolMax,x:enemyCombatRules.moveWithinPatrol(enemy.x,0,0,bounds.patrolMin,bounds.patrolMax)}:enemy});items=bootSave.items;sim=bootSave.sim;mechanismState=runtimeLevels[level].authoredMap?authoredMapRules.restoreMechanisms(runtimeLevels[level].authoredMap,bootSave.mechanismState):authoredMapRules.freshMechanisms();levelScore=bootSave.levelScore;storyState=storyEngine.restore(spec,bootSave.story);unread=bootSave.unread||[];won=Boolean(bootSave.won);if(won)document.querySelector('.overlay').classList.add('show');renderStory();playtestTraceRules.begin(traceState,{kind:'restore',levelId:spec.levels[level].id,sim,x:player.x,y:player.y,target:rosterState?.characterId});bootSave=null}else{reset();beginStory()} requestAnimationFrame(loop) })
 })()
 `
 
 export function buildOfflineGameRuntimeSource(): string {
-  return offlineGameLanguageSource() + '\n' + offlineNarrativeRuntimeSource() + '\n' + offlineEnemyCombatSource() + '\n' + offlineTraversalHintSource() + '\n' + OFFLINE_GAME_V2
+  return offlineGameLanguageSource() + '\n' + offlineNarrativeRuntimeSource() + '\n' + offlineEnemyCombatSource() + '\n' + offlineHeroPhysicsSource() + '\n' + offlineOriginalArtSource() + '\n' + offlinePlaytestTraceSource() + '\n' + offlineCharacterRosterSource() + '\n' + offlineBehaviorProgramSource() + '\n' + offlineAuthoredMapSource() + '\n' + offlineTraversalHintSource() + '\n' + OFFLINE_GAME_V2
 }
 
 /** Stable bytes across browser/server minifiers; regenerate after engine edits. */
@@ -367,7 +426,9 @@ export async function exportGameZip(spec: GameSpec): Promise<void> {
         const downloaded = await readAsset(source)
         const filename = `assets/${safeName(asset.id)}-${safeName(pose)}.${extensionFor(downloaded.contentType, source)}`
         entries.push({ name: filename, bytes: downloaded.bytes })
-        exportedAnimation.clips[pose] = { ...exportedAnimation.clips[pose]!, url: filename }
+        const originalPages=sourceAnimation.clips[pose]?.originalPages?.map(p=>({...p}))
+        if(originalPages)for(let i=1;i<originalPages.length;i++){const originalPage=originalPages[i];if(!originalPage.url)throw Error('Missing original frame page');const pageFile=await readAsset(originalPage.url),pageName=`assets/${safeName(asset.id)}-${pose}-page-${i}.${extensionFor(pageFile.contentType,originalPage.url)}`;entries.push({name:pageName,bytes:pageFile.bytes});originalPage.url=pageName}
+        exportedAnimation.clips[pose] = { ...exportedAnimation.clips[pose]!, originalPages, url: filename }
       }
       asset.animation = exportedAnimation
       asset.url = exportedAnimation.clips.idle?.url

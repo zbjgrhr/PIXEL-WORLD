@@ -1,4 +1,6 @@
-import type { GameSpec } from '@/types'
+import { authoredMapRules } from './authored-map'
+import { characterRosterRules } from './character-roster'
+import type { CharacterRosterState, MapMechanismState, GameSpec } from '@/types'
 import { narrativeEngine, type StoryProgress, type StoryEntry } from './narrative-runtime'
 import { recordPlaytestProgress } from './playtest-evidence'
 
@@ -12,6 +14,8 @@ export interface CampaignSave {
   simulationTime: number
   story: StoryProgress
   unread: StoryEntry[]
+  rosterState?: CharacterRosterState
+  mechanismState?: MapMechanismState
   actors: { player: unknown; enemies: unknown[]; collectibles: unknown[] }
 }
 const keyFor = (project: string) => `pixel-world-campaign-v1:${project}`
@@ -27,9 +31,12 @@ export function readCampaign(spec: GameSpec, project: string): CampaignSave | nu
     if (saved.story?.storyKey !== saved.storyKey || saved.story.levelId !== spec.levels[saved.levelIndex].id
       || !finiteFields(saved, ['score', 'levelScore', 'power', 'simulationTime'])
       || !finiteFields(saved.actors.player, ['x', 'y', 'vx', 'vy', 'health', 'maxHealth', 'width', 'height', 'invulnerableUntil', 'meleeReadyAt', 'rangedReadyAt', 'actionStartedAt', 'actionUntil'])
-      || saved.actors.enemies.length > 40 || saved.actors.collectibles.length > 40
+      || saved.actors.enemies.length > (spec.levels[saved.levelIndex].map ? 512 : 40) || saved.actors.collectibles.length > (spec.levels[saved.levelIndex].map ? 512 : 40)
       || !saved.actors.enemies.every(enemy => finiteFields(enemy, ['x', 'y', 'health', 'maxHealth', 'damage', 'speed', 'width', 'height', 'baseY', 'vy', 'phase', 'nextDecisionAt', 'idleUntil', 'removeAt', 'lastShotAt', 'actionStartedAt', 'actionUntil']))
       || !saved.actors.collectibles.every(item => finiteFields(item, ['x', 'y']))) return null
+    saved.rosterState = spec.hero.roster ? characterRosterRules.restore(spec.hero.roster,saved.rosterState) : undefined
+    const map = spec.levels[saved.levelIndex].map
+    saved.mechanismState = map ? authoredMapRules.restoreMechanisms(map, saved.mechanismState) : undefined
     saved.story = narrativeEngine.restore(spec, saved.story)
     saved.unread = Array.isArray(saved.unread) ? saved.unread.flatMap(item => { const entry = saved.story.history.find(entry => entry.id === item?.id); return entry ? [entry] : [] }) : []
     return saved

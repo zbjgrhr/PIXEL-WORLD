@@ -1,11 +1,15 @@
 'use client'
 
+import { originalArtRules } from '@/lib/original-art'
+
 import { useEffect, useMemo, useState } from 'react'
 import { Button, Card, Checkbox, Empty, Image, Progress, Skeleton, Space, Switch, Tag, Typography, message } from 'antd'
 import { Download, RotateCcw, Sparkles, Trash2, Volume2 } from 'lucide-react'
 import { animationClipPoses, normalizeAnimationSpec } from '@/lib/asset-catalog'
 import type { AnimationClipPose, AnimationPose, AssetDefinition, ThemePreviewProps } from '@/types'
 import { ExportValidationError, exportGameZip } from '@/lib/export-game'
+import BatchOriginalImport from '@/components/ui/BatchOriginalImport'
+import PlaytestTraceReview from '@/components/ui/PlaytestTraceReview'
 import AssetUpload from '@/components/ui/AssetUpload'
 
 const { Text, Title, Paragraph } = Typography
@@ -34,29 +38,32 @@ function AnimatedSpritePreview({ asset, meleeWeaponUrl, rangedWeaponUrl, loading
   const clip = animation.layoutVersion === 3 ? animation.clips?.[pose] : undefined
   const frameCount = clip?.frameCount || animation.columns
   const fps = clip?.fps || animation.fps
+  const sequence=clip?.original?originalArtRules.order(clip.frameOrder,frameCount):undefined
+  const sequenceLength=sequence?.length||frameCount
   const shouldLoop = animation.layoutVersion === 3 ? Boolean(clip?.loop) : pose === 'walk'
   useEffect(() => {
     setFrame(0)
-    if (pose === 'idle' || pose === 'hit' || frameCount <= 1) return
+    if ((!clip?.original && (pose === 'idle' || pose === 'hit')) || sequenceLength <= 1) return
     const timer = window.setInterval(() => setFrame((value) => {
-      if (shouldLoop) return (value + 1) % frameCount
-      if (value >= frameCount - 1) {
+      if (shouldLoop) return (value + 1) % sequenceLength
+      if (value >= sequenceLength - 1) {
         window.clearInterval(timer)
         return value
       }
       return value + 1
     }), 1000 / fps)
     return () => window.clearInterval(timer)
-  }, [fps, frameCount, playNonce, pose, shouldLoop])
-  const previewUrl = animation.layoutVersion === 3 ? clip?.status === 'success' ? clip.url : undefined : asset.url
+  }, [fps, frameCount, sequenceLength, playNonce, pose, shouldLoop, clip?.original?.sha256])
+  const originalFrame=clip?.original?originalArtRules.at(clip,sequence?.[Math.min(frame,sequence.length-1)]??frame):undefined
+  const previewUrl = animation.layoutVersion === 3 ? clip?.status === 'success' ? originalFrame?.url||clip.url : undefined : asset.url
   const legacyPose: AnimationPose = pose === 'meleeAttack' || pose === 'rangedAttack' ? 'attack' : pose
-  const x = frameCount > 1 ? frame / (frameCount - 1) * 100 : 0
+  const x = originalFrame ? originalFrame.original.width===originalFrame.rect.width?0:originalFrame.rect.x/(originalFrame.original.width-originalFrame.rect.width)*100 : frameCount > 1 ? (sequence?.[Math.min(frame,sequence.length-1)]??frame) / (frameCount - 1) * 100 : 0
   const row = Math.max(0, Math.min(animation.rows - 1, animation.states[legacyPose]))
-  const y = animation.rows > 1 ? row / (animation.rows - 1) * 100 : 0
+  const y = originalFrame ? originalFrame.original.height===originalFrame.rect.height?0:originalFrame.rect.y/(originalFrame.original.height-originalFrame.rect.height)*100 : animation.rows > 1 ? row / (animation.rows - 1) * 100 : 0
   const weaponUrl = pose === 'meleeAttack' ? meleeWeaponUrl : pose === 'rangedAttack' ? rangedWeaponUrl : undefined
   return <div>
     {previewUrl ? <div style={{ width: 190, height: 150, margin: '0 auto', position: 'relative', overflow: 'hidden' }}>
-      <div style={{ width: '100%', height: '100%', backgroundImage: `url("${previewUrl}")`, backgroundRepeat: 'no-repeat', backgroundSize: animation.layoutVersion === 3 ? `${frameCount * 100}% 100%` : `${animation.columns * 100}% ${animation.rows * 100}%`, backgroundPosition: animation.layoutVersion === 3 ? `${x}% 0%` : `${x}% ${y}%`, imageRendering: 'pixelated' }} />
+      <div style={{ width: '100%', height: '100%', backgroundImage: `url("${previewUrl}")`, backgroundRepeat: 'no-repeat', backgroundSize: originalFrame?`${originalFrame.original.width/originalFrame.rect.width*100}% ${originalFrame.original.height/originalFrame.rect.height*100}%`:animation.layoutVersion === 3 ? `${frameCount * 100}% 100%` : `${animation.columns * 100}% ${animation.rows * 100}%`, backgroundPosition: animation.layoutVersion === 3 ? `${x}% ${y}%` : `${x}% ${y}%`, imageRendering: 'pixelated' }} />
       {weaponUrl && <img src={weaponUrl} alt="Generated project weapon" style={{ position: 'absolute', width: pose === 'rangedAttack' ? 72 : 62, height: 46, objectFit: 'contain', left: '53%', top: '48%', transform: 'translate(-20%, -50%)', imageRendering: 'pixelated', pointerEvents: 'none' }} />}
     </div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={`${POSE_OPTIONS.find((item) => item.value === pose)?.label || pose}尚未生成`} />}
     <Space size={[4, 4]} wrap style={{ marginTop: 8 }}>
@@ -90,7 +97,7 @@ function PlannedAssetCard({ asset, levelOptions, loading, loadingPose, meleeWeap
   </Card>
 }
 
-const ThemePreview: React.FC<ThemePreviewProps> = ({ isLoading, loadingMessage, gameData, selectedTheme, themes, apiKey = '', regeneratingAssetIds = [], onRegenerateAsset, onUpdateAsset, onUploadAsset, onDeleteTheme, onStartGame }) => {
+const ThemePreview: React.FC<ThemePreviewProps> = ({ isLoading, loadingMessage, gameData, selectedTheme, themes, apiKey = '', regeneratingAssetIds = [], onRegenerateAsset, onUpdateAsset, onUploadAsset, onImportOriginals, onDeleteTheme, onStartGame }) => {
   const [isExporting, setIsExporting] = useState(false)
   const selected = themes.find((theme) => theme.id === selectedTheme)
   const data = gameData?.data
@@ -142,6 +149,8 @@ const ThemePreview: React.FC<ThemePreviewProps> = ({ isLoading, loadingMessage, 
 
   return <Card className="theme-preview-card glass-card" style={{ flex: 1, overflow: 'visible', height: 'fit-content' }} extra={<Space wrap>{onStartGame && <Button disabled={!data?.characterUrl} onClick={onStartGame}>试玩游戏</Button>}<Button type="primary" icon={<Download size={15} />} loading={isExporting} disabled={!spec} onClick={() => { void exportGame() }}>导出游戏 ZIP</Button>{selectedTheme.startsWith('custom-') && onDeleteTheme ? <Button danger icon={<Trash2 size={15} />} onClick={() => onDeleteTheme(selectedTheme)}>删除游戏</Button> : null}</Space>}>
     {spec ? <>
+      {onImportOriginals && selectedTheme.startsWith('custom-') && <BatchOriginalImport spec={spec} disabled={isLoading} onApply={(base,next)=>onImportOriginals(selectedTheme,base,next)} />}
+      <PlaytestTraceReview spec={spec}/>
       <Card size="small" style={{ marginBottom: 20, background: '#f6f9ff' }}>
         <Space wrap><Tag color="blue">{spec.levels.length} 关</Tag><Tag color="purple">{spec.assets.filter((asset) => asset.enabled).length} 项素材</Tag><Tag color="green">{spec.assets.reduce((count, asset) => count + (asset.kind === 'spriteSheet' && asset.animation?.layoutVersion === 3 ? animationClipPoses(asset).filter((pose) => normalizeAnimationSpec(asset.animation).clips?.[pose]?.url).length : asset.url ? 1 : 0), 0)} 张图片</Tag></Space>
         <Paragraph ellipsis={{ rows: 2, expandable: true }} style={{ margin: '10px 0 0' }}>{spec.world}</Paragraph>

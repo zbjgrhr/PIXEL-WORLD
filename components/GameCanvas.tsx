@@ -4,6 +4,12 @@ import { ensureEncounterClearance } from '@/lib/encounter-layout'
 import { createGameTranslator } from '@/lib/game-language'
 import { narrativeEngine, type StoryProgress, type StoryEntry } from '@/lib/narrative-runtime'
 import { enemyCombatRules } from '@/lib/enemy-combat'
+import { characterRosterRules } from '@/lib/character-roster'
+import { behaviorProgramRules } from '@/lib/behavior-program'
+import { playtestTraceRules, type PlaytestTrace } from '@/lib/playtest-trace'
+import { originalArtRules } from '@/lib/original-art'
+import { heroPhysics } from '@/lib/hero-physics'
+import { authoredMapRules } from '@/lib/authored-map'
 import { createTraversalHints } from '@/lib/traversal-hints'
 import { enemySpecForAsset } from '@/lib/enemy-identity'
 import { readCampaign, writeCampaign, clearCampaign, type CampaignSave } from '@/lib/campaign-save'
@@ -22,6 +28,7 @@ import {
 } from '@/lib/game-settings'
 import { normalizeAnimationSpec } from '@/lib/asset-catalog'
 import { usableSpriteClip } from '@/lib/sprite-clip-browser'
+import type { CharacterRosterState, BehaviorProgram, BehaviorRuntime } from '@/types'
 import type { DisplaySize, GameSettings } from '@/lib/game-settings'
 import type { AnimationClipPose, AnimationPose, AssetCategory, AssetDefinition, AssetType, GameCanvasProps, ObstacleData, SpawnPoint } from '@/types'
 
@@ -47,6 +54,11 @@ const DISPLAY_PRESETS: Record<DisplaySize, { label: string; maxWidth?: number; s
 type GameMode = 'playing' | 'paused' | 'transition' | 'dead' | 'victory'
 
 interface PlayerRuntime {
+  frozen?: boolean
+  reversed?: boolean
+  jumpsUsed?: number
+  jumpHeld?: boolean
+  runUp?: number
   x: number
   y: number
   vx: number
@@ -66,6 +78,10 @@ interface PlayerRuntime {
 }
 
 interface EnemyRuntime {
+  program?: BehaviorProgram
+  programState?: BehaviorRuntime
+  programLabel?: string
+  programPhase?: string
   id: string
   x: number
   y: number
@@ -107,6 +123,8 @@ interface ProjectileRuntime {
 }
 
 interface CollectibleRuntime {
+  width?: number
+  height?: number
   id: string
   x: number
   y: number
@@ -170,8 +188,8 @@ function plannedSprite(
   const animation = asset?.kind === 'spriteSheet' && asset.animation ? normalizeAnimationSpec(asset.animation) : undefined
   const clipPose: AnimationClipPose = state === 'attack' ? 'meleeAttack' : state
   const requestedClip = animation?.layoutVersion === 3 ? animation.clips?.[clipPose] : undefined
-  const clip = requestedClip?.status === 'success' ? requestedClip : undefined
   const idle = animation?.clips?.idle
+  const clip = requestedClip?.status === 'success' && requestedClip.enabled !== false ? requestedClip : idle?.status === 'success' ? idle : undefined
   const spriteUrl = clip?.url || (animation?.layoutVersion === 3 ? idle?.status === 'success' ? idle.url : undefined : url)
   if (!spriteUrl) return fallback
   if (!animation) {
@@ -181,19 +199,21 @@ function plannedSprite(
     const frameCount = clip?.url ? clip.frameCount : 1
     const elapsed = Math.max(0, timeMs - stateStartedAt)
     const oneShot = clipPose === 'meleeAttack' || clipPose === 'rangedAttack' || clipPose === 'death'
-    const frame = clipPose === 'idle' || clipPose === 'hit'
+    const frame = clip?.original ? originalArtRules.frame(clip,elapsed) : clipPose === 'idle' || clipPose === 'hit'
       ? 0
       : clipPose === 'jump'
         ? Math.min(frameCount - 1, jumpFrame)
         : oneShot
           ? Math.min(frameCount - 1, Math.floor(elapsed / Math.max(1, stateUntil - stateStartedAt) * frameCount))
           : Math.floor(elapsed / (1000 / (clip?.fps || animation.fps))) % frameCount
-    const x = frameCount > 1 ? frame / (frameCount - 1) * 100 : 0
-    return <ValidatedActionClip src={spriteUrl} frameCount={frameCount} fallback={fallback} alt={alt} style={{
+    const source=clip?.original?originalArtRules.at(clip,frame):undefined
+    const x = source ? source.original.width===source.rect.width?0:source.rect.x/(source.original.width-source.rect.width)*100 : frameCount > 1 ? frame / (frameCount - 1) * 100 : 0
+    const y = source && source.original.height!==source.rect.height ? source.rect.y/(source.original.height-source.rect.height)*100 : 0
+    return <ValidatedActionClip src={source?.url||spriteUrl} frameCount={frameCount} sourceWidth={source?.original.width} sourceHeight={source?.original.height} original={!!clip?.original} fallback={fallback} alt={alt} style={{
       ...style,
-      backgroundImage: `url("${spriteUrl}")`,
-      backgroundSize: `${frameCount * 100}% 100%`,
-      backgroundPosition: `${x}% 0%`,
+      backgroundImage: `url("${source?.url||spriteUrl}")`,
+      backgroundSize: source?`${source.original.width/source.rect.width*100}% ${source.original.height/source.rect.height*100}%`:`${frameCount * 100}% 100%`,
+      backgroundPosition: `${x}% ${y}%`,
       backgroundRepeat: 'no-repeat',
       imageRendering: 'pixelated',
       userSelect: 'none',
@@ -221,19 +241,21 @@ function plannedSprite(
   }} />
 }
 
-function ValidatedActionClip({ src, frameCount, fallback, alt, style }: {
-  src: string; frameCount: number; fallback: ReactNode; alt: string; style: CSSProperties
+function ValidatedActionClip({ src, frameCount, sourceWidth, sourceHeight, original, fallback, alt, style }: {
+  src: string; frameCount: number; sourceWidth?:number; sourceHeight?:number; original?:boolean; fallback: ReactNode; alt: string; style: CSSProperties
 }) {
   const [valid, setValid] = useState(false)
   useEffect(() => {
     let live = true
     setValid(false)
     const image = new Image()
-    image.onload = () => { if (live) setValid(usableSpriteClip(image, frameCount)) }
+    // Normalization validates every frame rectangle. Validate source dimensions once
+    // per image, rather than blanking and reloading it on each animation frame.
+    image.onload = () => { if (live) setValid(original?sourceWidth&&sourceHeight?image.naturalWidth===sourceWidth&&image.naturalHeight===sourceHeight:originalArtRules.geometry(image.naturalWidth,image.naturalHeight,frameCount):usableSpriteClip(image, frameCount)) }
     image.onerror = () => { if (live) setValid(false) }
     image.src = src
     return () => { live = false }
-  }, [src, frameCount])
+  }, [src, frameCount, original, sourceWidth, sourceHeight])
   return valid ? <div role="img" aria-label={alt} style={style} /> : <>{fallback}</>
 }
 
@@ -274,6 +296,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
   const projectilesRef = useRef<ProjectileRuntime[]>([])
   const collectiblesRef = useRef<CollectibleRuntime[]>([])
   const effectsRef = useRef<EffectRuntime[]>([])
+  const traceRef = useRef<PlaytestTrace | null>(null)
+  const traceRetryRef = useRef(false)
+  const rosterStateRef = useRef<CharacterRosterState | undefined>(undefined)
+  const retryCheckpointRef = useRef<string | undefined>(undefined)
+  const mechanismStateRef = useRef(authoredMapRules.freshMechanisms())
+  const mechanismFrameRef = useRef<ReturnType<typeof authoredMapRules.mechanismFrame> | null>(null)
   const obstaclesRef = useRef<RuntimeObstacle[]>([])
   const scoreRef = useRef(0)
   const powerRef = useRef(1)
@@ -331,8 +359,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     commitStory(narrativeEngine.emit(spec, storyRef.current, { kind, target, id, levelId: storyRef.current.levelId }))
   }, [spec, commitStory])
   const saveCampaign = useCallback(() => {
+    if(traceRef.current)try{localStorage.setItem('pixel-world-trace:'+traceRef.current.storyKey,JSON.stringify(traceRef.current))}catch{/* Optional local trace storage. */}
     if (!spec || !storyRef.current || !playerRef.current || playerRef.current.health <= 0) return
-    writeCampaign(selectedTheme, { version: 1, storyKey: narrativeEngine.key(spec), levelIndex: currentLevelIndex, score: scoreRef.current, levelScore: levelScoreRef.current, power: powerRef.current, simulationTime: simulationTimeRef.current, story: storyRef.current, unread: storyQueueRef.current, actors: { player: playerRef.current, enemies: enemiesRef.current, collectibles: collectiblesRef.current } })
+    writeCampaign(selectedTheme, { version: 1, storyKey: narrativeEngine.key(spec), levelIndex: currentLevelIndex, score: scoreRef.current, levelScore: levelScoreRef.current, power: powerRef.current, simulationTime: simulationTimeRef.current, story: storyRef.current, unread: storyQueueRef.current, rosterState: rosterStateRef.current, mechanismState: mechanismStateRef.current, actors: { player: playerRef.current, enemies: enemiesRef.current, collectibles: collectiblesRef.current } })
   }, [spec, selectedTheme, currentLevelIndex])
   useEffect(() => {
     const timer = window.setInterval(saveCampaign, 750)
@@ -396,10 +425,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
   const displayPreset = DISPLAY_PRESETS[settings.displaySize]
   const stageHeight = displayPreset.stageHeight
-  const groundTop = stageHeight - 122
-  const worldWidth = Math.max(1120, viewportWidth, level?.worldWidth || 0)
-  const exitX = worldWidth - EXIT_RIGHT_MARGIN - EXIT_WIDTH
-  const exitY = groundTop - EXIT_HEIGHT
+  const authoredMap = level?.authoredMap
+  const worldHeight = authoredMap?.height || stageHeight
+  const groundTop = authoredMap ? authoredMap.groundY ?? worldHeight + 1024 : stageHeight - 122
+  const worldWidth = authoredMap?.width || Math.max(1120, viewportWidth, level?.worldWidth || 0)
+  const exitX = authoredMap?.exit.x ?? worldWidth - EXIT_RIGHT_MARGIN - EXIT_WIDTH
+  const exitY = authoredMap?.exit.y ?? groundTop - EXIT_HEIGHT
+  const exitWidth = authoredMap?.exit.width ?? EXIT_WIDTH
+  const exitHeight = authoredMap?.exit.height ?? EXIT_HEIGHT
 
   useEffect(() => {
     const saved = loadGameSettings()
@@ -534,33 +567,35 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       const dy = groundTop - initialized.groundTop
       playerRef.current.x = Math.min(playerRef.current.x, worldWidth - playerRef.current.width)
       playerRef.current.y += dy
-      enemiesRef.current.forEach(enemy => { enemy.y += dy; enemy.baseY += dy })
+      enemiesRef.current.forEach(enemy => { enemy.y += dy; enemy.baseY += dy; if(enemy.programState)enemy.programState.baseY += dy })
       collectiblesRef.current.forEach(item => { item.y += dy })
       obstaclesRef.current.forEach(obstacle => { obstacle.y += dy; if (obstacle.baseY !== undefined) obstacle.baseY += dy })
       initializedWorldRef.current = { storyKey, levelId: level.id, groundTop, layoutVersion: initialized.layoutVersion }
       return
     }
-    if (storyRef.current && storyRef.current.storyKey !== storyKey) { storyRef.current = null; restoredCampaignRef.current = undefined }
+    if (storyRef.current && storyRef.current.storyKey !== storyKey) { storyRef.current = null; restoredCampaignRef.current = undefined; rosterStateRef.current = undefined }
     initializedWorldRef.current = { storyKey, levelId: level.id, groundTop, layoutVersion: level.layoutVersion }
     if (restoredCampaignRef.current === undefined) restoredCampaignRef.current = readCampaign(spec, selectedTheme)
     const saved = restoredCampaignRef.current?.levelIndex === currentLevelIndex ? restoredCampaignRef.current : null
     if (!storyRef.current) storyRef.current = saved ? saved.story : narrativeEngine.fresh(spec, level.id)
     levelScoreRef.current = saved?.levelScore ?? scoreRef.current
-    const previousHealth = playerRef.current?.health ?? spec.hero.maxHealth
+    if (spec.hero.roster) rosterStateRef.current = characterRosterRules.restore(spec.hero.roster,saved?.rosterState || rosterStateRef.current)
+    const currentHero = characterRosterRules.effective(spec.hero,rosterStateRef.current)
+    const previousHealth = playerRef.current?.health ?? currentHero.maxHealth
     const health = currentLevelIndex > 0
-      ? Math.min(spec.hero.maxHealth, previousHealth + 15)
+      ? Math.min(currentHero.maxHealth, previousHealth + 15)
       : previousHealth
     playerRef.current = {
-      x: 60,
-      y: groundTop - PLAYER_HEIGHT,
+      x: authoredMap?.player.x ?? 60,
+      y: authoredMap?.player.y ?? groundTop - PLAYER_HEIGHT,
       vx: 0,
       vy: 0,
-      width: PLAYER_WIDTH,
-      height: PLAYER_HEIGHT,
+      width: authoredMap?.player.width ?? PLAYER_WIDTH,
+      height: authoredMap?.player.height ?? PLAYER_HEIGHT,
       health,
-      maxHealth: spec.hero.maxHealth,
+      maxHealth: currentHero.maxHealth,
       facing: 1,
-      onGround: true,
+      onGround: !authoredMap || authoredMap.player.y + authoredMap.player.height === groundTop || authoredMap.obstacles.some(o => authoredMap.player.y + authoredMap.player.height === o.y && authoredMap.player.x + authoredMap.player.width > o.x && authoredMap.player.x < o.x + o.width),
       invulnerableUntil: 0,
       meleeReadyAt: 0,
       rangedReadyAt: 0,
@@ -568,7 +603,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       actionStartedAt: 0,
       actionUntil: 0,
     }
+    const retryCheckpoint = authoredMap?.checkpoints?.find(c => c.id === retryCheckpointRef.current)
+    if (retryCheckpoint) { Object.assign(playerRef.current, retryCheckpoint.respawn, { health: currentHero.maxHealth, onGround: false }); }
+    retryCheckpointRef.current = undefined
+    if (currentHero.roster) { const profile = currentHero.roster.characters.find(c=>c.id===rosterStateRef.current?.characterId)!; Object.assign(playerRef.current, characterRosterRules.resized(playerRef.current!,profile),{maxHealth:profile.maxHealth,health:Math.min(playerRef.current!.health,profile.maxHealth)}) }
     obstaclesRef.current = (level.obstacles || []).map((obstacle, index) => {
+      if (authoredMap) return { ...obstacle, assetId: assetFor(obstacle.type === 'platform' ? 'groundPlatform' : obstacle.type as AssetCategory, levelSpec?.id)?.id }
       const width = Math.max(42, Math.min(80, obstacle.width || 48))
       const height = Math.max(42, Math.min(80, obstacle.height || 48))
       const maxX = Math.max(150, worldWidth - EXIT_SAFE_ZONE - width)
@@ -584,7 +624,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         phase: index * 0.8,
       }
     })
-    if (levelSpec?.platformMode === 'air' && assetFor('airPlatform', levelSpec.id)?.enabled) {
+    if (!authoredMap && levelSpec?.platformMode === 'air' && assetFor('airPlatform', levelSpec.id)?.enabled) {
       obstaclesRef.current.push(...Array.from({ length: 3 }, (_, index): RuntimeObstacle => ({
         id: `air-platform-${index}`,
         x: 250 + index * 235,
@@ -597,7 +637,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         phase: index * 1.3,
       })))
     }
-    const spawns: SpawnPoint[] = level.enemySpawns?.length
+    const spawns: SpawnPoint[] = authoredMap || level.enemySpawns?.length
       ? level.enemySpawns
       : Array.from({ length: spec.levels[currentLevelIndex]?.enemyCount ?? 3 }, (_, index) => ({
           id: `enemy-${index}`,
@@ -606,24 +646,25 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           kind: 'enemy',
         }))
     enemiesRef.current = spawns.map((spawn, index): EnemyRuntime => {
-      const asset = assetById(spawn.kind) || assetFor('groundEnemy', levelSpec?.id)
-      const mobility = asset?.motion?.mobility || (asset?.category === 'airEnemy' ? 'air' : asset?.category === 'waterEnemy' ? 'water' : 'ground')
+      const asset = assetById(spawn.kind) || assetFor((authoredMap && ['groundEnemy','airEnemy','waterEnemy'].includes(spawn.kind) ? spawn.kind : 'groundEnemy') as AssetCategory, levelSpec?.id)
+      const mobility = asset?.motion?.mobility || (asset?.category === 'airEnemy' || authoredMap && spawn.kind === 'airEnemy' ? 'air' : asset?.category === 'waterEnemy' || authoredMap && spawn.kind === 'waterEnemy' ? 'water' : 'ground')
       const enemySpec = enemySpecForAsset(spec, asset)
-      const baseY = mobility === 'air' ? groundTop - 175 - (index % 2) * 45 : mobility === 'water' ? groundTop - 74 : groundTop - ENEMY_HEIGHT
+      const baseY = authoredMap ? spawn.y : mobility === 'air' ? groundTop - 175 - (index % 2) * 45 : mobility === 'water' ? groundTop - 74 : groundTop - ENEMY_HEIGHT
       const healthValue = enemySpec.health + currentLevelIndex * 8
       return {
+        program: enemySpec.program,
         id: spawn.id,
-        x: Math.max(220, Math.min(exitX - 120, spawn.x)),
+        x: authoredMap ? spawn.x : Math.max(220, Math.min(exitX - 120, spawn.x)),
         y: baseY,
-        width: ENEMY_WIDTH,
-        height: ENEMY_HEIGHT,
+        width: authoredMap ? spawn.width! : ENEMY_WIDTH,
+        height: authoredMap ? spawn.height! : ENEMY_HEIGHT,
         health: healthValue,
         maxHealth: healthValue,
         damage: enemySpec.damage + currentLevelIndex * 2,
         speed: enemySpec.speed + currentLevelIndex * 0.08,
         direction: index % 2 ? -1 : 1,
-        patrolMin: spawn.patrolMin ?? Math.max(150, spawn.x - 100),
-        patrolMax: Math.min(worldWidth - 100, spawn.patrolMax ?? spawn.x + 100),
+        patrolMin: spawn.patrolMin ?? Math.max(authoredMap ? 0 : 150, spawn.x - 100),
+        patrolMax: Math.min(worldWidth - (authoredMap ? spawn.width! : 100), spawn.patrolMax ?? spawn.x + 100),
         lastShotAt: 0,
         ranged: enemyCombatRules.usesRanged(enemySpec.behavior, mobility, index),
         isBoss: false,
@@ -644,23 +685,24 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     if (level.bossSpawn) {
       enemiesRef.current.push({
         id: level.bossSpawn.id,
-        x: Math.min(exitX - 150, Math.max(600, level.bossSpawn.x)),
-        y: groundTop - 94,
-        width: 94,
-        height: 94,
+        x: authoredMap ? level.bossSpawn.x : Math.min(exitX - 150, Math.max(600, level.bossSpawn.x)),
+        y: authoredMap ? level.bossSpawn.y : groundTop - 94,
+        width: authoredMap ? level.bossSpawn.width! : 94,
+        height: authoredMap ? level.bossSpawn.height! : 94,
         health: spec.boss.health,
         maxHealth: spec.boss.health,
         damage: spec.boss.damage,
         speed: spec.boss.speed,
         direction: -1,
-        patrolMin: Math.max(520, level.bossSpawn.x - 180),
-        patrolMax: Math.min(worldWidth - 80, level.bossSpawn.x + 180),
+        patrolMin: level.bossSpawn.patrolMin ?? Math.max(authoredMap ? 0 : 520, level.bossSpawn.x - 180),
+        patrolMax: level.bossSpawn.patrolMax ?? Math.min(worldWidth - (authoredMap ? level.bossSpawn.width! : 80), level.bossSpawn.x + 180),
         lastShotAt: 0,
         ranged: true,
+        program: spec.boss.program,
         isBoss: true,
         assetId: level.bossSpawn.kind,
         mobility: 'boss',
-        baseY: groundTop - 94,
+        baseY: authoredMap ? level.bossSpawn.y : groundTop - 94,
         phase: 0,
         vy: 0,
         onGround: true,
@@ -674,8 +716,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     }
     collectiblesRef.current = (level.collectibleSpawns || []).map((spawn) => ({
       id: spawn.id,
-      x: Math.max(150, Math.min(exitX - 90, spawn.x)),
-      y: Math.min(groundTop - 42, spawn.y || groundTop - 100),
+      x: authoredMap ? spawn.x : Math.max(150, Math.min(exitX - 90, spawn.x)),
+      y: authoredMap ? spawn.y : Math.min(groundTop - 42, spawn.y || groundTop - 100),
+      width: authoredMap ? spawn.width : undefined,
+      height: authoredMap ? spawn.height : undefined,
       collected: false,
     }))
     if (saved) {
@@ -683,7 +727,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       playerRef.current = saved.actors.player as PlayerRuntime
       enemiesRef.current = (saved.actors.enemies as EnemyRuntime[]).map(actor => {
         const bounds = patrols.get(actor.id)
-        return bounds ? { ...actor, patrolMin: bounds.patrolMin, patrolMax: bounds.patrolMax,
+        return bounds ? { ...actor, program:bounds.program, programState:bounds.program?behaviorProgramRules.restore(bounds.program,actor,actor.programState):undefined, patrolMin: bounds.patrolMin, patrolMax: bounds.patrolMax,
           x: enemyCombatRules.moveWithinPatrol(actor.x, 0, 0, bounds.patrolMin, bounds.patrolMax) } : actor
       })
       collectiblesRef.current = saved.actors.collectibles as CollectibleRuntime[]
@@ -694,11 +738,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       setStoryProgress(saved.story)
       restoredCampaignRef.current = null
     }
+    mechanismStateRef.current = authoredMap ? authoredMapRules.restoreMechanisms(authoredMap, saved?.mechanismState) : authoredMapRules.freshMechanisms()
+    if (retryCheckpoint) mechanismStateRef.current.checkpointId = retryCheckpoint.id
+    mechanismFrameRef.current = null
+    enemiesRef.current.forEach(enemy => { if(enemy.program) enemy.programState = behaviorProgramRules.restore(enemy.program,enemy,enemy.programState) })
     projectilesRef.current = []
     effectsRef.current = []
     traversalHintsRef.current.clear()
     keysRef.current.clear()
     simulationTimeRef.current = saved?.simulationTime || 0
+    if(traceRef.current?.storyKey!==storyKey){let prior:unknown;try{const raw=localStorage.getItem('pixel-world-trace:'+storyKey);if(raw&&raw.length<2000000)prior=JSON.parse(raw)}catch{}traceRef.current=playtestTraceRules.restore(storyKey,'online',prior)}
+    playtestTraceRules.begin(traceRef.current,{kind:saved?'restore':traceRetryRef.current?'retry':'level-start',levelId:level.id,sim:simulationTimeRef.current,x:playerRef.current!.x,y:playerRef.current!.y,target:rosterStateRef.current?.characterId})
+    traceRetryRef.current=false
     transitionRef.current = false
     setBanner(`${t('关卡')} ${currentLevelIndex + 1} — ${spec.levels[currentLevelIndex]?.name || ''}`)
     setMode('playing')
@@ -718,8 +769,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     if (enemy.health <= 0) return
     if (enemy.isBoss && spec && storyRef.current && narrativeEngine.objectives(spec, storyRef.current).some(task => task.kind === 'boss' && !task.available)) return
     const now = simulationTimeRef.current
+    if (enemy.program && !behaviorProgramRules.canDamage(enemy.program,enemy.programState)) return
     enemy.health -= Math.round(damage * powerRef.current)
     if (enemy.health <= 0) {
+      if(enemy.program && enemy.programState && behaviorProgramRules.defeat(enemy.program,enemy.programState)) { enemy.health = 1; awardEnemy(enemy); return }
       enemy.health = 0
       setActorAction(enemy, 'death', now, DEATH_POSE_MS)
       enemy.removeAt = now + DEATH_POSE_MS
@@ -735,13 +788,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     const currentSpec = gameData.data?.spec
     if (!player || !currentSpec || modeRef.current !== 'playing' || storyBlockedRef.current) return
     const now = simulationTimeRef.current
-    if (player.health <= 0 || (player.action === 'hit' && now < player.actionUntil)) return
-    if (now < player.meleeReadyAt) return
+    if (player.frozen || player.health <= 0 || (player.action === 'hit' && now < player.actionUntil)) return
+    if (!characterRosterRules.effective(currentSpec.hero,rosterStateRef.current).meleeMultiplier || now < player.meleeReadyAt) return
     player.meleeReadyAt = now + currentSpec.weapon.cooldownMs
     setActorAction(player, 'meleeAttack', now, ATTACK_POSE_MS)
     const hitbox = enemyCombatRules.meleeHitbox(player.x, player.y, player.width, player.height, player.facing)
     enemiesRef.current.forEach((enemy) => {
-      if (enemy.health > 0 && intersects(hitbox, enemy)) damageEnemy(enemy, currentSpec.weapon.meleeDamage)
+      if (enemy.health > 0 && intersects(hitbox, enemy)) damageEnemy(enemy, currentSpec.weapon.meleeDamage * characterRosterRules.effective(currentSpec.hero,rosterStateRef.current).meleeMultiplier)
     })
     effectsRef.current.push({
       id: `slash-${Date.now()}`,
@@ -760,8 +813,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     const currentSpec = gameData.data?.spec
     if (!player || !currentSpec || modeRef.current !== 'playing' || storyBlockedRef.current) return
     const now = simulationTimeRef.current
-    if (player.health <= 0 || (player.action === 'hit' && now < player.actionUntil)) return
-    if (now < player.rangedReadyAt) return
+    if (player.frozen || player.health <= 0 || (player.action === 'hit' && now < player.actionUntil)) return
+    if (!characterRosterRules.effective(currentSpec.hero,rosterStateRef.current).rangedMultiplier || now < player.rangedReadyAt) return
     player.rangedReadyAt = now + Math.max(240, currentSpec.weapon.cooldownMs * 1.2)
     setActorAction(player, 'rangedAttack', now, ATTACK_POSE_MS)
     const muzzleX = player.facing === 1 ? player.x + player.width : player.x - 32
@@ -772,7 +825,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       width: 24,
       height: 16,
       vx: currentSpec.weapon.projectileSpeed * player.facing,
-      damage: currentSpec.weapon.rangedDamage,
+      damage: currentSpec.weapon.rangedDamage * characterRosterRules.effective(currentSpec.hero,rosterStateRef.current).rangedMultiplier,
       hostile: false,
     })
     effectsRef.current.push({
@@ -786,15 +839,27 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     playEffectSound(assetFor('rangedAttackSound', levelSpec?.id), 620)
   }, [assetFor, gameData.data?.spec, levelSpec?.id, playEffectSound, startMusic])
 
+  const switchCharacter = useCallback(() => {
+    const player = playerRef.current, roster = spec?.hero.roster
+    if (!player || !roster || !spec || !roster.allowSwitch || player.health <= 0 || player.frozen || modeRef.current !== 'playing' || storyBlockedRef.current || simulationTimeRef.current < player.actionUntil) return
+    const next = characterRosterRules.choose(roster,rosterStateRef.current || characterRosterRules.fresh(roster),'switch'), profile = roster.characters.find(c=>c.id===next.characterId)!, box = characterRosterRules.resized(player,profile)
+    if(box.x<0 || box.y<0 || box.x+box.width>worldWidth || box.y+box.height>worldHeight || authoredMap?.groundY!==undefined && authoredMap.groundY!==null && box.y+box.height>authoredMap.groundY || obstaclesRef.current.some(o=>authoredMapRules.overlaps(box,o))) { setBanner(t('空间不足，无法切换角色')); return }
+    rosterStateRef.current = next
+    if(traceRef.current)playtestTraceRules.event(traceRef.current,{kind:'character',levelId:level!.id,sim:simulationTimeRef.current,x:box.x,y:box.y,target:next.characterId})
+    Object.assign(player,box,{maxHealth:profile.maxHealth,health:Math.min(player.health,profile.maxHealth),runUp:0})
+    setRenderTick(simulationTimeRef.current)
+  },[spec,authoredMap,worldWidth,worldHeight,t,level])
+
   const damagePlayer = useCallback((damage: number) => {
     const player = playerRef.current
     if (!player || player.health <= 0) return
     const now = simulationTimeRef.current
     if (now < player.invulnerableUntil) return
     player.health = Math.max(0, player.health - damage)
+    if(!player.health&&traceRef.current)playtestTraceRules.event(traceRef.current,{kind:'death',levelId:level!.id,sim:now,x:player.x,y:player.y})
     setActorAction(player, player.health <= 0 ? 'death' : 'hit', now, player.health <= 0 ? DEATH_POSE_MS : HIT_POSE_MS)
     player.invulnerableUntil = now + 850
-  }, [])
+  }, [level])
 
   const enterExit = useCallback(() => {
     if (transitionRef.current) return
@@ -828,10 +893,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     const playerX = playerRef.current.x
     const point = plan.points.filter(candidate => candidate.kind === 'interact'
       && available.some(task => task.target === candidate.id && task.available && !task.complete)
-      && Math.abs(playerX - (120 + (exitX - 220) * candidate.position)) < 95)
-      .sort((left, right) => Math.abs(playerX - (120 + (exitX - 220) * left.position)) - Math.abs(playerX - (120 + (exitX - 220) * right.position)))[0]
+      && (!authoredMap || Math.abs((playerRef.current?.y || 0) - authoredMapRules.storyPoint(authoredMap, candidate.position).y) < 100)
+      && Math.abs(playerX - ((authoredMap ? authoredMapRules.storyPoint(authoredMap, candidate.position).x : 120 + (exitX - 220) * candidate.position))) < 95)
+      .sort((left, right) => Math.abs(playerX - ((authoredMap ? authoredMapRules.storyPoint(authoredMap, left.position).x : 120 + (exitX - 220) * left.position))) - Math.abs(playerX - ((authoredMap ? authoredMapRules.storyPoint(authoredMap, right.position).x : 120 + (exitX - 220) * right.position))))[0]
     if (point) emitStory('interact', point.id, point.id)
-  }, [spec, levelSpec, exitX, emitStory])
+  }, [spec, levelSpec, exitX, authoredMap, emitStory])
 
   useEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
@@ -847,6 +913,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       void startMusic()
       if (event.repeat) return
       keysRef.current.add(key)
+      if (key === 'c') switchCharacter()
       if (key === 'e') interactStory()
       if (key === 'j') meleeAttack()
       if (key === 'k' || key === 'f') rangedAttack()
@@ -858,7 +925,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
       window.removeEventListener('keydown', keyDown)
       window.removeEventListener('keyup', keyUp)
     }
-  }, [meleeAttack, rangedAttack, setMode, startMusic, interactStory])
+  }, [meleeAttack, rangedAttack, setMode, startMusic, interactStory, switchCharacter])
 
   useEffect(() => {
     if (!data || !level || !spec) return
@@ -886,10 +953,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         stageRef.current.dataset.playerOnGround = String(player?.onGround)
         stageRef.current.dataset.playerVy = String(player?.vy)
         stageRef.current.dataset.playerSize = player ? `${player.width},${player.height}` : ''
-        stageRef.current.dataset.jumpPower = String(spec.hero.jumpPower)
+        stageRef.current.dataset.jumpPower = String(characterRosterRules.effective(spec.hero,rosterStateRef.current).jumpPower)
         stageRef.current.dataset.weaponCooldown = String(spec.weapon.cooldownMs)
         stageRef.current.dataset.groundTop = String(groundTop)
         stageRef.current.dataset.worldWidth = String(worldWidth)
+        stageRef.current.dataset.worldHeight = String(worldHeight)
+        stageRef.current.dataset.authoredMap = String(!!authoredMap)
+        stageRef.current.dataset.characterId = rosterStateRef.current?.characterId || ''
+        stageRef.current.dataset.behaviorStages = enemiesRef.current.filter(e=>e.programState).map(e=>e.id+':'+e.programState!.index+':'+e.programPhase).join(';')
+        stageRef.current.dataset.playerFrozen = String(!!player?.frozen)
+        stageRef.current.dataset.playerReversed = String(!!player?.reversed)
+        stageRef.current.dataset.checkpointId = mechanismStateRef.current.checkpointId || ''
         stageRef.current.dataset.layoutVersion = String(initializedWorldRef.current?.layoutVersion || 0)
         stageRef.current.dataset.obstacleLayout = obstaclesRef.current.map(obstacle => `${obstacle.type}:${obstacle.x},${obstacle.width},${obstacle.height}`).join(';')
       }
@@ -897,11 +971,22 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         simulationTimeRef.current += elapsedRealMs
         const now = simulationTimeRef.current
         const delta = Math.min(2, elapsedRealMs / 16.67)
+        const currentHero = characterRosterRules.effective(spec.hero,rosterStateRef.current)
         obstaclesRef.current.forEach((obstacle) => {
           if (obstacle.type === 'airPlatform' && obstacle.baseY !== undefined) {
             obstacle.y = obstacle.baseY + Math.sin(now / 850 + (obstacle.phase || 0)) * 18
           }
         })
+        if (authoredMap && player.health > 0) {
+          const previousCheckpoint=mechanismStateRef.current.checkpointId
+          const frame = authoredMapRules.mechanismFrame(authoredMap, mechanismStateRef.current, player, now, elapsedRealMs)
+          if(frame.checkpointId!==previousCheckpoint&&frame.checkpointId&&traceRef.current)playtestTraceRules.event(traceRef.current,{kind:'checkpoint',levelId:level.id,sim:now,x:player.x,y:player.y,target:frame.checkpointId})
+          mechanismFrameRef.current = frame
+          obstaclesRef.current = frame.solids.map(o => ({ ...o, assetId: assetFor(o.type === 'platform' ? 'groundPlatform' : o.type as AssetCategory, levelSpec?.id)?.id }))
+          const carried = authoredMapRules.transport(player, frame, authoredMap)
+          Object.assign(player, { x: carried.x, y: carried.y, frozen: frame.frozen, reversed: frame.reversed })
+          if (carried.dead || frame.solids.some(o => o.type === 'deathObstacle' && authoredMapRules.overlaps(player, o))) { player.invulnerableUntil = 0; damagePlayer(player.maxHealth) }
+        }
         if (player.health <= 0) {
           player.vx = 0
           if (now >= player.actionUntil) setMode('dead')
@@ -910,14 +995,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           const moveLeft = keysRef.current.has('a') || keysRef.current.has('arrowleft')
           const moveRight = keysRef.current.has('d') || keysRef.current.has('arrowright')
           const jump = keysRef.current.has(' ') || keysRef.current.has('w') || keysRef.current.has('arrowup')
-          player.vx = reactionLocked ? 0 : (moveRight ? spec.hero.moveSpeed : 0) - (moveLeft ? spec.hero.moveSpeed : 0)
+          const motion = heroPhysics.drive(player, { direction: (Number(moveRight) - Number(moveLeft)) * (player.reversed ? -1 : 1), jump, locked: reactionLocked || !!player.frozen }, currentHero.moveSpeed, currentHero.jumpPower, delta, currentHero.physics)
+          Object.assign(player, { vx: motion.vx, vy: motion.vy, onGround: motion.onGround, jumpsUsed: motion.jumpsUsed, jumpHeld: motion.jumpHeld, runUp: motion.runUp })
           if (player.vx) player.facing = player.vx > 0 ? 1 : -1
-          if (!reactionLocked && jump && player.onGround) {
-            player.vy = -spec.hero.jumpPower
-            player.onGround = false
-            traversalHintsRef.current.clear()
-          }
+          if (motion.jumped) {traversalHintsRef.current.clear();if(traceRef.current)playtestTraceRules.event(traceRef.current,{kind:'jump',levelId:level.id,sim:now,x:player.x,y:player.y,target:rosterStateRef.current?.characterId})}
 
+          if (authoredMap) {
+            const moved = player.frozen ? { ...player, vx: 0, vy: 0, dead: false } : authoredMapRules.move(player, obstaclesRef.current, delta, heroPhysics.gravity(currentHero.physics, levelSpec?.platformMode || 'ground'), authoredMap, currentHero.jumpPower)
+            Object.assign(player, { x: moved.x, y: moved.y, vx: moved.vx, vy: moved.vy, onGround: moved.onGround })
+            if (stageRef.current) { stageRef.current.dataset.playerXAfter = String(player.x); stageRef.current.dataset.playerY = String(player.y) }
+            if (moved.dead) damagePlayer(player.maxHealth)
+          } else {
           let nextX = Math.max(0, Math.min(worldWidth - player.width, player.x + player.vx * delta))
           const horizontalBox = { ...player, x: nextX }
           const horizontalHit = obstaclesRef.current.find((obstacle) => intersects(horizontalBox, obstacle))
@@ -935,12 +1023,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           if (stageRef.current) {
             stageRef.current.dataset.playerXAfter = String(player.x)
             stageRef.current.dataset.playerY = String(player.y)
-            stageRef.current.dataset.moveSpeed = String(spec.hero.moveSpeed)
-            stageRef.current.dataset.motionFinite = String([player.x, player.y, player.vx, player.vy, delta, spec.hero.moveSpeed].every(Number.isFinite))
+            stageRef.current.dataset.moveSpeed = String(currentHero.moveSpeed)
+            stageRef.current.dataset.motionFinite = String([player.x, player.y, player.vx, player.vy, delta, currentHero.moveSpeed].every(Number.isFinite))
           }
 
-          const gravityScale = levelSpec?.platformMode === 'water' ? 0.34 : levelSpec?.platformMode === 'air' ? 0.68 : 1
-          player.vy += 0.82 * gravityScale * delta
+          player.vy += heroPhysics.gravity(currentHero.physics, levelSpec?.platformMode || 'ground') * delta
           let nextY = player.y + player.vy * delta
           player.onGround = false
           if (nextY + player.height >= groundTop) {
@@ -956,7 +1043,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
                   damagePlayer(player.maxHealth)
                 } else if (obstacle.type === 'bounceObstacle') {
                   nextY = obstacle.y - player.height
-                  player.vy = -spec.hero.jumpPower * 1.35
+                  player.vy = -currentHero.jumpPower * 1.35
                   player.onGround = false
                 } else {
                   nextY = obstacle.y - player.height
@@ -968,6 +1055,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
             }
           }
           player.y = nextY
+          }
 
           if (!reactionLocked || now >= player.actionUntil) {
             if (!player.onGround) setActorAction(player, 'jump', now)
@@ -978,6 +1066,26 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
         enemiesRef.current.forEach((enemy) => {
           if (enemy.health <= 0) return
+          if (enemy.program) {
+            if (enemy.isBoss && storyRef.current && narrativeEngine.objectives(spec,storyRef.current).some(task=>task.kind==='boss'&&!task.available)) return
+            const state = enemy.programState || (enemy.programState = behaviorProgramRules.fresh(enemy))
+            const priorStage=state.index,priorPhase=enemy.programPhase
+            const frame = behaviorProgramRules.step(enemy.program,state,enemy,player,now,delta)
+            Object.assign(enemy,{x:Math.max(0,Math.min(worldWidth-frame.width,frame.x)),y:frame.y,width:frame.width,height:frame.height,programLabel:frame.label,programPhase:frame.phase})
+            if((state.index!==priorStage||frame.phase!==priorPhase)&&traceRef.current)playtestTraceRules.event(traceRef.current,{kind:'boss-stage',levelId:level.id,sim:now,x:enemy.x,y:enemy.y,target:enemy.id,stage:state.index,phase:frame.phase})
+            enemy.direction = player.x >= enemy.x ? 1 : -1
+            setActorAction(enemy,frame.phase==='warning'?'idle':frame.attack==='ranged'?'rangedAttack':frame.attack==='melee'?'meleeAttack':'walk',now)
+            if(frame.contact && intersects(player,enemy)) { player.invulnerableUntil=0; damagePlayer(player.maxHealth) }
+            else if(frame.attack==='melee' && intersects(enemyCombatRules.meleeHitbox(enemy.x,enemy.y,enemy.width,enemy.height,enemy.direction),player)) damagePlayer(enemy.damage)
+            else if(frame.attack==='ranged') projectilesRef.current.push({id:'program-shot-'+enemy.id+'-'+now,x:enemy.x+enemy.width/2,y:enemy.y+enemy.height*.4,width:20,height:16,vx:enemy.direction*7,damage:enemy.damage,hostile:true})
+            return
+          }
+          if (authoredMap && mechanismFrameRef.current && (enemy.mobility === 'ground' || enemy.mobility === 'boss')) {
+            const carried = authoredMapRules.transport({ ...enemy, vx: 0 }, mechanismFrameRef.current, authoredMap)
+            Object.assign(enemy, { x: carried.x, y: carried.y })
+            if (carried.dead) { damageEnemy(enemy, enemy.maxHealth); return }
+          }
+          const previousX = enemy.x
           if (enemy.isBoss && storyRef.current && narrativeEngine.objectives(spec, storyRef.current).some(task => task.kind === 'boss' && !task.available)) return
           const distance = player.x - enemy.x
           if (Math.abs(distance) < (enemy.isBoss ? 480 : 300)) enemy.direction = distance >= 0 ? 1 : -1
@@ -998,7 +1106,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
             const speedScale = enemy.mobility === 'water' ? 0.72 : enemy.mobility === 'air' ? 1.12 : 1
             enemy.x = enemyCombatRules.moveWithinPatrol(
               enemy.x, enemy.direction, enemy.speed * speedScale * delta,
-              enemy.patrolMin, Math.min(enemy.patrolMax, exitX - enemy.width - 32),
+              enemy.patrolMin, Math.min(enemy.patrolMax, (authoredMap ? worldWidth : exitX - 32) - enemy.width),
             )
           }
           if (!reactionLocked) {
@@ -1014,7 +1122,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
               enemy.y = Math.min(groundTop - enemy.height * 0.45, enemy.baseY + Math.sin(now / 630 + enemy.phase) * 22 + lift)
               setActorAction(enemy, maneuvering ? 'jump' : resting ? 'idle' : 'walk', now)
             } else {
-              if (!enemy.onGround) {
+              if (!enemy.onGround && !authoredMap) {
                 enemy.vy += 0.72 * delta
                 enemy.y += enemy.vy * delta
                 if (enemy.y + enemy.height >= groundTop) {
@@ -1022,11 +1130,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
                   enemy.vy = 0
                   enemy.onGround = true
                 }
-              } else enemy.y = groundTop - enemy.height
+              } else if (!authoredMap) enemy.y = groundTop - enemy.height
               setActorAction(enemy, !enemy.onGround ? 'jump' : resting ? 'idle' : 'walk', now)
             }
           }
 
+          if (authoredMap && (enemy.mobility === 'ground' || enemy.mobility === 'boss')) {
+            const moved = authoredMapRules.move({ ...enemy, x: previousX, vx: delta ? (enemy.x - previousX) / delta : 0 }, obstaclesRef.current, delta, 0.72, authoredMap, 7.5)
+            Object.assign(enemy, { x: moved.x, y: moved.y, vy: moved.vy, onGround: moved.onGround })
+            if (moved.dead) { damageEnemy(enemy, enemy.health); return }
+          }
           const verticalOverlap = player.y < enemy.y + enemy.height && player.y + player.height > enemy.y
           const attackKind = enemyCombatRules.attackKind(enemy.ranged, enemy.isBoss, distance, enemy.width, now - enemy.lastShotAt, reactionLocked, verticalOverlap)
           if (attackKind === 'ranged') {
@@ -1083,7 +1196,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
         collectiblesRef.current.forEach((item) => {
           if (item.collected) return
-          const box = { x: item.x, y: item.y, width: 34, height: 34 }
+          const box = { x: item.x, y: item.y, width: item.width ?? 34, height: item.height ?? 34 }
           if (intersects(player, box)) {
             item.collected = true
             const collectible = spec.collectible
@@ -1096,19 +1209,20 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
         const chapter = spec.narrative?.chapters.find(c => c.levelId === levelSpec?.id)
         chapter?.points.filter(point => point.kind === 'reach').forEach(point => {
-          if (Math.abs(player.x - (120 + (exitX - 220) * point.position)) < 70) emitStory('reach', point.id, point.id)
+          if ((!authoredMap || Math.abs(player.y - authoredMapRules.storyPoint(authoredMap, point.position).y) < 100) && Math.abs(player.x - ((authoredMap ? authoredMapRules.storyPoint(authoredMap, point.position).x : 120 + (exitX - 220) * point.position))) < 70) emitStory('reach', point.id, point.id)
         })
-        const liveBoss = enemiesRef.current.find(enemy => enemy.isBoss && enemy.health > 0)
+        const liveBoss = enemiesRef.current.find(enemy => enemy.isBoss && enemy.health > 0 && !enemy.programState?.resolved)
         if (liveBoss && Math.abs(player.x - liveBoss.x) < 360) emitStory('boss-approach', 'boss', 'approach')
         const exitTrigger = {
-          x: exitX - 16,
+          x: authoredMap ? exitX : exitX - 16,
           y: exitY,
-          width: EXIT_WIDTH + 32,
-          height: EXIT_HEIGHT,
+          width: authoredMap ? exitWidth : EXIT_WIDTH + 32,
+          height: exitHeight,
         }
-        if (player.health > 0 && narrativeEngine.exitReady(spec, storyRef.current, enemiesRef.current.length) && !storyBlockedRef.current && intersects(player, exitTrigger)) {
+        if (player.health > 0 && narrativeEngine.exitReady(spec, storyRef.current, enemiesRef.current.filter(e=>!e.programState?.resolved).length) && !storyBlockedRef.current && intersects(player, exitTrigger)) {
           enterExit()
         }
+        if(traceRef.current)playtestTraceRules.sample(traceRef.current,{levelId:level.id,sim:now,x:player.x,y:player.y,vx:player.vx,vy:player.vy,onGround:player.onGround,health:player.health,characterId:rosterStateRef.current?.characterId})
         setRenderTick(now)
       }
       animationRef.current = requestAnimationFrame(loop)
@@ -1119,7 +1233,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
     }
   }, [assetFor, damageEnemy, damagePlayer, data, enterExit, exitX, exitY, groundTop, level, levelSpec?.id, levelSpec?.platformMode, playEffectSound, spec, worldWidth, emitStory])
 
+  const exportTrace=()=>{if(!traceRef.current)return;const url=URL.createObjectURL(new Blob([JSON.stringify(traceRef.current,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='pixel-world-online-trace.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+
   const restartCampaign = () => {
+    traceRetryRef.current=false
+    rosterStateRef.current = undefined
+    retryCheckpointRef.current = undefined
+    mechanismStateRef.current = authoredMapRules.freshMechanisms()
     clearCampaign(selectedTheme)
     restoredCampaignRef.current = null
     storyRef.current = spec ? narrativeEngine.fresh(spec) : null
@@ -1172,21 +1292,23 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
 
   const player = playerRef.current
   const cameraX = player ? Math.max(0, Math.min(worldWidth - viewportWidth, player.x - viewportWidth * 0.42)) : 0
-  const boss = enemiesRef.current.find((enemy) => enemy.isBoss)
-  const remaining = enemiesRef.current.length
+  const cameraY = authoredMap && player ? Math.max(0, Math.min(worldHeight - stageHeight, player.y - stageHeight * 0.42)) : 0
+  const boss = enemiesRef.current.find((enemy) => enemy.isBoss && !enemy.programState?.resolved)
+  const remaining = enemiesRef.current.filter(e=>!e.programState?.resolved).length
   const levelCleared = Boolean(spec && narrativeEngine.exitReady(spec, storyProgress, remaining))
   const storyTasks = spec && storyProgress ? narrativeEngine.objectives(spec, storyProgress) : []
   const storyChapter = spec?.narrative?.chapters.find(chapter => chapter.levelId === levelSpec?.id)
   const playerNearExit = Boolean(player && intersects(player, {
     x: exitX - 54,
     y: exitY - 10,
-    width: EXIT_WIDTH + 108,
-    height: EXIT_HEIGHT + 20,
+    width: exitWidth + 108,
+    height: exitHeight + 20,
   }))
 
   const renderImage = (url: string, alt: string, style: CSSProperties, fallback: ReactNode) =>
     url ? <img src={url} alt={alt} draggable={false} style={{ ...style, imageRendering: 'pixelated', userSelect: 'none', pointerEvents: 'none' }} /> : fallback
-  const heroAsset = assetFor('hero', levelSpec?.id)
+  const currentHero = spec ? characterRosterRules.effective(spec.hero,rosterStateRef.current) : undefined
+  const heroAsset = currentHero?.assetId ? assetById(currentHero.assetId) || assetFor('hero',levelSpec?.id) : assetFor('hero', levelSpec?.id)
   const meleeWeaponAsset = assetFor('meleeWeapon', levelSpec?.id)
   const rangedWeaponAsset = assetFor('rangedWeapon', levelSpec?.id)
   const weather = levelSpec?.effects.weather || ''
@@ -1207,6 +1329,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           <Tag color="blue">{t('关卡')} {currentLevelIndex + 1}/{totalLevels}</Tag>
           <Tag color={levelCleared ? 'green' : remaining ? 'red' : 'gold'}>{levelCleared ? t('出口已开放') : remaining ? spec.creationLanguage === 'en' ? `${remaining} enemies · Complete the objectives to unlock the exit` : `${remaining} 名敌人 · 完成任务后开放出口` : t('完成任务后开放出口')}</Tag>
           <Tag color="gold">{t('得分')} {scoreRef.current}</Tag>
+          <Button onClick={exportTrace}>{t('导出试玩轨迹')}</Button>
+          {spec.hero.roster && <Button disabled={mode !== 'playing' || !spec.hero.roster.allowSwitch} onClick={switchCharacter}>{currentHero?.name} · C</Button>}
           {powerRef.current > 1 && <Tag color="purple">{t('强化')} ×{powerRef.current.toFixed(2)}</Tag>}
         </Space>
         <Space>
@@ -1283,19 +1407,21 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           }} />)}
         </div>}
 
-        <div style={{ position: 'absolute', width: worldWidth, height: stageHeight, transform: `translateX(${-cameraX}px)`, willChange: 'transform', filter: filterStyle, zIndex: 2 }}>
+        <div style={{ position: 'absolute', width: worldWidth, height: worldHeight, transform: `translate(${-cameraX}px, ${-cameraY}px)`, willChange: 'transform', filter: filterStyle, zIndex: 2 }}>
           <div style={{
             position: 'absolute',
             left: 0,
             top: groundTop,
             width: worldWidth,
-            height: stageHeight - groundTop,
+            height: Math.max(0, worldHeight - groundTop),
             backgroundImage: assets.ground ? `url("${assets.ground}")` : 'linear-gradient(#5f6f39, #3c3928)',
             backgroundSize: '110px 110px',
             imageRendering: 'pixelated',
             borderTop: '4px solid rgba(220,255,145,.75)',
           }} />
 
+          {authoredMap?.checkpoints?.map(c => <div key={'checkpoint-' + c.id} title={t('存档点')} style={{ position: 'absolute', pointerEvents: 'none', left: c.x, top: c.y, width: c.width, height: c.height, border: '2px solid #58d68d', background: mechanismStateRef.current.checkpointId === c.id ? '#58d68d66' : '#58d68d22', color: '#fff', boxSizing: 'border-box' }}>⚑</div>)}
+          {mechanismFrameRef.current?.visuals.filter(m => m.kind !== 'movingPlatform').map(m => <div key={'zone-' + m.id} title={m.kind} style={{ position: 'absolute', pointerEvents: 'none', left: m.x, top: m.y, width: m.width, height: m.height, boxSizing: 'border-box', border: '2px dashed ' + (m.kind === 'freeze' ? '#74d9ff' : m.kind === 'reverse' ? '#d49aff' : m.warning ? '#ffcf55' : '#ff6573'), background: m.active ? '#ffffff33' : '#ffffff0c', opacity: m.active || m.warning ? 1 : 0.6 }}><small>{m.kind === 'freeze' ? '❄' : m.kind === 'reverse' ? '⇄' : m.warning ? '!' : '△'}</small></div>)}
           {obstaclesRef.current.map((obstacle) => {
             const obstacleAsset = obstacle.assetId ? assetById(obstacle.assetId) : undefined
             const obstacleUrl = obstacle.type === 'deathObstacle'
@@ -1312,7 +1438,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
           )})}
 
           {collectiblesRef.current.filter((item) => !item.collected).map((item) => (
-            <div key={item.id} style={{ position: 'absolute', left: item.x, top: item.y, width: 36, height: 36, filter: 'drop-shadow(0 0 8px #77f7ff)', animation: 'pulse 1s infinite alternate' }}>
+            <div key={item.id} style={{ position: 'absolute', left: item.x, top: item.y, width: item.width ?? 36, height: item.height ?? 36, filter: 'drop-shadow(0 0 8px #77f7ff)', animation: 'pulse 1s infinite alternate' }}>
               {renderImage(assets.collectible, spec.collectible.name, { width: '100%', height: '100%', objectFit: 'contain' }, fallbackSprite(t('SEED'), '#08a88a', 34))}
             </div>
           ))}
@@ -1321,7 +1447,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
             const enemyAsset = assetById(enemy.assetId) || assetFor(enemy.isBoss ? 'boss' : enemy.mobility === 'air' ? 'airEnemy' : enemy.mobility === 'water' ? 'waterEnemy' : 'groundEnemy', levelSpec?.id)
             const enemyUrl = enemyAsset?.url || (enemy.isBoss ? assets.boss : assets.enemy)
             return (
-            <div key={enemy.id} data-testid={enemy.isBoss ? 'game-boss' : 'game-enemy'} data-action={enemy.action} style={{ position: 'absolute', left: enemy.x, top: enemy.y, width: enemy.width, height: enemy.height }}>
+            <div key={enemy.id} data-testid={enemy.isBoss ? 'game-boss' : 'game-enemy'} data-action={enemy.action} data-program-stage={enemy.programState?.index} data-program-phase={enemy.programPhase} style={{ position: 'absolute', left: enemy.x, top: enemy.y, width: enemy.width, height: enemy.height }}>
+              {enemy.programLabel && <small style={{position:'absolute',top:-28,color:'#fff',whiteSpace:'nowrap'}}>{enemy.programLabel} · {enemy.programPhase}</small>}
               <div style={{ position: 'absolute', left: 0, top: -9, width: '100%', height: 5, background: '#2b2030', borderRadius: 3 }}>
                 <div style={{ width: `${Math.max(0, enemy.health / enemy.maxHealth * 100)}%`, height: '100%', background: enemy.isBoss ? '#ff375f' : '#ff7547', borderRadius: 3 }} />
               </div>
@@ -1362,14 +1489,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
               opacity: renderTick < player.invulnerableUntil && Math.floor(renderTick / 80) % 2 ? 0.35 : 1,
               filter: 'drop-shadow(0 5px 3px rgba(0,0,0,.6))',
             }}>
-              {plannedSprite(heroAsset, assets.character, player.action, renderTick, player.actionStartedAt, player.actionUntil, spec.hero.name, { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${player.facing})` }, fallbackSprite(t('HERO'), '#2664c9', 54), player.vy < 0 ? 0 : 1)}
+              {plannedSprite(heroAsset, assets.character, player.action, renderTick, player.actionStartedAt, player.actionUntil, currentHero?.name || spec.hero.name, { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${player.facing})` }, fallbackSprite(t('HERO'), '#2664c9', 54), player.vy < 0 ? 0 : 1)}
               <div style={{ position: 'absolute', left: player.facing === 1 ? 34 : -14, top: 25, width: 34, height: 20 }}>
                 {renderImage(player.action === 'rangedAttack' ? rangedWeaponAsset?.url || assets.rangedWeapon : player.action === 'meleeAttack' ? meleeWeaponAsset?.url || assets.weapon : '', spec.weapon.name, { width: '100%', height: '100%', objectFit: 'contain', transform: `scaleX(${player.facing}) rotate(${player.facing === 1 ? -10 : 10}deg)` }, null)}
               </div>
             </div>
           )}
 
-          <div style={{ position: 'absolute', left: exitX, top: exitY, width: EXIT_WIDTH, height: EXIT_HEIGHT, display: 'grid', placeItems: 'center' }}>
+          <div style={{ position: 'absolute', left: exitX, top: exitY, width: exitWidth, height: exitHeight, display: 'grid', placeItems: 'center' }}>
             <div style={{
               width: 54,
               height: 88,
@@ -1383,8 +1510,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
         </div>
 
         {storyChapter?.points.filter(point => storyTasks.some(task => task.target === point.id && (task.available || task.complete))).map(point => {
-          const x = 120 + (exitX - 220) * point.position - cameraX
-          return <button key={point.id} className="narrative-world-point" style={{ left: x, top: groundTop - 85 }} aria-label={point.name} onClick={interactStory}>✦<small>{point.name} · E</small></button>
+          const x = (authoredMap ? authoredMapRules.storyPoint(authoredMap, point.position).x : 120 + (exitX - 220) * point.position) - cameraX
+          return <button key={point.id} className="narrative-world-point" style={{ left: x, top: (authoredMap ? authoredMapRules.storyPoint(authoredMap, point.position).y : groundTop - 85) - cameraY }} aria-label={point.name} onClick={interactStory}>✦<small>{point.name} · E</small></button>
         })}
         {spec?.narrative && <div className="narrative-objectives" aria-label={t("当前关卡任务")}><strong>{storyChapter?.title}</strong>{storyTasks.map(task => <div key={task.id} data-objective={task.id} data-complete={task.complete}>{task.complete ? '✓' : task.available ? '○' : '·'} {task.description} {task.count > 1 ? `${task.current}/${task.count}` : ''}</div>)}<Button size="small" onClick={() => { keysRef.current.clear(); storyBlockedRef.current = true; setStoryLogOpen(true) }}>{t("剧情记录")}</Button><Button size="small" onClick={interactStory}>{t("交互 E")}</Button></div>}
         <NarrativeOverlay creationLanguage={spec.creationLanguage} queue={storyQueue} history={storyProgress?.history || []} logOpen={storyLogOpen} onNext={() => setQueue(storyQueueRef.current.slice(1))} onSkip={() => setQueue([])} onClose={() => { setStoryLogOpen(false); storyBlockedRef.current = storyQueueRef.current.length > 0; keysRef.current.clear() }} />
@@ -1404,7 +1531,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
             <div style={{ textAlign: 'center', color: '#fff', padding: 28 }}>
               <Title style={{ color: '#fff' }}>{mode === 'paused' ? t('游戏已暂停') : mode === 'dead' ? t('主角倒下了') : mode === 'victory' ? t('冒险完成') : t('本关完成')}</Title>
               {mode === 'victory' && <Text style={{ color: '#ffe985', display: 'block', marginBottom: 18 }}>{t("得分：")}{scoreRef.current} {t("· 所有关卡已完成")}</Text>}
-              {mode === 'dead' && <Button onClick={() => { if (spec && storyRef.current && level) { storyRef.current = narrativeEngine.begin(spec, storyRef.current, level.id, true); setStoryProgress(storyRef.current); setQueue(storyRef.current.history.filter(entry => entry.id === `${level.id}:arrival`)); } scoreRef.current = levelScoreRef.current; playerRef.current = null; restoredCampaignRef.current = null; initializeLevel() }}>{t("重试本关")}</Button>}
+              {mode === 'dead' && <Button onClick={() => { if (spec && storyRef.current && level) { storyRef.current = narrativeEngine.begin(spec, storyRef.current, level.id, true); setStoryProgress(storyRef.current); setQueue(storyRef.current.history.filter(entry => entry.id === `${level.id}:arrival`)); } scoreRef.current = levelScoreRef.current; traceRetryRef.current=true; retryCheckpointRef.current = mechanismStateRef.current.checkpointId; if(spec?.hero.roster)rosterStateRef.current=characterRosterRules.choose(spec.hero.roster,rosterStateRef.current||characterRosterRules.fresh(spec.hero.roster),'respawn'); powerRef.current = 1; playerRef.current = null; restoredCampaignRef.current = null; initializeLevel() }}>{t("重试本关")}</Button>}
               {mode === 'paused' && <Button type="primary" icon={<Play size={15} />} onClick={() => setMode('playing')}>{t("Resume")}</Button>}
               {(mode === 'dead' || mode === 'victory') && <Button type="primary" icon={<RotateCcw size={15} />} onClick={restartCampaign}>{t("重新开始冒险")}</Button>}
               {mode === 'victory' && spec.narrative && <Button style={{ marginLeft: 10 }} onClick={() => { keysRef.current.clear(); storyBlockedRef.current = true; setStoryLogOpen(true) }}>{t("回看故事")}</Button>}
@@ -1417,6 +1544,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
             shape="circle"
             size="large"
             icon={<ArrowLeft />}
+            aria-label={spec.creationLanguage==='en'?'Move left':'向左移动'}
             onPointerDown={() => pressMovement('a', true)}
             onPointerUp={() => pressMovement('a', false)}
             onPointerLeave={() => pressMovement('a', false)}
@@ -1425,6 +1553,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ onBackToMenu }) => {
             shape="circle"
             size="large"
             icon={<ArrowRight />}
+            aria-label={spec.creationLanguage==='en'?'Move right':'向右移动'}
             onPointerDown={() => pressMovement('d', true)}
             onPointerUp={() => pressMovement('d', false)}
             onPointerLeave={() => pressMovement('d', false)}

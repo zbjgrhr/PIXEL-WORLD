@@ -2,6 +2,7 @@ import type { LevelData, ObstacleData } from '@/types'
 
 /** Runtime layout rules, not an edit of the approved story or actor statistics. */
 export function ensureEncounterClearance(source: LevelData, fallbackEnemyCount = 0): LevelData {
+  if (source.authoredMap) return source
   if (source.layoutVersion === 2 && (source.enemySpawns?.length || !fallbackEnemyCount)) return source
   const obstacles = (source.obstacles || []).map(obstacle => ({ ...obstacle,
     width: Math.max(42, Math.min(80, obstacle.width || 48)), height: Math.max(42, Math.min(80, obstacle.height || 48)),

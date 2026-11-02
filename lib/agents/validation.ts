@@ -1,5 +1,9 @@
 import { narrativeProblems } from '@/lib/narrative'
 import { animationClipPoses, normalizeAnimationSpec } from '@/lib/asset-catalog'
+import { characterRosterRules } from '@/lib/character-roster'
+import { behaviorProgramRules } from '@/lib/behavior-program'
+import { authoredMapRules } from '@/lib/authored-map'
+import { validateReference, referenceFingerprint } from '@/lib/reference-analysis'
 import type { AgentIssue, AgentRole, AssetCategory, GameSpec } from '@/types'
 
 function issue(source: AgentRole, severity: AgentIssue['severity'], path: string, message: string, suggestion: string): AgentIssue {
@@ -19,12 +23,43 @@ function enabledAssets(spec: GameSpec, category: AssetCategory) {
 
 export function inspectGameSpec(spec: GameSpec, source: AgentRole = 'engineQa'): AgentIssue[] {
   const issues: AgentIssue[] = []
+  try {
+    if (spec.hero.roster) {
+      const roster = characterRosterRules.validate(spec.hero.roster)
+      for (const character of roster.characters) {
+        if (character.assetId && !spec.assets.some(a => a.id === character.assetId && (a.kind === 'image'||a.kind === 'spriteSheet') && a.enabled)) throw Error('Character sprite must reference an enabled image asset')
+        for (const level of spec.levels) if (level.map) {
+          const spawns = [level.map.player,...(level.map.checkpoints || []).map(c => ({...level.map!.player,...c.respawn}))]
+          for (const spawn of spawns) {
+            const box = characterRosterRules.resized(spawn, character)
+            if (box.x < 0 || box.y < 0 || box.x+box.width>level.map.width || box.y+box.height>(level.map.groundY??level.map.height) || level.map.obstacles.some(o=>authoredMapRules.overlaps(box,o))) throw Error('Character collider does not fit a spawn or checkpoint')
+          }
+        }
+      }
+    }
+    for (const actor of [spec.boss,...spec.enemies]) if(actor.program) behaviorProgramRules.validate(actor.program)
+  } catch (error) { issues.push(issue(source,'blocking','actorRules',String(error),'修正角色池、碰撞框或阶段编排后重新审核。')) }
+
+  if (spec.reference) {
+    try {
+      const reference = validateReference(spec.reference), key = referenceFingerprint(spec)
+      for (const requirement of reference.requirements) if (requirement.policy === 'required' && (!requirement.confirmed || requirement.confirmationKey !== key || !requirement.description.trim() || !requirement.evidence.trim())) issues.push(issue(source, 'blocking', `reference.${requirement.id}`, '必须还原项尚未人工对照确认、设定已变化或缺少来源证据。', '核对描述和来源；实际对照后再确认，不将未知项视为通过。'))
+    } catch (error) { issues.push(issue(source, 'blocking', 'reference', String(error), '修正原作分析数据。')) }
+  }
+  for (const level of spec.levels) if (level.map) {
+    try {
+      const map = authoredMapRules.validate(level.map)
+      for (const spawn of [...map.enemies, ...(map.boss ? [map.boss] : [])]) if (!['enemy', 'groundEnemy','airEnemy','waterEnemy','boss'].includes(spawn.kind) && !spec.assets.some(a => a.enabled && ['groundEnemy','airEnemy','waterEnemy','boss'].includes(a.category) && a.id === spawn.kind)) issues.push(issue(source, 'blocking', `levels.${level.id}.map.${spawn.id}`, '地图敌人尚未映射到支持的素材与行为类别。', '映射原作对象；不要用普通敌人冒充未实现的原作机关。'))
+    } catch (error) { issues.push(issue(source, 'blocking', `levels.${level.id}.map`, String(error), '修正精确地图后再批准。')) }
+  }
   const required: Array<[AssetCategory, string]> = [
     ['hero', '主角'], ['meleeWeapon', '近战武器'], ['rangedWeapon', '远程武器'],
     ['rangedProjectile', '远程弹射物'], ['rangedAttackEffect', '远程攻击特效'],
     ['collectible', '收集品'], ['boss', 'Boss'], ['groundPlatform', '地面平台'],
   ]
   for (const [category, label] of required) {
+    if (category === 'boss' && !spec.levels.some(level => level.hasBoss)) continue
+    if (category === 'collectible' && !spec.levels.some(level => level.collectibleCount > 0)) continue
     if (!enabledAssets(spec, category).length) {
       issues.push(issue(source, 'blocking', `assets.${category}`, `缺少已启用的${label}素材。`, `新增并启用 ${category} 素材。`))
     }
@@ -47,7 +82,7 @@ export function inspectGameSpec(spec: GameSpec, source: AgentRole = 'engineQa'):
 
   const bossLevels = spec.levels.filter((level) => level.hasBoss)
   const finalLevel = spec.levels[spec.levels.length - 1]
-  if (!finalLevel?.hasBoss) issues.push(issue(source, 'blocking', 'levels.last.hasBoss', '最终关没有启用 Boss。', '将最终关 hasBoss 设为 true。'))
+  if (!finalLevel?.hasBoss && !finalLevel?.map) issues.push(issue(source, 'blocking', 'levels.last.hasBoss', '最终关没有启用 Boss。', '自动关卡启用Boss；原作无Boss关卡请使用显式地图与通关条件。'))
   if (bossLevels.length > 1) issues.push(issue(source, 'warning', 'levels.hasBoss', '多个关卡被设为最终 Boss 战。', '第一版仅保留最终关 Boss。'))
 
   for (const asset of spec.assets.filter((candidate) => candidate.enabled)) {
@@ -92,7 +127,7 @@ export function inspectVisualAssets(spec: GameSpec): AgentIssue[] {
       for (const pose of animationClipPoses(asset)) {
         const clip = animation.clips?.[pose]
         if (!clip?.url || clip.status !== 'success') issues.push(issue('visualQa', 'blocking', `assets.${asset.id}.animation.${pose}`, `${asset.title} 的 ${pose} 动作条缺失或未通过生成检查。`, `重新生成 ${pose} 动作。`))
-        if (clip && (clip.frameCount < 1 || clip.frameCount > 3)) issues.push(issue('visualQa', 'blocking', `assets.${asset.id}.animation.${pose}.frameCount`, `${asset.title} 的 ${pose} 帧数超出引擎规则。`, '将动作条限制为 1～3 帧。'))
+        if (clip && (clip.frameCount < 1 || clip.frameCount > (clip.original ? 64 : 3))) issues.push(issue('visualQa', 'blocking', `assets.${asset.id}.animation.${pose}.frameCount`, `${asset.title} 的 ${pose} 帧数超出引擎规则。`, clip.original ? '原图动作支持1～64帧。' : '生成动作条限制为1～3帧。'))
       }
     } else if (!asset.url) {
       issues.push(issue('visualQa', 'blocking', `assets.${asset.id}.url`, `${asset.title} 尚未生成。`, '生成该素材后再执行发布检查。'))
@@ -108,7 +143,7 @@ export function inspectPlayability(spec: GameSpec): AgentIssue[] {
   }
   const boss = enabledAssets(spec, 'boss')
   const finalLevel = spec.levels[spec.levels.length - 1]
-  if (finalLevel && !boss.some((asset) => asset.levelIds.includes(finalLevel.id))) {
+  if (finalLevel?.hasBoss && !boss.some((asset) => asset.levelIds.includes(finalLevel.id))) {
     issues.push(issue('playtest', 'blocking', 'assets.boss.levelIds', 'Boss 没有被分配到最终关。', '把 Boss 及其攻击素材分配到最终关。'))
   }
   const usableEnemies = spec.assets.filter((asset) => asset.enabled && ['groundEnemy', 'airEnemy', 'waterEnemy'].includes(asset.category))

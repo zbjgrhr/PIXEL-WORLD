@@ -39,7 +39,7 @@ export async function readUploadedImage(file: File, frameCount = 1, isStrip = fa
 }
 
 export function withUploadedStatic(asset: AssetDefinition, url: string): AssetDefinition {
-  return { ...asset, kind: 'image', animation: undefined, url, status: 'success', error: undefined }
+  return { ...asset, kind: 'image', original: undefined, source:undefined, animation: undefined, url, status: 'success', error: undefined }
 }
 
 export function withUploadedClip(asset: AssetDefinition, pose: AnimationClipPose, url: string): AssetDefinition {
@@ -47,8 +47,8 @@ export function withUploadedClip(asset: AssetDefinition, pose: AnimationClipPose
   const animation = existing?.layoutVersion === 3 ? existing : createActionStripAnimation()
   const clips = { ...animation.clips }
   if (asset.kind === 'image' && asset.url) clips.idle = { ...clips.idle!, url: asset.url, status: 'success' }
-  clips[pose] = { ...clips[pose]!, url, status: 'success' }
-  const next: AssetDefinition = { ...asset, kind: 'spriteSheet', animation: { ...animation, clips }, url: clips.idle?.url, error: undefined, status: 'pending' }
+  clips[pose] = { ...clips[pose]!, original:undefined,originalPages:undefined,frameRects:undefined,source:undefined,frameOrder:undefined,frameCount:[1,2,3].includes(clips[pose]!.frameCount)?clips[pose]!.frameCount:1, url, status: 'success' }
+  const next: AssetDefinition = { ...asset, original:clips.idle?.original,source:undefined, kind: 'spriteSheet', animation: { ...animation, clips }, url: clips.idle?.url, error: undefined, status: 'pending' }
   return { ...next, status: animationIsComplete(next) ? 'success' : 'pending' }
 }
 

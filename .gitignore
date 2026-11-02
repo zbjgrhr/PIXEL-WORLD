@@ -16,6 +16,7 @@
 
 # next.js
 /.next/
+/.next-*/
 /.next-en-preview/
 /.next-en-build/
 /out/

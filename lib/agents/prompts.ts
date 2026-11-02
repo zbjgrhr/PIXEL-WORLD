@@ -1,6 +1,7 @@
 import { AGENT_ROLE_LABELS } from '@/lib/agents/config'
 import { selectedInspirationTexts } from '@/configs/inspiration-packs'
 import { enabledEnemyNamesForLevel } from '@/lib/enemy-identity'
+import { referencePrompt, geometryPrompt } from '@/lib/reference-analysis'
 import type { AgentExecuteRequest, AgentRole } from '@/types'
 
 /** Resolve from project data, never from the browser's interface-language preference. */
@@ -151,7 +152,7 @@ function currentSpec(request: AgentExecuteRequest) {
 function playerOverrides(request: AgentExecuteRequest): string {
   const fields = currentSpec(request)?.narrative?.source.playerFields || {}
   const explicit = Object.fromEntries(Object.entries(fields).filter(([path]) => path.startsWith('narrative.') || path === 'visualStyle.artDirection' || path === 'creativeBrief.identityRules'))
-  return Object.keys(explicit).length ? `Current player-approved field overrides (these supersede older wording in the original brief and prior specialist plans; preserve their meaning):\n${compact(explicit, 5000)}` : ''
+  return [referencePrompt(currentSpec(request)), geometryPrompt(currentSpec(request)), Object.keys(explicit).length ? `Current player-approved field overrides (these supersede older wording in the original brief and prior specialist plans; preserve their meaning):\n${compact(explicit, 5000)}` : ''].filter(Boolean).join('\n\n')
 }
 
 function roleContext(request: AgentExecuteRequest): string[] {
