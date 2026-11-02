@@ -26,6 +26,13 @@ function safeName(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9-_]+/g, '-').replace(/^-+|-+$/g, '') || 'pixel-world'
 }
 
+export function gameZipFileName(title: string): string {
+  let name = Array.from(title.replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, '-').trim()).slice(0, 60).join('').replace(/[. ]+$/g, '')
+  if (!name || /^[. -]+$/.test(name)) name = 'pixel-world'
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name)) name = '_' + name
+  return name + '.zip'
+}
+
 function extensionFor(contentType: string, url: string): string {
   if (contentType.includes('png')) return 'png'
   if (contentType.includes('webp')) return 'webp'
@@ -453,7 +460,7 @@ export async function exportGameZip(spec: GameSpec): Promise<void> {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = `${safeName(spec.title)}.zip`
+  anchor.download = gameZipFileName(spec.title)
   anchor.click()
   window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
