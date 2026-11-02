@@ -7,9 +7,18 @@ import LanguageSwitcher from './LanguageSwitcher'
 const NAV_ITEMS = [
   { label: '世界主页', href: '#world-home' },
   { label: '预览与发布', href: '#preview-publish' },
+  { label: '项目库', href: '/projects' },
 ]
 
-const ProjectHeader: React.FC<ProjectHeaderProps> = ({ className }) => (
+type HeaderProps = ProjectHeaderProps & {
+  projectNote?: string
+  projectError?: boolean
+  onOpenProjects?: (event: React.MouseEvent<HTMLAnchorElement>) => void
+  activeSection?: 'home' | 'projects'
+  spatialPreview?: boolean
+}
+
+const ProjectHeader: React.FC<HeaderProps> = ({ className, projectNote, projectError, onOpenProjects, activeSection = 'home', spatialPreview }) => (
   <header className={`${className || ''} portal-header`}>
     <LanguageSwitcher />
     <div className="portal-header-copy">
@@ -20,12 +29,12 @@ const ProjectHeader: React.FC<ProjectHeaderProps> = ({ className }) => (
 
     <div className="portal-world-note">
       <strong>WORLD NOTE</strong>
-      <span>你的提示词、关卡与素材共同组成这个世界。</span>
+      <span role={projectNote ? projectError ? 'alert' : 'status' : undefined}>{projectNote || '你的提示词、关卡与素材共同组成这个世界。'}</span>
     </div>
 
     <nav className="space-theme-nav" aria-label="Pixel World sections">
       {NAV_ITEMS.map((item, index) => (
-        <a className={index === 0 ? 'is-active' : ''} href={item.href} key={item.href}>{item.label}</a>
+        <a className={(activeSection === 'projects' ? item.href === '/projects' : index === 0) ? 'is-active' : ''} href={activeSection === 'projects' && item.href.startsWith('#') ? `/${item.href}` : spatialPreview && item.href === '#preview-publish' ? '#preview-publish-spatial' : item.href} key={item.href} onClick={item.href === '/projects' ? onOpenProjects : undefined}>{item.label}</a>
       ))}
     </nav>
   </header>

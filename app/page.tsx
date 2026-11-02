@@ -3,7 +3,13 @@
 import type { GameSpec } from '@/types'
 import { readCampaign, clearCampaign } from '@/lib/campaign-save'
 
-import React, { useEffect, useRef, useState, type CSSProperties } from 'react'
+import React, { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { getProject, saveProject } from '@/lib/project-library-db'
+import type { WorldProject, ProjectDraft } from '@/lib/project-library'
+import { PLAY_MODES, type PlayMode } from '@/lib/project-library'
+import { spatialWorldProject } from '@/lib/project-file'
+import type { SpatialProject } from '@/lib/spatial/spec'
+import HomeSpatialStudio from '@/components/HomeSpatialStudio'
 import { message } from 'antd'
 import { useGameStore } from '@/lib/store'
 import { buildVirtualGameData } from '@/lib/virtual-levels'
@@ -127,6 +133,84 @@ function particleModeFor(weather = 'none', filter = 'none'): ParticleMode {
 }
 
 export default function Home() {
+  const [homeMode, setHomeMode] = useState<PlayMode>('platformer')
+  const [libraryProject, setLibraryProject] = useState<WorldProject>()
+  const [projectReady, setProjectReady] = useState(false)
+  const [projectError, setProjectError] = useState('')
+  const [projectSaving, setProjectSaving] = useState(false)
+  const projectRecord = useRef<WorldProject | undefined>(undefined)
+  const projectQueue = useRef<Promise<void>>(Promise.resolve())
+  const projectPending = useRef(0)
+  const queueProjectWrite = useCallback((patch: (p: WorldProject) => WorldProject) => {
+    projectPending.current++; setProjectSaving(true)
+    const work = projectQueue.current.then(async () => {
+      if (!projectRecord.current) throw Error('项目尚未载入。')
+      projectRecord.current = await saveProject(patch(projectRecord.current))
+    })
+    projectQueue.current = work.catch(e => { setProjectError(e instanceof Error ? e.message : String(e)) })
+    void work.finally(() => { projectPending.current--; if (!projectPending.current) setProjectSaving(false) }).catch(() => {})
+    return work
+  }, [])
+  const saveLibraryDraft = useCallback((draft: ProjectDraft) => {
+    void queueProjectWrite(p => ({ ...p, title: draft.name.trim() || p.title, draft })).catch(() => {})
+  }, [queueProjectWrite])
+  const publishLibraryProject = useCallback((spec: GameSpec) => queueProjectWrite(p => ({ ...p, publishedSpec: spec })), [queueProjectWrite])
+  const saveSpatialProject = useCallback(async (spec: SpatialProject, existing?: WorldProject) => {
+    projectPending.current++; setProjectSaving(true)
+    try {
+      await projectQueue.current
+      const base = existing ? { ...existing, title: spec.title, spatial: spec, draft: { ...existing.draft, name: spec.title, story: spec.brief }, planning: { ...existing.planning, bpm: spec.rhythm.bpm, lanes: 4 } } : spatialWorldProject(spec)
+      const saved = await saveProject(base)
+      projectRecord.current = saved; setLibraryProject(saved); setProjectError('')
+      window.history.replaceState(null, '', `/?project=${encodeURIComponent(saved.id)}`)
+      return saved
+    } finally { projectPending.current--; if (!projectPending.current) setProjectSaving(false) }
+  }, [])
+  useEffect(() => {
+    if (!libraryProject || libraryProject.mode !== 'platformer') return
+    let previous = useGameStore.getState().gameDataByTheme[libraryProject.id]?.data?.spec
+    return useGameStore.subscribe(state => {
+      const spec = state.gameDataByTheme[libraryProject.id]?.data?.spec
+      if (!spec || spec === previous) return
+      previous = spec
+      void publishLibraryProject(spec).catch(() => {})
+    })
+  }, [libraryProject, publishLibraryProject])
+  useEffect(() => {
+    const guard = (e: BeforeUnloadEvent) => { if (projectPending.current) e.preventDefault() }
+    window.addEventListener('beforeunload', guard)
+    let alive = true
+    void (async () => {
+      try {
+        const requestedMode = new URLSearchParams(location.search).get('mode')
+        if (requestedMode && Object.hasOwn(PLAY_MODES, requestedMode)) setHomeMode(requestedMode as PlayMode)
+        const id = new URLSearchParams(location.search).get('project')
+        if (!id) return
+        const project = await getProject(id)
+        if (!project || project.archived) throw Error('项目不存在或已归档，请从项目库恢复。')
+        if (project.mode !== 'platformer') {
+          if (!alive) return
+          projectRecord.current = project; setLibraryProject(project); setHomeMode(project.mode)
+          return
+        }
+        setHomeMode('platformer')
+        if (project.draft.spec) await cacheSpecAssets(`${project.id}:draft`, project.draft.spec)
+        if (project.publishedSpec) await cacheSpecAssets(project.id, project.publishedSpec)
+        if (!alive) return
+        projectRecord.current = project; setLibraryProject(project)
+        useGameStore.getState().setSelectedTheme(project.id)
+        if (project.publishedSpec) {
+          const game = buildGameDataFromSpec(project.publishedSpec)
+          useGameStore.getState().setGameData(game, project.id)
+          useGameStore.getState().setSelectedTheme(project.id)
+          const theme: Theme = { id: project.id, name: project.publishedSpec.title, description: project.draft.prompt, characterImage: game.data?.characterUrl || '', backgroundImage: game.data?.levels[0]?.backgroundUrl || '', groundImage: game.data?.levels[0]?.groundUrl || '', obstacleImage: game.data?.levels[0]?.obstacleUrl || '', spec: project.publishedSpec }
+          setThemes(previous => [...previous.filter(t => t.id !== project.id), theme])
+        }
+      } catch (e) { if (alive) setProjectError(e instanceof Error ? e.message : String(e)) }
+      finally { if (alive) setProjectReady(true) }
+    })()
+    return () => { alive = false; window.removeEventListener('beforeunload', guard) }
+  }, [])
   const {
     selectedTheme,
     setSelectedTheme,
@@ -258,6 +342,10 @@ export default function Home() {
   }
 
   const handleDeleteTheme = (themeId: string) => {
+    if (libraryProject?.id === themeId) {
+      void queueProjectWrite(p => ({ ...p, archived: true })).then(() => location.assign('/projects')).catch(() => {})
+      return
+    }
     if (!themeId.startsWith('custom-')) {
       message.error('预设主题不能删除。')
       return
@@ -457,7 +545,7 @@ export default function Home() {
 
   const activeGameData = getGameDataForTheme(selectedTheme)
   const activeTheme = themes.find((theme) => theme.id === selectedTheme)
-  const createdThemes = themes.filter((theme) => theme.id.startsWith('custom-') || theme.id.startsWith('loading-'))
+  const createdThemes = themes.filter((theme) => libraryProject ? theme.id === libraryProject.id || theme.id.startsWith('loading-') : theme.id.startsWith('custom-') || theme.id.startsWith('loading-'))
 
   const openGameCover = () => {
     const state = useGameStore.getState()
@@ -544,13 +632,28 @@ export default function Home() {
         </div>
       )}
       <div id="world-home" className="pixel-world-shell" style={{ display: showGameCover || showGameInterface ? 'none' : undefined }}>
-          <ProjectHeader />
+          <ProjectHeader
+            spatialPreview={homeMode !== 'platformer'}
+            projectNote={projectError ? `${projectError} 请回项目库重新打开。` : libraryProject?.mode === homeMode ? `${libraryProject.title} · ${projectSaving ? '正在保存…' : homeMode === 'platformer' ? '已自动保存到本机' : '编辑后请保存项目'}` : undefined}
+            projectError={Boolean(projectError)}
+            onOpenProjects={e => { if (projectPending.current) { e.preventDefault(); message.info('项目正在保存，请稍候再返回项目库。') } }}
+          />
           <Guidebook />
           <LanguageSwitcher placement="floating" />
           <div className="world-content-frame">
+            <div className="home-gameplay-selector" aria-label="制作玩法">
+              <span>我要制作</span>
+              {Object.entries(PLAY_MODES).map(([id, mode]) => <button key={id} aria-pressed={homeMode === id} disabled={isLoading || projectSaving} onClick={() => { setHomeMode(id as PlayMode); window.history.replaceState(null, '', libraryProject?.mode === id ? `/?project=${encodeURIComponent(libraryProject.id)}` : `/?mode=${id}`) }}>{mode.name}<small>{mode.dimension}{id !== 'platformer' ? ' · 基础模板' : ''}</small></button>)}
+            </div>
+            <div style={{ display: homeMode === 'platformer' ? undefined : 'none' }}>
             <div className="world-columns">
               <div className="creator-panel">
+                {projectReady && (!projectError || libraryProject) && <>
                 <SideMenu
+                  key={libraryProject?.mode === 'platformer' ? libraryProject.id : 'legacy'}
+                  libraryProject={libraryProject?.mode === 'platformer' ? libraryProject : undefined}
+                  onProjectDraftChange={libraryProject?.mode === 'platformer' ? saveLibraryDraft : undefined}
+                  onProjectPublish={libraryProject?.mode === 'platformer' ? publishLibraryProject : undefined}
                   onImageSourceChange={setActiveImageSource}
                   onCustomImageChange={setCustomImageConnection}
                   onComfySettingsChange={setComfySettings}
@@ -572,6 +675,7 @@ export default function Home() {
                   workspaceTarget={studioWorkspaceTarget}
                   onPreviewStaleChange={setPreviewStale}
                 />
+                </>}
               </div>
 
               <div className="themes-panel">
@@ -601,6 +705,8 @@ export default function Home() {
                 </div>
               </div>
             </div>
+            </div>
+            {projectReady && homeMode !== 'platformer' && <HomeSpatialStudio key={homeMode} mode={homeMode} initialProject={libraryProject?.mode === homeMode ? libraryProject : undefined} onSave={saveSpatialProject} />}
           </div>
       </div>
     </main>

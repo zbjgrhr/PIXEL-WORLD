@@ -80,7 +80,7 @@ function dosDateTime(date = new Date()): { date: number; time: number } {
   }
 }
 
-function makeZip(entries: Array<{ name: string; bytes: Uint8Array }>): Blob {
+export function makeZip(entries: Array<{ name: string; bytes: Uint8Array }>): Blob {
   const chunks: Uint8Array[] = []
   const central: Uint8Array[] = []
   let offset = 0

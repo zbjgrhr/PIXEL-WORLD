@@ -1,6 +1,6 @@
 /** Stored ZIP parser for this project's native exporter. No extraction or code
  * execution. Self-contained so it can run in a dedicated browser Worker. */
-export function readStoredGameArchive(buffer:ArrayBuffer):Array<{name:string;bytes:Uint8Array}>{
+export function readStoredGameArchive(buffer:ArrayBuffer, spatialProjectOnly=false):Array<{name:string;bytes:Uint8Array}>{
   const bytes=new Uint8Array(buffer),view=new DataView(buffer),length=bytes.length
   const fail=():never=>{throw new Error('Unsupported or changed game archive')}
   if(length<22 || length>45_000_000)return fail()
@@ -29,7 +29,8 @@ export function readStoredGameArchive(buffer:ArrayBuffer):Array<{name:string;byt
     names.add(lower);files.push({name,bytes:data});localEnd=start+size
     cursor+=46+nameLength+extra+comment
   }
-  if(cursor!==end || localEnd!==directory || !['index.html','styles.css','game.js','project.json'].every(name=>files.some(file=>file.name===name)))return fail()
+  const required=spatialProjectOnly?['index.html','project.json']:['index.html','styles.css','game.js','project.json']
+  if(cursor!==end || localEnd!==directory || !required.every(name=>files.some(file=>file.name===name)))return fail()
   return files
 }
 

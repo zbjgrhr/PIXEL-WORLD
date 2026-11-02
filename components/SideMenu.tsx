@@ -52,6 +52,7 @@ import { translateUiText } from '@/lib/ui-locale'
 import {readTemplateAttributions} from '@/lib/template-attribution'
 import type {TemplateAttribution,TemplateReuseSelection} from '@/types'
 import { selectedInspirationTexts } from '@/configs/inspiration-packs'
+import type { WorldProject, ProjectDraft } from '@/lib/project-library'
 import type {
   AnimationClipPose,
   AnimationClipSpec,
@@ -70,6 +71,9 @@ import type {
 } from '@/types'
 
 export interface SideMenuProps {
+  libraryProject?: WorldProject
+  onProjectDraftChange?: (draft: ProjectDraft) => void
+  onProjectPublish?: (spec: GameSpec) => Promise<void>
   apiKey: string
   onApiKeyChange: (apiKey: string) => void
   selectedProvider: ProviderId
@@ -97,10 +101,6 @@ export interface SideMenuProps {
 
 const EMPTY_GENERATING = Object.fromEntries(ASSET_TYPES.map((type) => [type, false])) as RegeneratingImages
 const ALL_GENERATING = Object.fromEntries(ASSET_TYPES.map((type) => [type, true])) as RegeneratingImages
-const DRAFT_KEY = 'pixel-world-v3-generation-draft'
-const DRAFT_FIELDS_KEY = 'pixel-world-current-fields'
-const DRAFT_ACTIVE_KEY = 'pixel-world-current-draft-generated'
-const DRAFT_PROJECT_ID = 'active-draft'
 
 interface SavedDraft {
   name?: string
@@ -149,7 +149,14 @@ const SideMenu: React.FC<SideMenuProps> = ({
   onStageChange,
   workspaceTarget,
   onPreviewStaleChange,
+  libraryProject,
+  onProjectDraftChange,
+  onProjectPublish,
 }) => {
+  const DRAFT_PROJECT_ID = libraryProject ? `${libraryProject.id}:draft` : 'active-draft'
+  const DRAFT_KEY = libraryProject ? `pixel-world-project-draft:${libraryProject.id}` : 'pixel-world-v3-generation-draft'
+  const DRAFT_FIELDS_KEY = libraryProject ? `${DRAFT_KEY}:fields` : 'pixel-world-current-fields'
+  const DRAFT_ACTIVE_KEY = libraryProject ? `${DRAFT_KEY}:active` : 'pixel-world-current-draft-generated'
   const {
     selectedTheme, customPrompt, levelCount, setSelectedTheme, setCustomPrompt, setLevelCount,
     setGameState, setLoadingMessage, setGameData, isLoading, setLoading,
@@ -235,6 +242,15 @@ const SideMenu: React.FC<SideMenuProps> = ({
 
   useEffect(() => {
     // A fresh visit starts empty; a browser refresh resumes the same draft.
+    if (libraryProject) {
+      const draft = libraryProject.draft
+      setCustomThemeName(draft.name); setCustomStory(draft.story); setCustomPrompt(draft.prompt || buildStructuredPrompt(draft.levelCount)); setLevelCount(draft.levelCount); setCreationLanguage(draft.creationLanguage)
+      setOptimizedSpec(draft.spec || null)
+      templateSourcesRef.current = readTemplateAttributions(draft.spec?.templateSources) || []
+      setPreviewStale(Boolean(draft.spec)); setBriefLoaded(true)
+      if (draft.spec) onStageChange('agents')
+      return
+    }
     setCustomPrompt(buildStructuredPrompt(levelCount))
     setCustomThemeName('')
     setCustomStory('')
@@ -283,6 +299,11 @@ const SideMenu: React.FC<SideMenuProps> = ({
   useEffect(() => {
     if (briefLoaded) sessionStorage.setItem(DRAFT_FIELDS_KEY, JSON.stringify({ name: customThemeName, story: customStory, prompt: customPrompt, levelCount, creationLanguage,templateSources:templateSourcesRef.current }))
   }, [briefLoaded, customThemeName, customStory, customPrompt, levelCount, creationLanguage,inputRevision])
+
+  useEffect(() => {
+    if (!briefLoaded || !libraryProject) return
+    onProjectDraftChange?.({ name: customThemeName, story: customStory, prompt: customPrompt, levelCount, creationLanguage, spec: optimizedSpec || undefined })
+  }, [briefLoaded, customThemeName, customStory, customPrompt, levelCount, creationLanguage, optimizedSpec, onProjectDraftChange, libraryProject])
 
   const restoreSavedDraft = () => {
     if (!savedDraft) return
@@ -816,8 +837,9 @@ const SideMenu: React.FC<SideMenuProps> = ({
       const finalSpec = { ...baseSpec, assets: finalAssets }
       const gameData = buildGameDataFromSpec(finalSpec)
       const firstLevel = gameData.data?.levels[0]
-      const finalId = `custom-${Date.now()}` as GameTheme
+      const finalId = libraryProject?.id || `custom-${Date.now()}` as GameTheme
       await cacheSpecAssets(finalId, finalSpec)
+      await onProjectPublish?.(finalSpec)
       setGameData(gameData, finalId)
       useGameStore.getState().removeGameDataForTheme(loadingId)
       const finalTheme: Theme = {
@@ -828,7 +850,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
         projectileImage: gameData.data?.projectileUrl || '', attackEffectImage: gameData.data?.attackEffectUrl || '',
         collectibleImage: gameData.data?.collectibleUrl || '', bossImage: gameData.data?.bossUrl || '', spec: finalSpec,
       }
-      const finalThemes = themesWithLoading.map((theme) => theme.id === loadingId ? finalTheme : theme)
+      const finalThemes = themesWithLoading.filter(theme => theme.id !== finalId).map((theme) => theme.id === loadingId ? finalTheme : theme)
       onThemeUpdate?.(finalThemes)
       setSelectedTheme(finalId)
       requestAnimationFrame(() => document.getElementById('preview-publish')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
@@ -859,7 +881,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
   const publishPreparedGame = async (spec: GameSpec, successMessage: string) => {
     const gameData = buildGameDataFromSpec(spec)
     const firstLevel = gameData.data?.levels[0]
-    const id = `custom-${Date.now()}` as GameTheme
+    const id = libraryProject?.id || `custom-${Date.now()}` as GameTheme
     const theme: Theme = { id, name: spec.title, description: customPrompt,
       characterImage: gameData.data?.characterUrl || '', backgroundImage: firstLevel?.backgroundUrl || '',
       groundImage: firstLevel?.groundUrl || '', obstacleImage: firstLevel?.obstacleUrl || '',
@@ -867,7 +889,8 @@ const SideMenu: React.FC<SideMenuProps> = ({
       projectileImage: gameData.data?.projectileUrl || '', attackEffectImage: gameData.data?.attackEffectUrl || '',
       collectibleImage: gameData.data?.collectibleUrl || '', bossImage: gameData.data?.bossUrl || '', spec }
     await cacheSpecAssets(id, spec)
-    const next = [...themes.filter((item) => !item.isLoading), theme]
+    await onProjectPublish?.(spec)
+    const next = [...themes.filter((item) => !item.isLoading && item.id !== id), theme]
     onThemeUpdate?.(next); setGameData(gameData, id); setSelectedTheme(id)
     requestAnimationFrame(() => document.getElementById('preview-publish')?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
     setGameState('menu'); setIsThemeCreated(true); updateSpec(spec); onCreateTheme?.()
@@ -1000,7 +1023,7 @@ const SideMenu: React.FC<SideMenuProps> = ({
       </div>
     </div>
     {workspaceTarget && createPortal(<div className="studio-workspace">
-      {themes.some((theme) => theme.id.startsWith('custom-')) && <ThemesList ref={themesListRef} themes={themes.filter((theme) => theme.id.startsWith('custom-') || theme.id.startsWith('loading-'))} selectedTheme={selectedTheme} onThemeSelect={onThemeSelect} />}
+      {!libraryProject && themes.some((theme) => theme.id.startsWith('custom-')) && <ThemesList ref={themesListRef} themes={themes.filter((theme) => theme.id.startsWith('custom-') || theme.id.startsWith('loading-'))} selectedTheme={selectedTheme} onThemeSelect={onThemeSelect} />}
       <header className="studio-workspace-header">
         <small>{activeStage === 'idea' ? '第 1 步 · 写故事' : activeStage === 'agents' ? '第 2 步 · AI 策划' : '第 3 步 · 做素材'}</small>
         <div className="workflow-project-status" role="status"><span>{isOptimizing ? '正在补全设定' : agentApproved ? '当前草案已批准' : optimizedSpec ? '当前草案尚未批准' : '当前故事待补全'}</span>{previewStale && <span>右栏成品不会随草稿自动更新</span>}</div>
