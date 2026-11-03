@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { acceptanceFetch } from '@/lib/acceptance-budget.server'
 import { apiKeyHasUnsupportedCharacters, normalizeApiKey } from '@/lib/api-key'
 import { agentModelSupportsVision, getAgentProvider } from '@/lib/agents/config'
 import { buildAgentPrompts } from '@/lib/agents/prompts'
@@ -82,7 +83,7 @@ async function callModel(
   let response: Response
   try {
     if (onAttempt) await onAttempt()
-    response = await fetch(endpoint(request.provider), {
+    response = await acceptanceFetch(endpoint(request.provider), {
       method: 'POST',
       signal: controller.signal,
       headers: {

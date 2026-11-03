@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { acceptanceFetch } from '@/lib/acceptance-budget.server'
 import {
   createFallbackGameSpec,
   serializeGameSpec,
@@ -114,7 +115,7 @@ async function optimizeWithAi(
 ): Promise<unknown> {
   const config = optimizerEndpoint(provider)
   if (!config) throw new Error('当前文字服务不提供兼容的提示词整理接口')
-  const response = await fetch(config.url, {
+  const response = await acceptanceFetch(config.url, {
     method: 'POST',
     signal: AbortSignal.timeout(OPTIMIZER_TIMEOUT_MS),
     headers: {
@@ -130,7 +131,7 @@ async function optimizeWithAi(
       temperature: 0.25,
       max_tokens: OPTIMIZER_OUTPUT_TOKENS,
       ...(provider === 'openrouter' && selectedModel?.trim() === 'qwen/qwen3.8-flash'
-        ? { reasoning: { effort: 'low' } }
+        ? { reasoning: { enabled: false } }
         : {}),
       response_format: { type: 'json_object' },
       messages: optimizerMessages(prompt, fallback),

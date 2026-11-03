@@ -1009,6 +1009,11 @@ const SideMenu: React.FC<SideMenuProps> = ({
             {imageSource === 'upload' && <p className="ai-source-help">在中栏素材卡片逐项上传图片；角色也能按动作上传帧条。</p>}
             {imageSource === 'comfy' && <><Input disabled={isLoading} value={comfyEndpoint} onChange={(event) => setComfyEndpoint(event.target.value)} placeholder="http://127.0.0.1:8188" /><Space wrap><Button loading={comfyDetecting} onClick={() => { void testApi() }}>检测 ComfyUI</Button><Select disabled={isLoading} value={comfyCheckpoint || undefined} onChange={setComfyCheckpoint} placeholder="选择检查点模型" style={{ minWidth: 220 }} options={comfyCheckpoints.map((name) => ({ value: name, label: name }))} /></Space><Alert type="info" showIcon message={<span><a href="https://comfy.org/download" target="_blank" rel="noopener noreferrer">下载 ComfyUI Desktop ↗</a> · 浏览器直连本机；需启动服务并允许跨域访问。角色动作暂用内置素材。</span>} /></>}
             {imageSource === 'byok' && <ModelSelector disabled={isLoading} hideProviderSelector selectedProvider={selectedProvider} onProviderChange={onProviderChange} selectedModel={selectedModel} onModelChange={onModelChange} apiKey={apiKey} onApiKeyChange={onApiKeyChange} />}
+            {imageSource === 'byok' && !apiKey.trim() && textOptimizer.provider === selectedProvider && textOptimizer.apiKey.trim() && (
+              <Button disabled={isLoading} onClick={() => onApiKeyChange(textOptimizer.apiKey)}>
+                复用同平台的文字 API Key
+              </Button>
+            )}
             {imageSource === 'custom' && <><CustomConnectionFields disabled={isLoading} kind="image" value={customImage} onChange={changeCustomImage} /><Space wrap><Button loading={isTesting} onClick={() => { void testApi() }}>测试连接</Button><span className="ai-cost-hint">测试会实际生成一张小图，可能产生一次调用费用。</span></Space></>}
             <p className="ai-effect-note">内置素材打开即用；本机效果取决于设备与模型。连接自己的服务可选更多模型，也可能按量收费。</p>
           </Space>}

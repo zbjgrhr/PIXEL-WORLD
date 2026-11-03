@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Button, Input, Modal, Popconfirm, Select, Segmented, Spin, Tag } from 'antd'
-import LanguageSwitcher, { useUiLocale } from './ui/LanguageSwitcher'
+import { useUiLocale } from './ui/LanguageSwitcher'
 import { communityBrowserClient } from '@/lib/supabase/client'
 import type { CommunitySection } from '@/lib/community-types'
 import { ARTWORK_KINDS, type ArtworkKind } from '@/lib/community-types'
@@ -16,6 +16,7 @@ import CommunityAuthor from './CommunityAuthor'
 import CommunityTemplateReview from './CommunityTemplateReview'
 import CommunityGamePreview from './CommunityGamePreview'
 import type { PublicAuthor } from '@/lib/community-profile'
+import ProjectHeader from './ui/ProjectHeader'
 
 interface Post { id: string; owner_id: string; title: string; description: string; language: string; moderation: string; created_at: string; updated_at: string; rights: string; license_note: string; reuse: string; experiment_id: string | null; art_kind?: ArtworkKind; linked_game_id?: string | null; linked_game?: { id: string; title: string; language: string } | null; attachments?: { media_id: string }[] }
 interface Report { id: string; post_id: string; status: 'open' | 'resolved' | 'dismissed'; created_at: string }
@@ -50,6 +51,7 @@ export default function CommunityPortal() {
   const [licenseNote, setLicenseNote] = useState('')
   const [language, setLanguage] = useState('zh-CN')
   const [editing, setEditing] = useState<Post | null>(null)
+  const [composerOpen, setComposerOpen] = useState(false)
   const [reportTarget, setReportTarget] = useState<Post | null>(null)
   const [reportReason, setReportReason] = useState('')
   const [reportError, setReportError] = useState('')
@@ -154,6 +156,7 @@ export default function CommunityPortal() {
   }
 
   const edit = (post: Post) => {
+    setComposerOpen(true)
     setEditing(post); setTitle(post.title); setDescription(post.description); setRights(post.rights)
     setLicenseNote(post.license_note); setLanguage(post.language); setReuse(post.reuse); setError(''); setNotice('')
     setArtKind(post.art_kind || 'other'); setLinkedGameId(post.linked_game_id || null); setGameSearch('')
@@ -206,9 +209,20 @@ export default function CommunityPortal() {
     finally { setBusy(false) }
   }
 
-  return <main className="community-shell">
-    <header className="community-header"><Link href="/">← 返回制作台</Link><h1>玩家社区</h1><LanguageSwitcher /></header>
-    <div className="community-content">
+  return <main className="pixel-world-shell community-shell community-world-shell">
+    <ProjectHeader activeSection="community" projectNote={locale === 'en' ? 'Explore the worlds people are making. Play, watch and download.' : '看看大家正在创造什么。试玩世界，分享制作的过程。'} />
+    <div className="community-layout">
+    <aside className="community-feed-sidebar">
+      <span className="community-sidebar-eyebrow">THE WORLD FEED</span>
+      <h1>{locale === 'en' ? 'Creative Workshop' : '创意工坊'}</h1>
+      <p>{locale === 'en' ? 'Every world starts with a story.' : '每一个世界，都从一个故事开始。'}</p>
+      <button className={!mine ? 'is-selected' : ''} disabled={busy || !!editing} onClick={() => setMine(false)}>{locale === 'en' ? 'Explore creations' : '发现作品'}<span>↗</span></button>
+      {session?.user && <button className={mine ? 'is-selected' : ''} disabled={busy || !!editing} onClick={() => setMine(true)}>{locale === 'en' ? 'My posts & drafts' : '我的发布与草稿'}<span>✎</span></button>}
+      <Link className="community-create-link" href="/">＋ {locale === 'en' ? 'Create a world' : '去创造一个世界'}</Link>
+      <div className="community-sidebar-note"><strong>{locale === 'en' ? 'From idea to play' : '从灵感到可玩世界'}</strong><p>{locale === 'en' ? 'Find the game ZIP, process video and creation settings in each post’s attachments.' : '游戏 ZIP、过程视频和生成配置，都可以在帖子附件里找到。'}</p></div>
+    </aside>
+    <div className="community-content community-feed">
+      <div className="community-feed-heading"><div><span>PIXEL WORLD / COMMUNITY</span><h2>{locale === 'en' ? 'Worlds in the making' : '世界正在发生'}</h2></div>{session?.user && <Button type="primary" onClick={() => setComposerOpen(value => !value)} disabled={busy}>{composerOpen ? (locale === 'en' ? 'Close editor' : '收起编辑') : (locale === 'en' ? 'Write a post' : '发布作品')}</Button>}</div>
       <div className="community-toolbar">
         <Segmented disabled={busy || !!editing} aria-label="社区板块" value={section} onChange={value => { setSection(value as CommunitySection); setNotice('') }} options={[{ value: 'workshop', label: locale === 'en' ? 'Creative Workshop' : '创意工坊' }, { value: 'art', label: locale === 'en' ? 'Artwork' : '艺术作品' }]} />
         <div>{session?.moderator && <Link href="/community/moderation">社区审核</Link>}{session?.user && <Button disabled={busy} onClick={()=>setProfileOpen(true)}>{locale==='en'?'Author Profile':'作者资料'}</Button>}{session?.user ? <Button disabled={busy} onClick={signOut}>退出登录</Button> : <Button disabled={!session?.configured || !client} loading={busy} onClick={signIn}>使用 GitHub 登录</Button>}</div>
@@ -219,7 +233,7 @@ export default function CommunityPortal() {
       {error && <Alert type="error" message={error} showIcon />}
       {notice && <Alert type="success" message={notice} showIcon />}
       {session && !session.configured && <Alert type="info" showIcon message="玩家社区尚未配置。制作和离线导出仍可正常使用。" />}
-      {session?.user && <section id="community-composer" className="community-composer">
+      {session?.user && <section id="community-composer" className="community-composer" hidden={!composerOpen && !editing}>
         <h2>{editing ? '编辑作品' : '写一篇作品草稿'}</h2>
         {editing && <p>已公开的内容修改后需要重新审核。</p>}
         <p>{locale === 'en' ? 'Save a draft first, then add attachments from My Posts and Drafts. Artwork requires verified media before submission.' : '先保存草稿，再到“我的作品与草稿”添加附件。艺术作品需附上已验证的媒体文件才能提交审核。'}</p>
@@ -240,16 +254,17 @@ export default function CommunityPortal() {
       </section>}
       {session?.configured && <>
         <div className="community-toolbar"><h2>{mine ? '我的作品与草稿' : '玩家作品'}</h2><div>{session.user && <Button disabled={busy || !!editing} onClick={() => { setUploadTarget(null); setUploadsOpen(true) }}>{locale === 'en' ? 'Manage Uploads' : '管理上传'}</Button>}<Button disabled={loading || busy} onClick={() => { void loadPosts(); setReportRefresh(value => value + 1) }}>刷新列表</Button>{session.user && <Button disabled={busy || !!editing} onClick={() => setMine(value => !value)}>{mine ? '查看公开作品' : '查看我的草稿'}</Button>}</div></div>
-        <Spin spinning={loading}><div className="workshop-grid">{posts.map(post => <article key={post.id} className="workshop-card" data-no-ui-translation>
-          <Tag>{post.language === 'en' ? 'English' : '简体中文'}</Tag><Tag>{locale === 'en' ? ({ published: 'Published', pending: 'Awaiting Review', rejected: 'Changes Requested', draft: 'Draft' }[post.moderation] || 'Not published') : ({ published: '已发布', pending: '待审核', rejected: '退回修改', draft: '草稿' }[post.moderation] || '未公开')}</Tag>
-          <CommunityAuthor author={(post as Post & {author?:PublicAuthor}).author || {id:post.owner_id,displayName:null,isOfficial:false,avatarUrl:null}} />
-          <h3>{post.title}</h3><p style={{ whiteSpace: 'pre-wrap' }}>{post.description}</p>
+        <Spin spinning={loading}><div className="workshop-grid community-post-stream">{posts.map(post => <article key={post.id} className="workshop-card community-post" data-no-ui-translation>
+          <div className="community-post-byline"><CommunityAuthor author={(post as Post & {author?:PublicAuthor}).author || {id:post.owner_id,displayName:null,isOfficial:false,avatarUrl:null}} /><time dateTime={post.created_at}>{new Intl.DateTimeFormat(locale === 'en' ? 'en-GB' : 'zh-CN', { month: 'short', day: 'numeric', timeZone: 'Asia/Shanghai' }).format(new Date(post.created_at))}</time></div>
+          <div className="community-post-tags"><Tag>{post.language === 'en' ? 'English' : '简体中文'}</Tag><Tag>{locale === 'en' ? ({ published: 'Published', pending: 'Awaiting Review', rejected: 'Changes Requested', draft: 'Draft' }[post.moderation] || 'Not published') : ({ published: '已发布', pending: '待审核', rejected: '退回修改', draft: '草稿' }[post.moderation] || '未公开')}</Tag><span>{locale === 'en' ? 'Creation log' : '创作记录'}</span></div>
+          <h3>{post.title}</h3><details className="community-post-story"><summary>{post.description.slice(0, 220)}{post.description.length > 220 ? (locale === 'en' ? '… Read more' : '… 展开全文') : ''}</summary>{post.description.length > 220 && <p style={{ whiteSpace: 'pre-wrap' }}>{post.description}</p>}</details>
           {section === 'art' && <><Tag>{artLabel(post.art_kind || 'other')}</Tag>{post.linked_game_id && (post.linked_game ? <p>{locale === 'en' ? 'Related game: ' : '关联游戏：'}<a href={`/community?game=${post.linked_game.id}`} target="_blank" rel="noopener noreferrer" data-no-ui-translation>{post.linked_game.title}</a></p> : <p>{locale === 'en' ? 'The related game is not currently available.' : '关联游戏暂不可见。'}</p>)}</>}
           {post.experiment_id && <CommunityExperimentDetails key={`record:${post.id}:${post.updated_at}`} postId={post.id} revision={post.updated_at} />}
           {section==='workshop' && !!post.attachments?.length && <CommunityGamePreview key={`play:${post.id}:${post.updated_at}`} postId={post.id} revision={post.updated_at} />}
           {session.moderator && section==='workshop' && post.experiment_id && post.moderation==='published' && <CommunityTemplateReview key={`template:${post.id}:${post.updated_at}`} postId={post.id} revision={post.updated_at} reuse={post.reuse} />}
           <p>{locale === 'en' ? 'Reuse permission: ' : '复用权限：'}{locale === 'en' ? ({ 'view-only': 'Viewing only', download: 'Download permitted', 'remix-with-credit': 'Adaptation permitted with attribution' }[post.reuse] || post.reuse) : ({ 'view-only': '仅展示', download: '允许下载', 'remix-with-credit': '署名后可改编' }[post.reuse] || post.reuse)}</p>
-          {post.attachments?.length ? <CommunityMediaGallery key={`${post.id}:${post.updated_at}`} postId={post.id} revision={post.updated_at} busy={busy || !!editing} onDetach={mine && post.owner_id === session.user?.id && post.moderation === 'draft' && !post.experiment_id ? mediaId => revise(post, 'detach', mediaId) : undefined} /> : null}
+          {post.attachments?.length ? <CommunityMediaGallery feed key={`${post.id}:${post.updated_at}`} postId={post.id} revision={post.updated_at} busy={busy || !!editing} onDetach={mine && post.owner_id === session.user?.id && post.moderation === 'draft' && !post.experiment_id ? mediaId => revise(post, 'detach', mediaId) : undefined} /> : null}
+          {section === 'workshop' && post.moderation === 'published' && <div className="community-post-permalink"><Link href={`/community?game=${post.id}`}>{locale === 'en' ? 'Open this post' : '打开这篇作品'} ↗</Link><span>{locale === 'en' ? `${post.attachments?.length || 0} attachments` : `${post.attachments?.length || 0} 份附件`}</span></div>}
           {post.moderation === 'published' && post.owner_id !== session.user?.id && <div>
             {reports.find(item => item.post_id === post.id) ? <Tag>{(() => {
               const status = reports.find(item => item.post_id === post.id)?.status
@@ -272,7 +287,7 @@ export default function CommunityPortal() {
         </article>)}</div></Spin>
         {!loading && !posts.length && <p>这里还没有作品。</p>}
       </>}
-    </div>
+    </div></div>
     {session?.user && <CommunityProfile key={`profile:${session.user.id}`} open={profileOpen} onClose={()=>setProfileOpen(false)} onSaved={()=>void loadPosts()} />}
     {session?.user && <CommunityUploads key={session.user.id} target={uploadTarget} open={uploadsOpen} section={section} configured={!!session.uploadsConfigured} onClose={() => { setUploadsOpen(false); setUploadTarget(null) }} onBusy={setBusy} onChanged={loadPosts} />}
     {session?.user && <CommunityExperimentImport key={`experiment:${session.user.id}`} target={experimentTarget} configured={!!session.uploadsConfigured} onClose={() => setExperimentTarget(null)} onBusy={setBusy} onChanged={loadPosts} />}

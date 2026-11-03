@@ -189,6 +189,7 @@ export const englishUi: Record<string, string> = {
   '返回写故事修改': 'Back to Story Editor',
   'AI 策划与审核': 'AI Planning and Review',
   '世界主页': 'World Home',
+  '本地项目库': 'Local Projects',
   '预览与发布': 'Preview & Export',
   '像素世界制作器': 'Pixel World Builder',
   '写下一个世界，生成它，然后真正走进去。': 'Describe a world, build it, and step inside.',

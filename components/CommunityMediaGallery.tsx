@@ -5,7 +5,7 @@ import { Alert, Button, Checkbox, Popconfirm, Spin } from 'antd'
 import { useUiLocale } from './ui/LanguageSwitcher'
 
 interface Media { id: string; kind: string | null; bytes: number | null; durationSeconds: number | null; verified: boolean; canDownload: boolean }
-interface Props { postId: string; revision: string; onReady?: (ids: string[] | null) => void; onDetach?: (mediaId: string) => Promise<void>; busy?: boolean }
+interface Props { postId: string; revision: string; onReady?: (ids: string[] | null) => void; onDetach?: (mediaId: string) => Promise<void>; busy?: boolean; feed?: boolean }
 
 function AttachmentDownload({ postId, item, onChecked }: { postId: string; item: Media; onChecked?: (checked: boolean) => void }) {
   const en = useUiLocale() === 'en'
@@ -46,7 +46,7 @@ function MediaPreview({ postId, item, onLoaded }: { postId: string; item: Media;
   useEffect(() => {
     const controller = new AbortController()
     let active = true
-    const timeout = window.setTimeout(() => { if (active) { setFailed(true); controller.abort() } }, 15000)
+    const timeout = window.setTimeout(() => { if (active) { setFailed(true); controller.abort() } }, 30000)
     setFailed(false); setPreview(null)
     void fetch(`/api/community/posts/${postId}/media?mediaId=${item.id}`, { cache: 'no-store', signal: controller.signal }).then(async response => {
       if (!response.ok) throw new Error('preview')
@@ -67,7 +67,7 @@ function MediaPreview({ postId, item, onLoaded }: { postId: string; item: Media;
   </div>
 }
 
-export default function CommunityMediaGallery({ postId, revision, onReady, onDetach, busy = false }: Props) {
+export default function CommunityMediaGallery({ postId, revision, onReady, onDetach, busy = false, feed = false }: Props) {
   const locale = useUiLocale()
   const [open, setOpen] = useState(false)
   const [media, setMedia] = useState<Media[] | null>(null)
@@ -75,12 +75,13 @@ export default function CommunityMediaGallery({ postId, revision, onReady, onDet
   const [error, setError] = useState(false)
   const [refresh, setRefresh] = useState(0)
   const readyCallback = useRef(onReady)
+  const shouldLoad = open || feed
   useEffect(() => { readyCallback.current = onReady }, [onReady])
   useEffect(() => {
-    if (!open) return
+    if (!shouldLoad) return
     const controller = new AbortController()
     let active = true
-    const timeout = window.setTimeout(() => { if (active) { setError(true); controller.abort() } }, 15000)
+    const timeout = window.setTimeout(() => { if (active) { setError(true); controller.abort() } }, 30000)
     setMedia(null); setLoaded({}); setError(false)
     void fetch(`/api/community/posts/${postId}/media`, { cache: 'no-store', signal: controller.signal }).then(async response => {
       if (!response.ok) throw new Error('attachments')
@@ -88,13 +89,20 @@ export default function CommunityMediaGallery({ postId, revision, onReady, onDet
       if (active) setMedia(data.media)
     }).catch(() => { if (active) setError(true) }).finally(() => window.clearTimeout(timeout))
     return () => { active = false; window.clearTimeout(timeout); controller.abort() }
-  }, [postId, revision, open, refresh])
+  }, [postId, revision, shouldLoad, refresh])
   useEffect(() => {
     const ready = media && !error && media.every(item => item.verified && ['image', 'video', 'audio', 'game-zip', 'game-spec', 'report'].includes(item.kind || '') && loaded[item.id])
     readyCallback.current?.(ready ? media.map(item => item.id) : null)
   }, [media, loaded, error])
-  return <details className="community-media-gallery" onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary>{locale === 'en' ? 'View Attached Media' : '查看附带作品'}</summary>
+  const featured = media?.find(item => item.verified && item.kind === 'video') || media?.find(item => item.verified && ['image', 'audio'].includes(item.kind || ''))
+  return <>
+    {feed && <div className="community-post-preview">
+      {!media && !error && <div role="status"><Spin size="small" /> {locale === 'en' ? 'Loading media' : '正在载入作品画面'}</div>}
+      {featured && <MediaPreview postId={postId} item={featured} onLoaded={(id, success) => setLoaded(previous => previous[id] === success ? previous : { ...previous, [id]: success })} />}
+      {error && <p role="status">{locale === 'en' ? 'Media is temporarily unavailable. Open attachments to retry.' : '画面暂时无法加载，可展开附件重试。'}</p>}
+    </div>}
+    <details className="community-media-gallery" onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary>{feed ? (locale === 'en' ? 'Attachments & downloads' : '附件与下载') : (locale === 'en' ? 'View Attached Media' : '查看附带作品')}{feed && media ? ` · ${media.length}` : ''}</summary>
     {open && <div>
       <Button onClick={() => setRefresh(value => value + 1)}>{locale === 'en' ? 'Refresh Media' : '刷新媒体'}</Button>
       {error && <Alert type="warning" showIcon message={locale === 'en' ? 'Attachments are unavailable. No missing media has been marked as reviewed.' : '附件暂时无法读取，未将缺失素材标为已查看。'} />}
@@ -102,12 +110,12 @@ export default function CommunityMediaGallery({ postId, revision, onReady, onDet
       {media?.map(item => <div key={`${item.id}:${refresh}`}>
         {onDetach && <Popconfirm title={locale === 'en' ? 'Remove this attachment from the draft?' : '从草稿中移除这份附件？'} description={locale === 'en' ? 'The original file will be retained. You can manage unlinked files separately.' : '原文件会保留，未关联文件可另行管理。'} okText={locale === 'en' ? 'Remove Attachment' : '移除附件'} cancelText={locale === 'en' ? 'Cancel' : '取消'} onConfirm={() => onDetach(item.id)}><Button danger disabled={busy}>{locale === 'en' ? 'Remove Attachment' : '移除附件'}</Button></Popconfirm>}
         {item.verified && ['image', 'video', 'audio'].includes(item.kind || '')
-          ? <><MediaPreview postId={postId} item={item} onLoaded={(id, success) => setLoaded(previous => previous[id] === success ? previous : { ...previous, [id]: success })} />{item.canDownload && <AttachmentDownload postId={postId} item={item} />}</>
+          ? <>{(!feed || item.id !== featured?.id) && <MediaPreview postId={postId} item={item} onLoaded={(id, success) => setLoaded(previous => previous[id] === success ? previous : { ...previous, [id]: success })} />}{item.canDownload && <AttachmentDownload postId={postId} item={item} />}</>
           : item.verified && ['game-zip','game-spec','report'].includes(item.kind || '')
             ? <AttachmentDownload postId={postId} item={item} onChecked={onReady ? checked => setLoaded(previous => previous[item.id] === checked ? previous : { ...previous, [item.id]: checked }) : undefined} />
             : <p>{locale === 'en' ? 'This attachment has not been verified.' : '此附件尚未验证。'}</p>}
       </div>)}
       {media?.length === 0 && <p>{locale === 'en' ? 'No media is attached.' : '这篇帖子没有媒体附件。'}</p>}
     </div>}
-  </details>
+  </details></>
 }

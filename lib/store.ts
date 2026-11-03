@@ -106,8 +106,8 @@ export function migrateGameData(input: unknown, themeId = 'Pixel World'): GameDa
   const data = input && typeof input === 'object' ? input as GameData : {}
   if (!data.data) return {}
   const levels = Array.isArray(data.data.levels) ? data.data.levels : []
-  const fallback = createFallbackGameSpec(themeId, themeId, Math.max(1, levels.length))
   const savedSpec=data.data.spec
+  const fallback = createFallbackGameSpec(themeId, themeId, Math.max(1, levels.length), savedSpec?.creationLanguage === 'en' ? 'en' : 'zh-CN')
   const baseline = authoredGameSpecBaseline(savedSpec,fallback) || (savedSpec?.narrative && fallback.narrative ? { ...fallback, narrative: { ...fallback.narrative, source: savedSpec.narrative.source } } : fallback)
   const normalized = normalizeGameSpec(data.data.spec || fallback, baseline, Math.max(1, levels.length))
   // Do not silently add new task gates to old saved games whose real actor

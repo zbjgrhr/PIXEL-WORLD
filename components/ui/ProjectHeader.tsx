@@ -5,20 +5,20 @@ import type { ProjectHeaderProps } from '@/types'
 import LanguageSwitcher from './LanguageSwitcher'
 
 const NAV_ITEMS = [
-  { label: '世界主页', href: '#world-home' },
-  { label: '预览与发布', href: '#preview-publish' },
-  { label: '项目库', href: '/projects' },
+  { section: 'home', label: '世界主页', href: '#world-home' },
+  { section: 'projects', label: '本地项目库', href: '/projects' },
+  { section: 'community', label: '创意工坊', href: '/community' },
 ]
 
 type HeaderProps = ProjectHeaderProps & {
   projectNote?: string
   projectError?: boolean
   onOpenProjects?: (event: React.MouseEvent<HTMLAnchorElement>) => void
-  activeSection?: 'home' | 'projects'
+  activeSection?: 'home' | 'projects' | 'community'
   spatialPreview?: boolean
 }
 
-const ProjectHeader: React.FC<HeaderProps> = ({ className, projectNote, projectError, onOpenProjects, activeSection = 'home', spatialPreview }) => (
+const ProjectHeader: React.FC<HeaderProps> = ({ className, projectNote, projectError, onOpenProjects, activeSection = 'home' }) => (
   <header className={`${className || ''} portal-header`}>
     <LanguageSwitcher />
     <div className="portal-header-copy">
@@ -33,8 +33,8 @@ const ProjectHeader: React.FC<HeaderProps> = ({ className, projectNote, projectE
     </div>
 
     <nav className="space-theme-nav" aria-label="Pixel World sections">
-      {NAV_ITEMS.map((item, index) => (
-        <a className={(activeSection === 'projects' ? item.href === '/projects' : index === 0) ? 'is-active' : ''} href={activeSection === 'projects' && item.href.startsWith('#') ? `/${item.href}` : spatialPreview && item.href === '#preview-publish' ? '#preview-publish-spatial' : item.href} key={item.href} onClick={item.href === '/projects' ? onOpenProjects : undefined}>{item.label}</a>
+      {NAV_ITEMS.map((item) => (
+        <a className={activeSection === item.section ? 'is-active' : ''} aria-current={activeSection === item.section ? 'page' : undefined} href={activeSection !== 'home' && item.href.startsWith('#') ? `/${item.href}` : item.href} key={item.href} onClick={item.href === '/projects' ? onOpenProjects : undefined}>{item.label}</a>
       ))}
     </nav>
   </header>

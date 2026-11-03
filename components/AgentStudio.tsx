@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import { Alert, Button, Card, Collapse, Input, Progress, Select, Space, Tag, Typography, message } from 'antd'
 import { CheckCircle2, CircleStop, FlaskConical, Pause, Play, RotateCcw, ShieldCheck, Sparkles } from 'lucide-react'
 import { loadAgentApiKey, loadAgentApiPrefs, saveAgentApiPrefs } from '@/lib/agent-api-prefs'
-import { AGENT_PROVIDERS, AGENT_ROLE_LABELS, LOCAL_AGENT_PROVIDERS, PROFESSIONAL_AGENT_ROLES, SYSTEM_AGENT_ROLES, getAgentProvider, getDefaultAgentModel, isLocalAgentProvider, localProviderConfig } from '@/lib/agents/config'
+import { AGENT_ROLE_LABELS, PROFESSIONAL_AGENT_ROLES, SYSTEM_AGENT_ROLES, getAgentProvider, getDefaultAgentModel, isLocalAgentProvider, localProviderConfig } from '@/lib/agents/config'
 import { discoverLocalModels, safeLocalBaseUrl, testLocalAgentConnection } from '@/lib/agents/local-client'
 import { inspectWebLlm, prepareWebLlm } from '@/lib/agents/webllm-client'
 import { countBlockingIssues } from '@/lib/agents/validation'
@@ -13,12 +13,13 @@ import { latestPlanningIssues } from '@/lib/agents/review-status'
 import { useAgentCluster } from '@/hooks/useAgentCluster'
 import type { AgentExecuteRequest, AgentExecuteResponse, AgentProviderId, AgentTaskStatus, CreationLanguage, GameSpec } from '@/types'
 import ApiPlatformGuide from './ui/ApiPlatformGuide'
-import { getApiPlatformGuide } from '@/configs/api-platform-guide'
 import { customConnectionError, EMPTY_CUSTOM_CONNECTION, loadAiAccessMode, loadCustomConnection, saveAiAccessMode, saveCustomConnection, type AiAccessMode, type CustomConnection } from '@/lib/custom-connection'
 import AiAccessTabs from './ui/AiAccessTabs'
 import CustomConnectionFields from './ui/CustomConnectionFields'
-import AiProviderChoice from './ui/AiProviderChoice'
-import ReadyAgentGuide, { READY_AGENT_VISUALS } from './ui/ReadyAgentGuide'
+import ConnectionChoiceGroups from './ui/ConnectionChoiceGroups'
+import CloudTextModelPicker from './ui/CloudTextModelPicker'
+import { CLOUD_TEXT_GROUPS, CLOUD_TEXT_PLATFORM_COUNT, READY_TEXT_GROUPS, TEXT_CONNECTION_PRESETS, filterConnectionGroups } from '@/lib/text-connection-options'
+import ReadyAgentGuide from './ui/ReadyAgentGuide'
 import StageHeading from './ui/StageHeading'
 import GameSpecSummary from './ui/GameSpecSummary'
 import ActorRulesEditor from './ui/ActorRulesEditor'
@@ -96,6 +97,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
   const [customAgent, setCustomAgent] = useState<CustomConnection>(EMPTY_CUSTOM_CONNECTION)
   const [model, setModel] = useState(getDefaultAgentModel('openrouter'))
   const [apiKey, setApiKey] = useState('')
+  const [platformSearch, setPlatformSearch] = useState('')
   const [testing, setTesting] = useState(false)
   const [actionFeedback, setActionFeedback] = useState<WorkflowFeedback | null>(null)
   const reviewInFlight = useRef(false)
@@ -252,6 +254,31 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
     if (provider === 'custom') setModel(value.model)
   }
 
+  const changeTextModel = (value: string) => { setModel(value); persist(provider, value, apiKey) }
+  const chooseConnection = (id: string) => {
+    if (id === 'builtin') {
+      setReadyProvider(null)
+      localStorage.removeItem('pixel-world-agent-ready-choice')
+      localStorage.removeItem('pixel-local-provider')
+      setActionFeedback(null)
+      return
+    }
+    const preset = TEXT_CONNECTION_PRESETS.find(item => item.id === id)
+    if (preset) {
+      // Credentials never move between platforms just because a shortcut was selected.
+      const next = customAgent.baseUrl === preset.baseUrl ? { ...customAgent, displayName: preset.name } : { displayName: preset.name, baseUrl: preset.baseUrl, model: '', apiKey: '' }
+      changeCustomAgent(next)
+      setOwnProvider('custom')
+      setProvider('custom')
+      setModel(next.model)
+      localStorage.setItem('pixel-world-agent-own-choice', 'custom')
+      setActionFeedback(null)
+      return
+    }
+    if (id === 'custom') changeCustomAgent({ ...customAgent, displayName: '' })
+    selectProvider(id as AgentProviderId)
+  }
+
   const selected = accessMode === 'own' || readyProvider !== null
   const legacyManagedRun = cluster.run?.modelLock.provider === 'managed'
   const activeKey = provider === 'custom' ? customAgent.apiKey.trim() : isLocalAgentProvider(provider) ? localPassword : apiKey.trim()
@@ -402,7 +429,7 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
       setIsCheckingDraft(false)
     }
   }
-  const sourceLabel = !selected ? '内置规则整理：无需配置' : provider === 'webllm' ? '浏览器 AI：首次需要下载模型' : isLocalAgentProvider(provider) ? '本机 AI：需要安装并启动' : '使用我的文字 API：按服务商规则计费'
+  const sourceLabel = !selected ? '内置规则整理：无需配置' : provider === 'webllm' ? '浏览器 AI：首次需要下载模型' : isLocalAgentProvider(provider) ? '本机 AI：需要安装并启动' : '云端文字模型：按服务商规则计费'
   const runActive = Boolean(cluster.run && !['draft', 'failed', 'cancelled'].includes(cluster.run.status))
 
   return <Card
@@ -418,22 +445,14 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
       <Collapse size="small" items={[{ key: 'text-settings', label: '选择文字来源与模型（可选）', children: <Space direction="vertical" size={10} style={{ width: '100%' }}>
       <AiAccessTabs value={accessMode} onChange={changeAccessMode} kind="agent" disabled={locked} />
       <Space direction="vertical" size={10} style={{ width: '100%' }}>
-        <Select<AgentProviderId | 'builtin'>
-          aria-label="文字来源"
-          value={selected ? provider : 'builtin'}
-          disabled={locked}
-          onChange={(value) => { if (value === 'builtin') { setReadyProvider(null); localStorage.removeItem('pixel-world-agent-ready-choice'); localStorage.removeItem('pixel-local-provider'); setActionFeedback(null) } else selectProvider(value) }}
-          placeholder={accessMode === 'ready' ? '选择可用工具' : '选择服务商'}
-          style={{ width: '100%' }}
-          options={accessMode === 'own' ? [...AGENT_PROVIDERS.map((item) => {
-            const guide = getApiPlatformGuide(item.id)
-            return {
-              value: item.id,
-              label: <AiProviderChoice name={item.label} note={guide.strengths[0]} color={guide.accent} />,
-            }
-          }), { value: 'custom' as AgentProviderId, label: <AiProviderChoice name="手动接入其他服务" note="自定义接口" color="#317d70" /> }] : [{ value: 'builtin', label: <AiProviderChoice name="内置规则整理" note="无需配置" color="#338a70" /> }, ...LOCAL_AGENT_PROVIDERS.map((item) => ({ value: item.id as AgentProviderId, label: <AiProviderChoice name={item.label} note={READY_AGENT_VISUALS[item.id].note} color={READY_AGENT_VISUALS[item.id].color} /> }))]}
-        />
-        {selected && provider !== 'custom' && <Select
+        {accessMode === 'own' && <div className="cloud-platform-search"><label className="connection-field-label">查找云端平台<Input aria-label="查找云端平台" allowClear disabled={locked} placeholder="搜索平台，如 Kimi、GLM、豆包、Groq" value={platformSearch} onChange={event => setPlatformSearch(event.target.value)} /></label><small>{CLOUD_TEXT_PLATFORM_COUNT} 个平台入口 + 自定义接入 · 不包含本机工具</small></div>}
+        <div className={accessMode === 'own' ? 'cloud-platform-results' : undefined}>
+          <ConnectionChoiceGroups groups={accessMode === 'own' ? filterConnectionGroups(CLOUD_TEXT_GROUPS, platformSearch) : READY_TEXT_GROUPS} value={!selected ? 'builtin' : provider === 'custom' ? TEXT_CONNECTION_PRESETS.find(item => item.baseUrl === customAgent.baseUrl && item.name === customAgent.displayName)?.id || 'custom' : provider} onChange={chooseConnection} disabled={locked} />
+          {accessMode === 'own' && !filterConnectionGroups(CLOUD_TEXT_GROUPS, platformSearch).length && <div className="ai-ready-empty" role="status"><strong>没有找到这个平台</strong><span>可以手动填写兼容接口地址和模型 ID。</span><Button size="small" disabled={locked} onClick={() => { setPlatformSearch(''); chooseConnection('custom') }}>手动接入其他服务</Button></div>}
+        </div>
+        {selected && provider !== 'custom' && !isLocalAgentProvider(provider) && <CloudTextModelPicker provider={provider} model={model} disabled={locked} onChange={changeTextModel} />}
+        {selected && isLocalAgentProvider(provider) && <Select
+          aria-label="本机或浏览器模型"
           value={model || undefined}
           disabled={locked}
           onChange={(value) => {
@@ -461,7 +480,10 @@ export default function AgentStudio({ embedded = false, projectId, sourcePrompt,
 
       {accessMode === 'ready' && !readyProvider && <div className="ai-ready-empty" role="status"><strong>当前使用内置规则整理</strong><span>可以直接补全草案。想让 AI 补充创意，再选择本机工具、浏览器模型或自己的 API。</span></div>}
 
-      {selected && provider === 'custom' && <CustomConnectionFields kind="agent" value={customAgent} onChange={changeCustomAgent} disabled={locked} />}
+      {selected && provider === 'custom' && <>
+        <CustomConnectionFields kind="agent" value={customAgent} onChange={changeCustomAgent} disabled={locked} />
+        {TEXT_CONNECTION_PRESETS.filter(item => item.baseUrl === customAgent.baseUrl && item.name === customAgent.displayName).map(item => <div className="connection-availability-note" key={item.id}><p>已预填官方接口地址；请按 <a href={item.docsUrl} target="_blank" rel="noreferrer">{item.name} 官方接入文档 ↗</a> 填写模型 ID 和对应 Key。快捷配置不代表已通过实测；部分模型可能不支持 Agent 所需的结构化输出。</p>{item.hint && <p>{item.hint}</p>}</div>)}
+      </>}
       {selected && isLocalAgentProvider(provider) && <>
         <Space wrap style={{ width: '100%' }}>
           {provider !== 'webllm' && <Input value={baseUrl} onChange={(event) => { setBaseUrl(event.target.value); localStorage.setItem(`pixel-local-url-${provider}`, event.target.value) }} placeholder="本地 API 地址" style={{ minWidth: 0, width: '100%' }} />}

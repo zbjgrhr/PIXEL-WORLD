@@ -91,7 +91,7 @@ describe('POST /api/optimize-prompt', () => {
       fetchMock.mockRestore()
     }
   })
-  it('allows Qwen Flash a short reasoning pass and still reserves room for the JSON patch', async () => {
+  it('disables Qwen Flash reasoning so the bounded JSON patch can finish within the request deadline', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
       choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ narrative: { incitingIncident: '小企鹅发现了妈妈留下的线索。' } }) } }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
@@ -102,7 +102,7 @@ describe('POST /api/optimize-prompt', () => {
       }) as never)
       const result = await response.json()
       const sent = JSON.parse(String(fetchMock.mock.calls[0][1]?.body))
-      expect(sent.reasoning).toEqual({ effort: 'low' })
+      expect(sent.reasoning).toEqual({ enabled: false })
       expect(sent.max_tokens).toBe(4000)
       expect(result.data.source).toBe('ai')
       expect(result.data.spec.hero.name).toBe('小企鹅')

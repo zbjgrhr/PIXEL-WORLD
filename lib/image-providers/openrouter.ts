@@ -1,4 +1,5 @@
 import { OPENROUTER_PRIMARY_IMAGE_MODEL } from '@/configs/image-providers'
+import { acceptanceFetch } from '@/lib/acceptance-budget.server'
 import {
   type GenerateImageParams,
   type ImageProvider,
@@ -127,7 +128,7 @@ async function callOpenRouterImageAPI(
   if (params.referenceImages?.length && !supportsReferences) {
     throw new ProviderValidationError('无法确认当前模型的参考图能力，已停止这个动作；请检查连接或更换支持参考图的模型。', 'openrouter')
   }
-  const response = await fetch(OPENROUTER_IMAGE_API_URL, {
+  const response = await acceptanceFetch(OPENROUTER_IMAGE_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
